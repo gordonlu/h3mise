@@ -22,3 +22,4 @@ dist/
 *.log
 coverage/
 .rh-research/
+.h3mise-cookie.txt

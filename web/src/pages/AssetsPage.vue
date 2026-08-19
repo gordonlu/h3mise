@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { get, post, del, mediaUrl, fileUrl } from '../api/client';
 import { useToastStore } from '../stores/toast';
+import { t } from '../stores/locale';
 import { confirmDialog } from '../stores/confirm';
 import type { CharacterState, Entity, MediaAsset, ReferenceBinding } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
@@ -120,14 +121,14 @@ onMounted(load);
 <template>
   <div class="page">
     <div class="spread">
-      <h1>Assets</h1>
+      <h1>{{ t('pages.assets.title') }}</h1>
       <div class="tabs">
-        <button v-for="t in ([{ id: 'entities', cn: '实体' }, { id: 'states', cn: '角色状态' }, { id: 'media', cn: '媒体资产' }, { id: 'bindings', cn: '全局绑定' }] as const)" :key="t.id" :class="['tab', { active: tab === t.id }]" @click="tab = t.id">
-          {{ t.cn }}
+        <button v-for="tt in ([{ id: 'entities', cn: t('pages.assets.tabs.entities') }, { id: 'states', cn: t('pages.assets.tabs.states') }, { id: 'media', cn: t('pages.assets.tabs.media') }, { id: 'bindings', cn: t('pages.assets.tabs.bindings') }] as const)" :key="tt.id" :class="['tab', { active: tab === tt.id }]" @click="tab = tt.id">
+          {{ tt.cn }}
         </button>
       </div>
     </div>
-    <p class="muted page-sub">资产由 Shot 需求驱动（PRD §8）：Entity 是「谁/什么」，CharacterState 是「当前剧情状态」，MediaAsset 通过 ReferenceBinding 承担用途。</p>
+    <p class="muted page-sub">{{ t('pages.assets.subtitle') }}</p>
 
     <!-- Entities -->
     <div v-if="tab === 'entities'" class="panel">
@@ -256,7 +257,7 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .create-row { margin-bottom: 12px; }
 .create-row input { flex: 1; }
 .kind-filter { margin-bottom: 6px; }
-.create-grid { grid-template-columns: repeat(3, 1fr); margin-bottom: 12px; }
+.create-grid { grid-template-columns: repeat(2, 1fr); margin-bottom: 14px; }
 .list { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); margin-top: 12px; }
 .entity, .media { padding: 10px; }
 .name { font-weight: 600; font-size: 13.5px; }

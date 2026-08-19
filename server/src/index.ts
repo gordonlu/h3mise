@@ -36,6 +36,7 @@ async function main(): Promise<void> {
 
   const registry = new ProviderRegistry(
     () => store.current,
+    () => store.registry,
     ffmpeg,
     config.runningHubApiKey,
     config.providerMode,

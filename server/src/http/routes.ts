@@ -69,7 +69,8 @@ export function buildRoutes(services: AppServices): App {
     return c.json({
       ok: true,
       ffmpeg: caps,
-      runningHubConfigured: services.providers.get('runninghub')?.configured ?? false,
+      runningHubConfigured: services.providers.runningHubKeyPresent,
+      providerMode: services.providers.providerMode,
       aiConfigured: services.ai.status.configured,
       projectOpen: Boolean(services.store.current),
       time: new Date().toISOString(),
@@ -500,6 +501,18 @@ export function buildRoutes(services: AppServices): App {
     const profile = services.providers.saveProfile(await c.req.json());
     services.bus.emit({ type: 'project.updated' });
     return c.json(profile);
+  });
+  app.get('/api/providers/runninghub/apikey', (c) =>
+    c.json({ source: services.providers.getApiKeySource(), configured: services.providers.getEffectiveApiKey() !== null }),
+  );
+  app.put('/api/providers/runninghub/apikey', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { key?: unknown };
+    if (typeof body.key !== 'string' || !body.key.trim()) {
+      return c.json({ ok: false, message: 'API Key 不能为空' }, 400);
+    }
+    services.providers.saveApiKey(body.key);
+    services.bus.emit({ type: 'project.updated' });
+    return c.json({ ok: true, source: 'settings', configured: true });
   });
   app.post('/api/providers/runninghub/verify', async (c) => {
     const profile = await services.providers.detectAndVerify();

@@ -91,7 +91,7 @@ onMounted(() => project.refreshProjects());
             </label>
             <label class="field grow">
               默认时长 (s)
-              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" />
+              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" title="每个新镜头的默认时长（1–15 秒）" placeholder="5" />
             </label>
           </div>
           <p v-if="error" class="badge bad">{{ error }}</p>

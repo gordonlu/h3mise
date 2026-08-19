@@ -244,16 +244,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       <div class="panel-title">选片 <span class="mono">{{ commitTarget }}</span> 并提交 Actual Visual Continuity</div>
       <div class="panel-body col">
         <div class="grid commit-grid">
-          <label class="field">地点<input v-model="commitForm.location" /></label>
+          <label class="field">地点<input v-model="commitForm.location" placeholder="如：窄巷 / 天台 / 车内" /></label>
           <label class="field">时间<input v-model="commitForm.timeOfDay" placeholder="如 dusk / 03:00" /></label>
-          <label class="field">天气<input v-model="commitForm.weather" /></label>
-          <label class="field">风<input v-model="commitForm.wind" /></label>
+          <label class="field">天气<input v-model="commitForm.weather" placeholder="如：暴雨 / 晴 / 雾" /></label>
+          <label class="field">风<input v-model="commitForm.wind" placeholder="如：3 级 / 无" /></label>
           <label class="field">银幕方向<input v-model="commitForm.screenDirection" placeholder="left-to-right" /></label>
-          <label class="field">朝向<input v-model="commitForm.facing" /></label>
+          <label class="field">朝向<input v-model="commitForm.facing" placeholder="如：profile right" /></label>
         </div>
 
         <template v-if="characters.length">
-          <div class="muted sec-caption">角色视觉状态（PRD §31：服装 / 发型 / 伤势 / 手持物 / CharacterState）</div>
+          <div class="muted sec-caption">角色视觉状态（服装 / 发型 / 伤势 / 手持物 / CharacterState）</div>
           <div v-for="ch in characters" :key="ch.id" class="char-block">
             <div class="row char-head">
               <span class="badge accent no-dot">{{ ch.name }}</span>
@@ -291,7 +291,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <button class="primary sm" :disabled="commitBusy" @click="doSelectCommit">{{ commitBusy ? '提交中…' : 'Select + Commit（选片并提交连续性）' }}</button>
           <button class="sm" @click="commitTarget = null">取消</button>
         </div>
-        <p class="muted">只有 Selected Take 才能提交 Actual Continuity（PRD §31）；NarrativeState 不受影响。</p>
+        <p class="muted">只有 Selected Take 才能提交 Actual Continuity；NarrativeState 不受影响。</p>
       </div>
     </div>
 

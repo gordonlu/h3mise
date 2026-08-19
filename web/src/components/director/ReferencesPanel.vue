@@ -50,7 +50,7 @@ function toggleRole(r: ReferenceRole) {
     </div>
 
     <div v-if="pickerOpen" class="panel picker">
-      <div class="panel-title">选择资产 + 指定职责（PRD §17：Reference 必须有职责）</div>
+      <div class="panel-title">选择资产 + 指定职责（Reference 必须有职责）</div>
       <div class="panel-body col">
         <div class="asset-pick">
           <div

@@ -2,20 +2,39 @@
 import { onMounted, ref } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
+import { t } from '../stores/locale';
 import type { AiAppProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
 const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; aiConfigured: boolean } | null>(null);
+const healthError = ref('');
 const profile = ref<AiAppProfile | null>(null);
 const verifying = ref(false);
 const notice = ref('');
 const profileJson = ref('');
 const editingProfile = ref(false);
+const apiKeyInfo = ref<{ source: 'settings' | 'env' | 'none'; configured: boolean } | null>(null);
+const apiKeyInput = ref('');
+const savingKey = ref(false);
 
 async function load() {
-  health.value = await get('/api/health');
-  profile.value = await get<AiAppProfile | null>('/api/providers/runninghub/profile');
-  profileJson.value = JSON.stringify(profile.value, null, 2);
+  // Load independently: a failing endpoint must not blank the whole page.
+  try {
+    health.value = await get('/api/health');
+  } catch (e) {
+    healthError.value = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    profile.value = await get<AiAppProfile | null>('/api/providers/runninghub/profile');
+    profileJson.value = JSON.stringify(profile.value, null, 2);
+  } catch {
+    /* profile stays null */
+  }
+  try {
+    apiKeyInfo.value = await get<{ source: 'settings' | 'env' | 'none'; configured: boolean }>('/api/providers/runninghub/apikey');
+  } catch {
+    /* keep null */
+  }
   await project.refreshProviders();
 }
 
@@ -39,25 +58,50 @@ async function verify() {
 }
 
 async function saveProfile() {
+  let parsed: unknown;
   try {
-    profile.value = await put('/api/providers/runninghub/profile', JSON.parse(profileJson.value));
+    parsed = JSON.parse(profileJson.value);
+  } catch (e) {
+    notice.value = `JSON 解析失败：${e instanceof Error ? e.message : e}`;
+    return;
+  }
+  try {
+    profile.value = await put('/api/providers/runninghub/profile', parsed);
     editingProfile.value = false;
     notice.value = 'Provider Profile 已保存（节点映射只影响 RunningHub 适配器）';
   } catch (e) {
     notice.value = `保存失败：${e instanceof Error ? e.message : e}`;
   }
 }
+
+async function saveApiKey() {
+  if (!apiKeyInput.value.trim()) {
+    notice.value = '请输入 API Key';
+    return;
+  }
+  savingKey.value = true;
+  try {
+    apiKeyInfo.value = await put('/api/providers/runninghub/apikey', { key: apiKeyInput.value });
+    apiKeyInput.value = '';
+    notice.value = 'API Key 已保存（替换环境变量默认值，立即生效）';
+  } catch (e) {
+    notice.value = `API Key 保存失败：${e instanceof Error ? e.message : e}`;
+  } finally {
+    savingKey.value = false;
+  }
+}
 </script>
 
 <template>
   <div class="page">
-    <h1>Settings</h1>
+    <h1>{{ t('pages.settings.title') }}</h1>
 
     <div class="grid">
       <div class="panel">
-        <div class="panel-title">Project</div>
+        <div class="panel-title">当前项目</div>
         <div class="panel-body col" v-if="project.current">
-          <label class="field">标题<input :value="project.current.config.title" @change="saveProjectConfig({ title: ($event.target as HTMLInputElement).value })" /></label>
+          <p class="muted">每个项目独立保存这些配置；切换项目请在顶栏下拉或 Projects 页操作。</p>
+          <label class="field">标题<input :value="project.current.config.title" placeholder="项目名称" @change="saveProjectConfig({ title: ($event.target as HTMLInputElement).value })" /></label>
           <label class="field">
             画幅
             <select :value="project.current.config.default_aspect_ratio" @change="saveProjectConfig({ default_aspect_ratio: ($event.target as HTMLSelectElement).value })">
@@ -66,11 +110,11 @@ async function saveProfile() {
           </label>
           <label class="field">
             默认时长
-            <input type="number" :value="project.current.config.default_duration_seconds" @change="saveProjectConfig({ default_duration_seconds: Number(($event.target as HTMLInputElement).value) })" />
+            <input type="number" :value="project.current.config.default_duration_seconds" title="默认时长（秒，1–15）" placeholder="5" @change="saveProjectConfig({ default_duration_seconds: Number(($event.target as HTMLInputElement).value) })" />
           </label>
           <label class="field">
             视觉风格
-            <input :value="project.current.config.visual_style ?? ''" @change="saveProjectConfig({ visual_style: ($event.target as HTMLInputElement).value })" />
+            <input :value="project.current.config.visual_style ?? ''" placeholder="如：胶片颗粒 + 暖色调" @change="saveProjectConfig({ visual_style: ($event.target as HTMLInputElement).value })" />
           </label>
           <div class="muted mono">{{ project.current.meta.dirPath }}</div>
         </div>
@@ -80,20 +124,33 @@ async function saveProfile() {
         <div class="panel-title">Provider — RunningHub AI App</div>
         <div class="panel-body col">
           <div class="row">
-            <span class="badge" :class="health?.runningHubConfigured ? 'ok' : 'warn'">
-              API Key: {{ health?.runningHubConfigured ? '已配置（环境变量）' : '未配置 RUNNINGHUB_API_KEY' }}
+            <span class="badge" :class="health === null || apiKeyInfo === null ? 'muted' : apiKeyInfo?.configured ? 'ok' : 'warn'">
+              <template v-if="health === null || apiKeyInfo === null">API Key: 检测中…</template>
+              <template v-else-if="apiKeyInfo?.source === 'settings'">API Key: 已设置（设置页）</template>
+              <template v-else-if="apiKeyInfo?.source === 'env'">API Key: 已配置（环境变量）</template>
+              <template v-else>API Key: 未配置（mock 模式可离线渲染）</template>
             </span>
             <span class="badge" :class="profile?.verification.status === 'verified' ? 'ok' : profile?.verification.status === 'failed' ? 'bad' : 'muted'">
               {{ profile?.verification.status === 'verified' ? '已验证节点' : profile?.verification.status === 'failed' ? '检测失败' : '未检测' }}
             </span>
           </div>
-          <p class="muted">AI App: <span class="mono">{{ profile?.appId }}</span>（用户自己的 H3 工作流，v0.1 唯一渲染后端）</p>
+          <label class="field">
+            API Key（RunningHub 控制台 → 设置 → API Token）
+            <input v-model="apiKeyInput" type="password" autocomplete="off" placeholder="留空则沿用环境变量 RUNNINGHUB_API_KEY" />
+          </label>
+          <div class="row">
+            <button class="sm" :disabled="savingKey" @click="saveApiKey">{{ savingKey ? '保存中…' : '保存 API Key' }}</button>
+          </div>
+          <p class="muted">
+            AI App: <span class="mono">{{ profile?.appId }}</span> — 可换成你自己的 H3 工作流：在 RunningHub 控制台复制
+            AI App ID 粘贴到下方 Profile 的 <span class="mono">appId</span>，保存后点「检测并获取节点映射」即可自动适配新工作流。
+          </p>
           <div class="row">
             <button class="sm" :disabled="verifying" @click="verify">{{ verifying ? '检测中…' : '检测并获取节点映射（apiCallDemo）' }}</button>
             <button class="sm" @click="editingProfile = !editingProfile">编辑 Profile（JSON）</button>
           </div>
           <div v-if="profile?.verification.note" class="muted">上次检测：{{ profile.verification.note }}</div>
-          <textarea v-if="editingProfile" v-model="profileJson" rows="12" class="mono"></textarea>
+          <textarea v-if="editingProfile" v-model="profileJson" rows="12" class="mono" placeholder="在此粘贴 / 编辑 RunningHub AI App Profile JSON（appId、节点映射 inputs、成本、能力）"></textarea>
           <button v-if="editingProfile" class="primary sm" @click="saveProfile">保存 Profile</button>
         </div>
       </div>
@@ -116,7 +173,14 @@ async function saveProfile() {
       <div class="panel">
         <div class="panel-title">Environment</div>
         <div class="panel-body col">
-          <div class="row"><span class="badge" :class="health?.ffmpeg.available ? 'ok' : 'bad'">ffmpeg {{ health?.ffmpeg.available ? '可用' : '缺失' }}</span><span class="muted mono">{{ health?.ffmpeg.ffmpegVersion }}</span></div>
+          <div class="row">
+            <span class="badge" :class="health === null ? 'muted' : health?.ffmpeg.available ? 'ok' : 'bad'">
+              <template v-if="health === null">ffmpeg 检测中…</template>
+              <template v-else>ffmpeg {{ health?.ffmpeg.available ? '可用' : '缺失' }}</template>
+            </span>
+            <span v-if="health" class="muted mono">{{ health?.ffmpeg.ffmpegVersion }}</span>
+            <span v-if="healthError" class="badge bad">health 接口异常：{{ healthError }}</span>
+          </div>
           <p class="muted">启动顺序：Node Local Server → SQLite 初始化 → RenderQueue 恢复 → Web。渲染队列的 taskId 持久化，重启后可恢复轮询。</p>
         </div>
       </div>

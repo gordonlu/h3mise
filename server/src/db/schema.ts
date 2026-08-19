@@ -284,4 +284,15 @@ CREATE TABLE kv (
 );
 `,
   },
+  {
+    version: 3,
+    name: 'provider-profile',
+    sql: `
+CREATE TABLE provider_profiles (
+  id TEXT PRIMARY KEY,
+  profile_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`,
+  },
 ];

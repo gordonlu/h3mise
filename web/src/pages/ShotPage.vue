@@ -332,7 +332,7 @@ const TABS = [
         </label>
         <label class="ctl">
           <span class="ctl-label">时长</span>
-          <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
+          <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" title="时长（秒，1–15）" placeholder="5" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
         </label>
         <label class="ctl">
           <span class="ctl-label">StoryBeat</span>
@@ -539,7 +539,7 @@ const TABS = [
     <section class="takes-section filmstrip">
       <div class="spread takes-head">
         <h2>Takes <span class="muted">{{ sDetail?.takes.length ?? 0 }} 条</span></h2>
-        <span class="muted">Shot 是意图，Take 是生成结果（PRD §6）</span>
+        <span class="muted">Shot 是意图，Take 是生成结果</span>
       </div>
       <TakesPanel
         :takes="sDetail?.takes ?? []"

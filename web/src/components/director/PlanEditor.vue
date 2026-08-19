@@ -213,7 +213,7 @@ function save() {
             <option v-for="o in f.options" :key="o" :value="o">{{ o || '—' }}</option>
           </select>
           <textarea v-else-if="f.type === 'textarea'" :value="fieldValue(f.path)" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
-          <input v-else-if="f.type === 'number'" type="number" :value="fieldValue(f.path)" @input="setField(f.path, Number(($event.target as HTMLInputElement).value))" />
+          <input v-else-if="f.type === 'number'" type="number" :value="fieldValue(f.path)" :placeholder="f.placeholder" @input="setField(f.path, Number(($event.target as HTMLInputElement).value))" />
           <template v-else-if="f.type === 'list'">
             <textarea :value="(fieldValue(f.path) as string[]).join('\n')" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value.split('\n').filter(Boolean))" />
           </template>

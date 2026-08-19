@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { get, post, fileUrl } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
+import { t } from '../stores/locale';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL } from '@h3mise/shared';
 import type { Shot, ShotStatus } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
@@ -106,7 +107,7 @@ onMounted(load);
 <template>
   <div class="page">
     <div class="spread page-head">
-      <h1>Shotboard <span class="muted">{{ shots.length }} shots</span></h1>
+      <h1>{{ t('pages.shots.title') }} <span class="muted">{{ t('pages.shots.shotsCount', { n: shots.length }) }}</span></h1>
       <div class="row">
         <select v-model="statusFilter" class="status-filter" title="按状态筛选">
           <option value="">全部状态</option>
@@ -134,7 +135,7 @@ onMounted(load);
           </label>
           <label class="field">
             时长
-            <input v-model.number="newShot.durationSeconds" type="number" min="1" max="15" />
+            <input v-model.number="newShot.durationSeconds" type="number" min="1" max="15" title="时长（秒，1–15）" placeholder="5" />
           </label>
         </div>
         <label class="field">

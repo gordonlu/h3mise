@@ -78,7 +78,13 @@ export class RunningHubAiAppProvider implements VideoProvider {
     try {
       res = await fetch(`${RH_BASE}${path}`, {
         ...init,
-        headers: { Authorization: `Bearer ${this.key}`, ...(init.headers ?? {}) },
+        // Body-carrying calls are POST (submit / query); GET only when no body.
+        method: init.method ?? (body !== undefined ? 'POST' : 'GET'),
+        headers: {
+          Authorization: `Bearer ${this.key}`,
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(init.headers ?? {}),
+        },
         body: body !== undefined ? JSON.stringify(body) : init.body,
         signal: AbortSignal.timeout(this.options.requestTimeoutMs ?? 120_000),
       });
@@ -169,7 +175,8 @@ export class RunningHubAiAppProvider implements VideoProvider {
     const inputs = this.profile.inputs;
     const out: Array<{ nodeId: string; fieldName: string; fieldValue: string }> = [];
     const push = (slot: { nodeId: string; fieldName: string } | undefined, value: string | undefined) => {
-      if (slot && value !== undefined && value !== '') {
+      // nodeId '' = disabled slot (workflow has no such node): never send it.
+      if (slot && slot.nodeId !== '' && value !== undefined && value !== '') {
         out.push({ nodeId: slot.nodeId, fieldName: slot.fieldName, fieldValue: value });
       }
     };

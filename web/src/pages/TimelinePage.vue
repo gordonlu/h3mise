@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { get, post, patch, del, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { useToastStore } from '../stores/toast';
+import { t } from '../stores/locale';
 import type { TimelineClip } from '@h3mise/shared';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -165,9 +166,9 @@ onUnmounted(() => off?.());
 <template>
   <div class="page">
     <div class="spread">
-      <h1>Timeline <span class="muted">{{ clips.length }} clips · {{ totalSeconds.toFixed(1) }}s</span></h1>
+      <h1>{{ t('pages.timeline.title') }} <span class="muted">{{ t('pages.timeline.clipsCount', { n: clips.length, s: totalSeconds.toFixed(1) }) }}</span></h1>
       <button class="primary" :disabled="!clips.length || exportJob?.status === 'running'" @click="exportTimeline">
-        {{ exportJob?.status === 'running' ? '导出中…' : 'Export（ffmpeg）' }}
+        {{ exportJob?.status === 'running' ? t('pages.timeline.exporting') : t('pages.timeline.export') }}
       </button>
     </div>
 
@@ -207,7 +208,7 @@ onUnmounted(() => off?.());
         v-else
         icon="▤"
         title="时间线为空"
-        desc="只接受 Selected Take（PRD §33）。先在 Shot 里选片，再从下方把镜头加入时间线。"
+        desc="只接受 Selected Take。先在 Shot 里选片，再从下方把镜头加入时间线。"
       />
     </div>
 
@@ -228,7 +229,7 @@ onUnmounted(() => off?.());
           </div>
           <div class="row trim-io">
             <label class="muted">in</label>
-            <input type="number" step="0.1" min="0" :value="activeClip.trimIn" class="trim-input" @change="updateClip(activeClip.id, { trimIn: Number(($event.target as HTMLInputElement).value) })" />
+            <input type="number" step="0.1" min="0" :value="activeClip.trimIn" class="trim-input" placeholder="0" @change="updateClip(activeClip.id, { trimIn: Number(($event.target as HTMLInputElement).value) })" />
             <label class="muted">out</label>
             <input type="number" step="0.1" min="0" :value="activeClip.trimOut ?? undefined" class="trim-input" placeholder="尾" @change="updateClip(activeClip.id, { trimOut: Number(($event.target as HTMLInputElement).value) || null })" />
           </div>

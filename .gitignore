@@ -1,0 +1,24 @@
+# --- secrets (never commit) ---
+.env
+.env.local
+.env.*.local
+*.pem
+
+# --- node / build ---
+node_modules/
+.pnpm-store/
+dist/
+*.tsbuildinfo
+.turbo/
+
+# --- project data (local-first) ---
+.h3mise-home/
+*.h3studio/
+.rh-research/
+.doc/
+
+# --- misc ---
+.DS_Store
+*.log
+coverage/
+.rh-research/

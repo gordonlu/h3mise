@@ -1,0 +1,32 @@
+import { buildApp } from '/data/code/H3Mise/server/src/http/app.ts';
+import { EventBus } from '/data/code/H3Mise/server/src/events.ts';
+import { SessionManager } from '/data/code/H3Mise/server/src/http/security.ts';
+import { Ffmpeg } from '/data/code/H3Mise/server/src/ffmpeg.ts';
+import { ProviderRegistry } from '/data/code/H3Mise/server/src/providers/registry.ts';
+import { RenderQueue } from '/data/code/H3Mise/server/src/modules/render.ts';
+import { AIService } from '/data/code/H3Mise/server/src/modules/ai.ts';
+import { JobRunner } from '/data/code/H3Mise/server/src/modules/jobs.ts';
+import { ProjectStore } from '/data/code/H3Mise/server/src/project-store.ts';
+
+const store = { current: null } as unknown as ProjectStore;
+const bus = new EventBus();
+const ffmpeg = new Ffmpeg();
+const registry = new ProviderRegistry(() => null, ffmpeg, null, 'mock');
+const queue = new RenderQueue(() => null, registry, ffmpeg, bus);
+const ai = new AIService({ baseUrl: null, apiKey: null, model: null }, null);
+const jobs = new JobRunner(bus);
+const sessions = new SessionManager();
+const app = buildApp({ store, bus, ffmpeg, providers: registry, queue, ai, jobs, sessions } as never, null);
+
+const r1 = await app.request('/api/health', { headers: { host: '127.0.0.1:4789', origin: 'https://evil.example' } });
+console.log('evil origin:', r1.status);
+const r2 = await app.request('/api/health', { headers: { host: '127.0.0.1:4789', origin: 'http://localhost:5173' } });
+console.log('localhost origin:', r2.status);
+const r3 = await app.request('/api/health', { headers: { host: '127.0.0.1:4789' } });
+console.log('no origin:', r3.status);
+const r4 = await app.request('/api/health', { headers: { host: 'evil.example' } });
+console.log('evil host:', r4.status);
+const r5 = await app.request('/api/shots', { method: 'POST', headers: { host: '127.0.0.1:4789', 'content-type': 'application/json' }, body: '{}' });
+console.log('mutate without session:', r5.status);
+const r6 = await app.request('/', { headers: { host: '127.0.0.1:4789' } });
+console.log('static /:', r6.status);

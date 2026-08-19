@@ -1,0 +1,19 @@
+{
+  "name": "h3mise",
+  "private": true,
+  "version": "0.1.0",
+  "description": "H3Mise — A local director workstation for MiniMax H3",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @h3mise/server --filter @h3mise/web dev",
+    "dev:server": "pnpm --filter @h3mise/server dev",
+    "dev:web": "pnpm --filter @h3mise/web dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @h3mise/server start",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @h3mise/server test"
+  }
+}

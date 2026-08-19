@@ -1,0 +1,11 @@
+packages:
+  - shared
+  - server
+  - web
+
+# pnpm 11 settings live here
+storeDir: .pnpm-store
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true

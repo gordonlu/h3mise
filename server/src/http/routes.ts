@@ -227,6 +227,8 @@ export function buildRoutes(services: AppServices): App {
 
   // --- director ------------------------------------------------------------
 
+  app.get('/api/shots/:id/plans', (c) => c.json(directorMod.listPlanVersions(p(c), c.req.param('id')!)));
+
   app.post('/api/shots/:id/plans', async (c) => {
     const ctx = p(c);
     const body = await c.req.json();

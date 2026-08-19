@@ -6,6 +6,7 @@ import { emptyDirectorPlan } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
+import YAML from 'yaml';
 
 interface DpvRow {
   id: string;
@@ -109,45 +110,12 @@ export function parseDirectorPlanText(text: string): { ok: boolean; plan?: Direc
   };
   try {
     if (trimmed.startsWith('{')) return parse(JSON.parse(trimmed));
-    // YAML-ish: use a minimal structural parser via JSON conversion of indentation
-    const json = yamlishToJson(trimmed);
-    if (!json) return { ok: false, error: 'unrecognized format' };
-    return parse(JSON.parse(json));
+    const parsed = YAML.parse(trimmed);
+    if (parsed === null || typeof parsed !== 'object') {
+      return { ok: false, error: 'unrecognized format' };
+    }
+    return parse(parsed);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-/** Minimal YAML-subset → JSON converter (flat + nested via 2-space indent). */
-export function yamlishToJson(text: string): string | null {
-  const lines = text
-    .split('\n')
-    .map((l) => l.replace(/\r$/, ''))
-    .filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
-  if (lines.length === 0) return null;
-  const out: string[] = [];
-  out.push('{');
-  for (const line of lines) {
-    const indent = line.match(/^\s*/)![0].length;
-    const content = line.trim();
-    if (indent === 0 && content.includes(':')) {
-      const parts = content.split(/:(.*)/s);
-      const k = (parts[0] ?? '').trim();
-      const v = (parts[1] ?? '').trim();
-      out.push(`${JSON.stringify(k)}: ${v === '' ? '{' : JSON.stringify(v)}`);
-    } else if (content.includes(':')) {
-      const parts = content.split(/:(.*)/s);
-      const k = (parts[0] ?? '').trim();
-      const v = (parts[1] ?? '').trim();
-      out.push(`${JSON.stringify(k)}: ${JSON.stringify(v)}`);
-    } else {
-      out.push(`${JSON.stringify(content)},`);
-    }
-  }
-  out.push('}');
-  try {
-    return out.join('\n').replace(/,\s*}/g, '}');
-  } catch {
-    return null;
   }
 }

@@ -156,7 +156,7 @@ export class Ffmpeg {
       inputs.push('-i', c);
       filter += `[${i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}];`;
     });
-    let prev = '[v0]';
+    let prev = 'v0';
     let offset = 0;
     const durations: number[] = [];
     for (const c of clips) {
@@ -166,14 +166,15 @@ export class Ffmpeg {
     for (let i = 1; i < clips.length; i++) {
       offset += Math.max(0, durations[i - 1]! - xfade);
       filter += `[${prev}][v${i}]xfade=transition=fade:duration=${xfade}:offset=${offset}[x${i}];`;
-      prev = `[x${i}]`;
+      prev = `x${i}`;
     }
-    filter += `${prev}[vout]`;
+    const lastLabel = `[${prev}]`;
     const audioInputs = clips.map((_, i) => `[${i}:a]`).join('');
-    const amix = clips.length > 0 ? `;${audioInputs}amix=inputs=${clips.length}:normalize=0[aout]` : '';
+    const amix = clips.length > 0 ? `${audioInputs}amix=inputs=${clips.length}:normalize=0[aout]` : '';
+    const fullFilter = amix ? `${filter.replace(/;+$/, '')};${amix}` : filter;
     await run(
       'ffmpeg',
-      ['-y', ...inputs, '-filter_complex', filter + amix, '-map', '[vout]', ...(clips.length > 0 ? ['-map', '[aout]'] : []), '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', '-movflags', '+faststart', outPath],
+      ['-y', ...inputs, '-filter_complex', fullFilter, '-map', lastLabel, ...(clips.length > 0 ? ['-map', '[aout]'] : []), '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', '-movflags', '+faststart', outPath],
       outPath,
     );
   }

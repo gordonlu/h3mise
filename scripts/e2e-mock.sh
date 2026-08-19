@@ -1,7 +1,9 @@
 #!/bin/bash
 B=http://127.0.0.1:4789
 J='Content-Type: application/json'
-COOKIE="-b /data/code/H3Mise/.h3mise-cookie.txt"
+CJAR=/data/code/H3Mise/.h3mise-cookie.txt
+curl -s --noproxy "*" -c $CJAR $B/api/session > /dev/null
+COOKIE="-b $CJAR"
 pass(){ echo "✓ $1"; }
 fail(){ echo "✗ $1 — $2"; exit 1; }
 SID=$(curl -s --noproxy "*" $COOKIE $B/api/shots | grep -o '"id":"shot-001"' | head -1 | cut -d'"' -f4)

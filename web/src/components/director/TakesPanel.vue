@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import type { Take } from '@h3mise/shared';
+import type { Take, VisualContinuityState } from '@h3mise/shared';
 import { FAILURE_TAGS } from '@h3mise/shared';
 import { takeVideoUrl } from '../../api/client';
 import VideoPlayer from '../VideoPlayer.vue';
@@ -9,10 +9,13 @@ const props = defineProps<{
   takes: Take[];
   selectedTakeId: string | null;
   aiEnabled: boolean;
+  /** Latest committed actual visual continuity (prefill for select+commit). */
+  actualState: VisualContinuityState | null;
   onSelect: (id: string) => Promise<void>;
   onReject: (id: string) => Promise<void>;
   onUpdate: (id: string, patch: Partial<Take>) => Promise<void>;
   onAiDiagnose: (takeId: string) => Promise<void>;
+  onSelectCommit: (takeId: string, state: VisualContinuityState) => Promise<void>;
   onUseLastFrame: (takeId: string) => Promise<void>;
   onUseFirstFrame: (takeId: string) => Promise<void>;
 }>();
@@ -28,6 +31,32 @@ function toggleTag(take: Take, tag: string) {
   const next = take.failureTags.includes(tag as never) ? take.failureTags.filter((t) => t !== tag) : [...take.failureTags, tag as never];
   void props.onUpdate(take.id, { failureTags: next });
 }
+
+const emptyState = (): VisualContinuityState => ({
+  characterStates: {}, costume: {}, hair: {}, injury: {}, heldItems: {}, location: '', timeOfDay: '',
+  weather: '', wind: '', screenDirection: '', facing: '', vehicleState: {}, notes: '',
+});
+
+const commitTarget = ref<string | null>(null);
+const commitBusy = ref(false);
+const commitForm = ref<VisualContinuityState>(emptyState());
+
+function openCommit(takeId: string) {
+  commitTarget.value = takeId;
+  // Prefill from the previous shot's committed actual continuity (Frame Bridge).
+  commitForm.value = structuredClone(props.actualState ?? emptyState());
+}
+
+async function doSelectCommit() {
+  if (!commitTarget.value) return;
+  commitBusy.value = true;
+  try {
+    await props.onSelectCommit(commitTarget.value, structuredClone(commitForm.value));
+    commitTarget.value = null;
+  } finally {
+    commitBusy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -36,11 +65,11 @@ function toggleTag(take: Take, tag: string) {
       <div class="panel-title">A/B Compare</div>
       <div class="compare-grid">
         <div>
-          <VideoPlayer :src="takeVideoUrl(activeTake.id)" :poster="activeTake.posterPath" :label="activeTake.id" />
+          <VideoPlayer :src="takeVideoUrl(activeTake.id)" :poster="activeTake.posterPath ? `/api/file/${encodeURIComponent(activeTake.posterPath)}` : undefined" :label="activeTake.id" />
           <div class="muted center">A · {{ activeTake.id }}</div>
         </div>
         <div>
-          <VideoPlayer :src="takeVideoUrl(compareTake.id)" :poster="compareTake.posterPath" :label="compareTake.id" />
+          <VideoPlayer :src="takeVideoUrl(compareTake.id)" :poster="compareTake.posterPath ? `/api/file/${encodeURIComponent(compareTake.posterPath)}` : undefined" :label="compareTake.id" />
           <div class="muted center">B · {{ compareTake.id }}</div>
         </div>
       </div>
@@ -51,15 +80,36 @@ function toggleTag(take: Take, tag: string) {
         <span>播放 Take {{ activeTake.id }}</span>
         <button class="sm ghost" @click="active = null">关闭</button>
       </div>
-      <VideoPlayer :src="takeVideoUrl(activeTake.id)" :poster="activeTake.posterPath" />
+      <VideoPlayer :src="takeVideoUrl(activeTake.id)" :poster="activeTake.posterPath ? `/api/file/${encodeURIComponent(activeTake.posterPath)}` : undefined" />
     </div>
 
     <div v-if="!takes.length" class="muted">还没有 Take。渲染完成后会出现在这里。</div>
 
+    <!-- Select + Commit continuity form -->
+    <div v-if="commitTarget" class="panel commit-panel">
+      <div class="panel-title">Select {{ commitTarget }} 并提交 Actual Visual Continuity</div>
+      <div class="panel-body">
+        <div class="grid commit-grid">
+          <label class="field">地点<input v-model="commitForm.location" /></label>
+          <label class="field">时间<input v-model="commitForm.timeOfDay" /></label>
+          <label class="field">天气<input v-model="commitForm.weather" /></label>
+          <label class="field">风<input v-model="commitForm.wind" /></label>
+          <label class="field">银幕方向<input v-model="commitForm.screenDirection" placeholder="left-to-right" /></label>
+          <label class="field">朝向<input v-model="commitForm.facing" /></label>
+          <label class="field" style="grid-column: 1 / -1">备注<textarea v-model="commitForm.notes" rows="2"></textarea></label>
+        </div>
+        <div class="row">
+          <button class="primary sm" :disabled="commitBusy" @click="doSelectCommit">{{ commitBusy ? '提交中…' : 'Select + Commit（选片即提交连续性）' }}</button>
+          <button class="sm" @click="commitTarget = null">取消</button>
+        </div>
+        <p class="muted">只有 Selected Take 才能提交 Actual Continuity（PRD §31）；NarrativeState 不受影响。</p>
+      </div>
+    </div>
+
     <div class="takes grid">
       <div v-for="t in takes" :key="t.id" class="panel take" :class="{ selected: t.status === 'selected', rejected: t.status === 'rejected' }">
         <div class="take-cover" @click="active = active === t.id ? null : t.id">
-          <img v-if="t.posterPath" :src="`/api/media/${t.posterPath}`" :alt="t.id" />
+          <img v-if="t.posterPath" :src="`/api/file/${encodeURIComponent(t.posterPath)}`" :alt="t.id" />
           <span v-else class="muted mono">no poster</span>
           <span class="badge status-badge" :class="{ ok: t.status === 'selected', bad: t.status === 'rejected' }">
             {{ t.status === 'selected' ? 'SELECTED' : t.status === 'rejected' ? 'REJECTED' : 'CANDIDATE' }}
@@ -76,6 +126,7 @@ function toggleTag(take: Take, tag: string) {
               :disabled="t.status === 'selected'"
               @click="onSelect(t.id)"
             >Select</button>
+            <button class="sm primary" :disabled="t.status === 'selected'" @click="openCommit(t.id)">Select + Commit</button>
             <button class="sm" @click="compare = compare === t.id ? null : t.id">
               {{ compare === t.id ? '退出对比' : 'Compare' }}
             </button>
@@ -130,5 +181,7 @@ function toggleTag(take: Take, tag: string) {
 .tags { display: flex; flex-wrap: wrap; }
 .compare-row { padding-bottom: 12px; }
 .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+.commit-panel { margin-bottom: 10px; }
+.commit-grid { grid-template-columns: 1fr 1fr 1fr; }
 .center { text-align: center; margin-top: 4px; }
 </style>

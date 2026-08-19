@@ -300,13 +300,21 @@ export function createBinding(
 }
 
 export function updateBinding(p: ProjectContext, id: string, patch: Partial<Pick<ReferenceBinding, 'roles' | 'preserve' | 'ignore' | 'label' | 'shotId'>>): ReferenceBinding {
+  const colMap: Record<string, string> = {
+    roles: 'roles_json',
+    preserve: 'preserve_json',
+    ignore: 'ignore_json',
+    label: 'label',
+    shotId: 'shot_id',
+  };
   const cols: string[] = [];
   const vals: unknown[] = [];
-  const jsonCols = new Set(['roles', 'preserve', 'ignore']);
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(`${k === 'shotId' ? 'shot_id' : k} = ?`);
-    vals.push(jsonCols.has(k) ? j(v) : v);
+    const col = colMap[k];
+    if (!col) continue;
+    cols.push(`${col} = ?`);
+    vals.push(k === 'roles' || k === 'preserve' || k === 'ignore' ? j(v) : v);
   }
   if (cols.length) {
     vals.push(id);

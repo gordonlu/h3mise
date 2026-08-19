@@ -22,6 +22,20 @@ const STATUS_BADGE: Record<string, string> = {
 const active = computed(() => render.jobs.filter((j) => ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)));
 const done = computed(() => render.jobs.filter((j) => !['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)).slice(0, 30));
 
+/** PRD §41 成本保护: 项目累计渲染消耗（RunningHub usage 回传时累加）。 */
+const totalCost = computed(() => {
+  let credits = 0;
+  let hasCost = false;
+  for (const j of render.jobs) {
+    const c = j.cost as { credits?: number } | null;
+    if (c?.credits !== undefined && c.credits !== null) {
+      credits += c.credits;
+      hasCost = true;
+    }
+  }
+  return hasCost ? credits : null;
+});
+
 async function cancel(job: RenderJob) {
   await post(`/api/render/${job.id}/cancel`);
   await render.refresh();
@@ -47,6 +61,10 @@ onMounted(() => render.refresh());
       <div class="drawer-head">
         <h2>Render Queue <span class="muted">{{ active.length }} 活跃</span></h2>
         <button class="ghost" @click="$emit('close')">✕</button>
+      </div>
+      <div v-if="totalCost !== null" class="cost-bar">
+        <span class="badge warn">项目累计消耗 ≈ {{ totalCost.toFixed(totalCost % 1 ? 2 : 0) }} <span v-if="totalCost % 1">CNY</span><span v-else>credits</span></span>
+        <span class="muted">（RunningHub usage 回传）</span>
       </div>
 
       <div class="drawer-body">
@@ -91,6 +109,7 @@ onMounted(() => render.refresh());
 }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .drawer-head h2 { margin: 0; font-size: 16px; }
+.cost-bar { padding: 8px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
 .drawer-body { flex: 1; overflow: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
 .job { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .error { color: var(--bad); font-size: 11px; background: rgba(217, 99, 92, 0.08); padding: 6px; border-radius: 4px; }

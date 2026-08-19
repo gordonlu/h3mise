@@ -66,17 +66,21 @@ export function addClip(p: ProjectContext, input: { shotId: string; takeId: stri
 }
 
 export function updateClip(p: ProjectContext, id: string, patch: Partial<Pick<TimelineClip, 'trimIn' | 'trimOut' | 'transition' | 'transitionDuration' | 'audio'>>): TimelineClip {
+  const colMap: Record<string, string> = {
+    trimIn: 'trim_in',
+    trimOut: 'trim_out',
+    transition: 'transition',
+    transitionDuration: 'transition_duration',
+    audio: 'audio_json',
+  };
   const cols: string[] = [];
   const vals: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    if (k === 'audio') {
-      cols.push('audio_json = ?');
-      vals.push(j(v));
-    } else {
-      cols.push(k === 'trimIn' ? 'trim_in = ?' : k === 'trimOut' ? 'trim_out = ?' : `${k} = ?`);
-      vals.push(v);
-    }
+    const col = colMap[k];
+    if (!col) continue;
+    cols.push(`${col} = ?`);
+    vals.push(k === 'audio' ? j(v) : v);
   }
   if (cols.length) {
     vals.push(new Date().toISOString(), id);
@@ -103,7 +107,7 @@ export interface TimelineExportResult {
 }
 
 /** Trim + concat selected-take clips into one export. */
-export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: string): Promise<TimelineExportResult> {
+export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: string, onProgress?: (done: number, total: number) => void): Promise<TimelineExportResult> {
   const tl = getTimeline(p);
   if (tl.clips.length === 0) throw new Error('timeline is empty');
   const outName = `${sanitize(title ?? tl.title ?? 'timeline')}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.mp4`;
@@ -119,6 +123,7 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
     await ffmpeg.trim(abs, tmp, clip.trimIn, trimOut);
     clips.push(tmp);
     total += trimOut - clip.trimIn;
+    onProgress?.(clips.length, tl.clips.length);
   }
   await ffmpeg.concat(clips, outPath, { crossfade: Math.max(0, ...tl.clips.map((c) => (c.transition === 'dissolve' ? c.transitionDuration : 0))) });
   return { path: outPath, relPath: outPath.slice(p.root.length + 1), durationSeconds: total };

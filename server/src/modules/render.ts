@@ -177,7 +177,8 @@ export class RenderQueue {
 
   retry(jobId: string): void {
     const job = this.getJob(jobId);
-    if (!job || job.status !== 'FAILED') return;
+    // FAILED and CANCELLED can be resubmitted (manual, explicit user action).
+    if (!job || (job.status !== 'FAILED' && job.status !== 'CANCELLED')) return;
     this.saveStatus(jobId, 'SUBMITTING', { error: null, finishedAt: null, providerTaskId: null, providerResponseSnapshot: null });
     this.pending.add(jobId);
     this.bus.emit({ type: 'render.job.updated', jobId, shotId: job.shotId, status: 'SUBMITTING' });

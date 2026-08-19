@@ -13,7 +13,7 @@ interface ShotWithTake {
 
 const clips = ref<TimelineClip[]>([]);
 const shotsWithTakes = ref<ShotWithTake[]>([]);
-const exportJob = ref<{ id: string; status: string; result?: { relPath?: string; url?: string }; error?: string | null } | null>(null);
+const exportJob = ref<{ id: string; status: string; progress?: number | null; result?: { relPath?: string; url?: string }; error?: string | null } | null>(null);
 const notice = ref('');
 const playUrl = ref('');
 
@@ -71,7 +71,7 @@ async function exportTimeline() {
 async function pollExport(jobId: string) {
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => setTimeout(r, 2000));
-    const job = await get<{ status: string; result?: { relPath?: string; url?: string }; error?: string | null }>(`/api/jobs/${jobId}`);
+    const job = await get<{ status: string; progress?: number | null; result?: { relPath?: string; url?: string }; error?: string | null }>(`/api/jobs/${jobId}`);
     exportJob.value = { id: jobId, ...job };
     if (job.status === 'done') {
       playUrl.value = job.result?.url ?? '';
@@ -108,6 +108,13 @@ onUnmounted(() => off?.());
       </div>
     </div>
     <p v-if="notice" class="badge info">{{ notice }}</p>
+
+    <div v-if="exportJob && exportJob.status === 'running'" class="panel progress-panel">
+      <div class="panel-title">导出中… {{ exportJob.progress != null ? Math.round(exportJob.progress * 100) + '%' : '' }}</div>
+      <div class="progress-track">
+        <div class="progress-fill" :style="{ width: `${Math.round((exportJob.progress ?? 0) * 100)}%` }"></div>
+      </div>
+    </div>
 
     <div class="grid top">
       <div class="panel">
@@ -175,4 +182,7 @@ h1 { font-size: 21px; margin: 0; }
 .trim { gap: 6px; }
 .trim-input { width: 64px; }
 .export-panel { margin-top: 16px; }
+.progress-panel { margin-top: 12px; }
+.progress-track { height: 6px; background: var(--bg-3); border-radius: 3px; margin: 10px 12px 12px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); transition: width 0.4s; }
 </style>

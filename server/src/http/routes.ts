@@ -374,8 +374,10 @@ export function buildRoutes(services: AppServices): App {
     const body = await c.req.json().catch(() => ({}));
     const job = services.jobs.start('timeline.export', 'Timeline export', async (update) => {
       update({ message: 'trimming clips' });
-      const result = await timelineMod.exportTimeline(ctx, services.ffmpeg, body.title);
-      update({ progress: 1, message: 'done' });
+      const result = await timelineMod.exportTimeline(ctx, services.ffmpeg, body.title, (done, total) => {
+        update({ progress: done / total, message: `trimming clip ${done}/${total}` });
+      });
+      update({ progress: 1, message: 'concatenating…' });
       return { ...result, url: `/api/file/${encodeURIComponent(result.relPath)}` };
     });
     return c.json({ jobId: job.id, status: job.status }, 202);

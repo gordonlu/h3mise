@@ -43,7 +43,22 @@ const pasteText = ref('');
 const parseResult = ref<{ ok: boolean; plan?: DirectorPlan; error?: string } | null>(null);
 const notice = ref('');
 
-const aiEnabled = computed(() => project.providers.some((p) => p.id === 'ai' && p.configured) || (project as unknown as { providers: Array<{ configured: boolean }> }).providers.some((p) => p.configured));
+const aiEnabled = computed(() => project.providers.some((p) => p.configured));
+
+/** Active render provider: prefer the real RunningHub when configured, else
+ * whatever the server exposes (e.g. mock in offline mode). */
+const activeProvider = computed(() => {
+  const rh = project.providers.find((p) => p.id === 'runninghub' && p.configured);
+  return rh ?? project.providers[0] ?? null;
+});
+const providerId = computed(() => activeProvider.value?.id ?? 'runninghub');
+
+/** PRD §15: UI only opens modes the current provider profile actually supports. */
+const availableModes = computed(() => {
+  const caps = activeProvider.value?.capabilities;
+  if (caps?.supportedModes?.length) return caps.supportedModes;
+  return H3_MODES;
+});
 
 const STATUS_BADGE: Record<string, string> = {
   DRAFT: '', PLANNED: 'info', ASSETS_READY: 'info', DIRECTED: 'info', PREFLIGHT_READY: 'accent',
@@ -138,7 +153,7 @@ async function aiPreflight(_promptId: string) {
 }
 
 async function doRender(promptId: string) {
-  const job = await s.render(promptId, 'runninghub', sShot.value?.durationSeconds);
+  const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds);
   notice.value = `已提交渲染任务 ${job.id} — 状态会实时推送，见渲染队列`;
 }
 
@@ -160,6 +175,31 @@ async function applyParsed() {
     parseResult.value = null;
     pasteText.value = '';
   }
+}
+
+/** Frame Bridge "inherit continuity only" (PRD §32): fold the previous
+ * shot's committed actual visual continuity into this shot's planned start. */
+async function inheritContinuity() {
+  const actual = sDetail.value?.continuityLatest?.visualActual?.state;
+  if (!actual) {
+    notice.value = '没有已提交的 Actual Continuity 可继承（先在上一镜头 Select + Commit）';
+    return;
+  }
+  const plan = sPlan.value?.plan ? structuredClone(sPlan.value.plan) : emptyPlan();
+  const parts = [
+    actual.location && `location: ${actual.location}`,
+    actual.timeOfDay && `time: ${actual.timeOfDay}`,
+    actual.weather && `weather: ${actual.weather}`,
+    actual.wind && `wind: ${actual.wind}`,
+    actual.screenDirection && `screen direction: ${actual.screenDirection}`,
+    actual.facing && `facing: ${actual.facing}`,
+    ...Object.entries(actual.costume).map(([k, v]) => `${k} costume: ${v}`),
+    ...Object.entries(actual.heldItems).map(([k, v]) => `${k} held: ${v.join(', ')}`),
+    actual.notes && `notes: ${actual.notes}`,
+  ].filter(Boolean);
+  plan.continuity.plannedStartState = `Inherited from previous shot actual: ${parts.join('; ')}`;
+  await s.savePlan(plan);
+  notice.value = '已将上一镜头的 Actual Continuity 继承为本镜头的 Planned Start State（新计划版本）';
 }
 
 async function useTakeFrame(takeId: string, which: 'first' | 'last') {
@@ -210,7 +250,7 @@ onUnmounted(() => off?.());
       </div>
       <div class="row controls">
         <select v-model="sShot.h3Mode" class="mode-select" @change="s.updateShot({ h3Mode: sShot?.h3Mode ?? 't2va' })">
-          <option v-for="m in H3_MODES" :key="m" :value="m">{{ m.toUpperCase() }}</option>
+          <option v-for="m in availableModes" :key="m" :value="m">{{ m.toUpperCase() }}</option>
         </select>
         <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" title="时长" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
         <select v-model="sShot.storyBeatId" class="beat-select" @change="s.updateShot({ storyBeatId: sShot?.storyBeatId })">
@@ -250,6 +290,9 @@ onUnmounted(() => off?.());
             {{ JSON.stringify(sDetail.continuityLatest.visualActual.state, null, 1).slice(0, 500) }}
           </div>
           <button class="sm" @click="tab = 'plan'">编辑计划连续性 →</button>
+          <button class="sm" :disabled="!sDetail?.continuityLatest?.visualActual?.state" @click="inheritContinuity">
+            继承上一镜头 Actual → Planned
+          </button>
         </div>
       </aside>
 
@@ -260,7 +303,7 @@ onUnmounted(() => off?.());
           <VideoPlayer
             v-if="sSelected"
             :src="takeVideoUrl(sSelected.id)"
-            :poster="sSelected.posterPath"
+            :poster="sSelected.posterPath ? `/api/file/${encodeURIComponent(sSelected.posterPath)}` : undefined"
             :label="`Selected take ${sSelected.id}`"
           />
           <div v-else class="empty-stage muted">还没有 Selected Take。<br />下方 Take 区域选择后这里播放。</div>
@@ -314,7 +357,7 @@ onUnmounted(() => off?.());
           <PreflightPanel
             :reports="sDetail?.preflights ?? []"
             :prompt="latestPrompt()"
-            provider-id="runninghub"
+            :provider-id="providerId"
             :ai-enabled="aiEnabled"
             :on-basic="(pid: string) => s.runPreflight(pid)"
             :on-ai-check="aiPreflight"
@@ -361,10 +404,12 @@ onUnmounted(() => off?.());
           :takes="sDetail?.takes ?? []"
           :selected-take-id="sSelected?.id ?? null"
           :ai-enabled="aiEnabled"
+          :actual-state="sDetail?.continuityLatest?.visualActual?.state ?? null"
           :on-select="s.selectTake"
           :on-reject="s.rejectTake"
           :on-update="s.updateTake"
           :on-ai-diagnose="aiDiagnose"
+          :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"
           :on-use-last-frame="(tid: string) => useTakeFrame(tid, 'last')"
           :on-use-first-frame="(tid: string) => useTakeFrame(tid, 'first')"
         />

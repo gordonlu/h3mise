@@ -67,6 +67,27 @@ export function latestContinuity(p: ProjectContext, scope: 'visual' | 'narrative
   return r ? contFromRow(r) : null;
 }
 
+/** Continuity of the IMMEDIATE PREDECESSOR shot (by shot order, P1). The
+ * project-wide "latest" is not the previous shot when scenes are reworked.
+ */
+export function predecessorContinuity(
+  p: ProjectContext,
+  shotId: string,
+  scope: 'visual' | 'narrative',
+  kind: 'planned' | 'actual',
+): ContinuityEntry | null {
+  const prev = p.db.get<{ id: string }>(
+    'SELECT id FROM shots WHERE ord < (SELECT ord FROM shots WHERE id = ?) ORDER BY ord DESC LIMIT 1',
+    [shotId],
+  );
+  if (!prev) return null;
+  const r = p.db.get<ContRow>(
+    'SELECT * FROM continuity_entries WHERE shot_id = ? AND scope = ? AND kind = ? ORDER BY committed_at DESC, created_at DESC LIMIT 1',
+    [prev.id, scope, kind],
+  );
+  return r ? contFromRow(r) : null;
+}
+
 export function listContinuity(p: ProjectContext, shotId?: string): ContinuityEntry[] {
   const rows = shotId
     ? p.db.all<ContRow>('SELECT * FROM continuity_entries WHERE shot_id = ? ORDER BY committed_at', [shotId])
@@ -86,10 +107,18 @@ export function commitContinuity(
   },
   bus?: EventBus,
 ): ContinuityEntry {
-  if (input.kind === 'actual' && input.scope === 'visual' && input.sourceTakeId) {
+  if (input.kind === 'actual') {
+    // P1: actual continuity must cite the exact take it came from, and that
+    // take must be selected AND belong to this shot.
+    if (!input.sourceTakeId) {
+      throw new Error('actual continuity requires a sourceTakeId (the selected take)');
+    }
     const take = getTake(p, input.sourceTakeId);
     if (take.status !== 'selected') {
-      throw new Error('actual visual continuity requires a selected take');
+      throw new Error('actual continuity requires a selected take');
+    }
+    if (take.shotId !== input.shotId) {
+      throw new Error(`source take ${input.sourceTakeId} belongs to shot ${take.shotId}, not ${input.shotId}`);
     }
   }
   const id = nextId(p.db, 'cont');

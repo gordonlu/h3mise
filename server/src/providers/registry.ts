@@ -4,7 +4,7 @@
 // RunningHub account, not to any single project), so switching projects never
 // loses the verified node mapping.
 
-import type { AiAppProfile, ProviderCapabilities, ProviderStatus } from '@h3mise/shared';
+import type { AiAppProfile, H3Mode, ProviderCapabilities, ProviderStatus } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -24,15 +24,9 @@ export function defaultAiAppProfile(): AiAppProfile {
     invokeUrl: H3_AI_APP_URL,
     protocolVersion: 'observed',
     capabilities: {
-      supportedModes: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'],
-      minDuration: 5,
-      maxDuration: 15,
-      supportedAspectRatios: ['16:9', '9:16'],
-      supportedResolutions: ['720p', '1080p', '2K'],
-      maxImageRefs: 3,
-      maxVideoRefs: 1,
-      maxAudioRefs: 1,
-      audioSupported: true,
+      // Unknown until verified (P0-6): a heuristic default must not be
+      // trusted as executable capability in front of a paid render.
+      supportedModes: [],
     },
     nodes: [],
     inputs: {
@@ -45,7 +39,7 @@ export function defaultAiAppProfile(): AiAppProfile {
       duration: { nodeId: 'node_1', fieldName: 'duration' },
       resolution: { nodeId: 'node_1', fieldName: 'resolution' },
     },
-    verification: { status: 'unverified', checkedAt: null, note: 'run "detect & verify" to capture the real node layout' },
+    verification: { status: 'unconfigured', checkedAt: null, note: 'run "detect nodes" in Settings, then confirm with a real render' },
   };
 }
 
@@ -137,14 +131,19 @@ export class ProviderRegistry {
   async capabilities(id: string): Promise<ProviderCapabilities | undefined> {
     const prov = this.providers.get(id);
     if (!prov) return undefined;
-    if (!this.capsCache.has(id)) {
-      try {
-        this.capsCache.set(id, await prov.capabilities());
-      } catch {
-        this.capsCache.set(id, { supportedModes: [] });
+    if (this.capsCache.has(id)) return this.capsCache.get(id);
+    let caps = await prov.capabilities().catch(() => ({ supportedModes: [] as H3Mode[] }));
+    // P0-6: capabilities of the runninghub adapter are only trusted once the
+    // profile is verified by a real submission; otherwise nothing is
+    // advertised as executable (unknown = blocked, not assumed).
+    if (prov instanceof RunningHubAiAppProvider) {
+      const v = this.getProfile()?.verification;
+      if (v?.status !== 'verified') {
+        caps = { supportedModes: [] };
       }
     }
-    return this.capsCache.get(id);
+    this.capsCache.set(id, caps);
+    return caps;
   }
 
   async statuses(): Promise<ProviderStatus[]> {
@@ -158,7 +157,7 @@ export class ProviderRegistry {
         name: prov.name,
         kind: 'runninghub_ai_app',
         configured: prov.configured,
-        verification: profile?.verification ?? { status: 'unverified', checkedAt: null, note: 'mock provider' },
+        verification: profile?.verification ?? { status: 'unconfigured', checkedAt: null, note: 'mock provider' },
         capabilities: caps ?? null,
       });
     }
@@ -213,8 +212,10 @@ export class ProviderRegistry {
   }
 
   /**
-   * Detect & verify: fetch the app's real node layout with the user's key,
-   * map it to business inputs, persist, and refresh the provider.
+   * Detect nodes: fetch the app's real node layout with the user's key and
+   * map it to business inputs. P0-6: this is NOT a verification — the mapping
+   * is heuristic until a real submission succeeds against it, so the status
+   * becomes 'nodes_detected', not 'verified'.
    */
   async detectAndVerify(): Promise<AiAppProfile> {
     const p = this.getProject();
@@ -228,7 +229,7 @@ export class ProviderRegistry {
     let note: string;
     try {
       nodes = await provider.discoverNodes();
-      note = `detected ${nodes.length} node(s) via apiCallDemo`;
+      note = `detected ${nodes.length} node(s) via apiCallDemo — mapping not yet confirmed by a real render`;
     } catch (e) {
       nodes = current.nodes;
       note = `detection failed: ${e instanceof Error ? e.message : e}`;
@@ -239,7 +240,20 @@ export class ProviderRegistry {
       ...current,
       nodes,
       inputs: mapDiscoveredNodes(nodes),
-      verification: { status: 'verified', checkedAt: new Date().toISOString(), note },
+      verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
+    };
+    return this.saveProfile(updated);
+  }
+
+  /**
+   * Called after a real provider submission returns a taskId: the mapping is
+   * now confirmed executable → 'verified', which unlocks full capabilities.
+   */
+  confirmVerified(): AiAppProfile {
+    const profile = this.getProfile() ?? defaultAiAppProfile();
+    const updated: AiAppProfile = {
+      ...profile,
+      verification: { status: 'verified', checkedAt: new Date().toISOString(), note: 'a real render submission succeeded against this profile' },
     };
     return this.saveProfile(updated);
   }

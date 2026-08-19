@@ -180,7 +180,7 @@ CREATE INDEX idx_rj_shot ON render_jobs(shot_id);
 CREATE TABLE takes (
   id TEXT PRIMARY KEY,
   shot_id TEXT NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
-  render_job_id TEXT NOT NULL,
+  render_job_id TEXT NOT NULL UNIQUE,
   prompt_version_id TEXT NOT NULL,
   director_plan_version_id TEXT,
   local_video_path TEXT NOT NULL,
@@ -253,6 +253,33 @@ CREATE TABLE kv (
     name: 'media-poster',
     sql: `
 ALTER TABLE media_assets ADD COLUMN poster_path TEXT;
+`,
+  },
+  {
+    version: 3,
+    name: 'render-invariants',
+    sql: `
+ALTER TABLE render_jobs ADD COLUMN project_id TEXT;
+CREATE UNIQUE INDEX uq_take_render_job ON takes(render_job_id);
+`,
+  },
+  {
+    version: 4,
+    name: 'render-intent-hash',
+    sql: `
+ALTER TABLE render_jobs ADD COLUMN render_intent_hash TEXT;
+`,
+  },
+  {
+    version: 5,
+    name: 'take-invariants',
+    sql: `
+-- One selected take per shot, enforced in the DB (P1). Existing duplicates
+-- (if any) are downgraded to candidate keeping the newest selection.
+UPDATE takes SET status = 'candidate'
+  WHERE status = 'selected'
+    AND id NOT IN (SELECT MAX(id) FROM takes WHERE status = 'selected' GROUP BY shot_id);
+CREATE UNIQUE INDEX uq_take_selected ON takes(shot_id) WHERE status = 'selected';
 `,
   },
 ];

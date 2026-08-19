@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     config.runningHubApiKey,
     config.providerMode,
   );
-  const queue = new RenderQueue(() => store.current, registry, ffmpeg, bus);
+  const queue = new RenderQueue(() => store, registry, ffmpeg, bus);
   const jobs = new JobRunner(bus);
   const ai = new AIService(config.ai, join(config.home, 'skills'));
   const sessions = new SessionManager();
@@ -57,10 +57,10 @@ async function main(): Promise<void> {
     }
   }
   registry.refresh();
-  if (store.current) {
-    queue.recover();
-    console.log('  queue:       recovered pending render jobs');
-  }
+  // Recover active jobs of every project (P0-1); recovery is independent of
+  // which project the UI reopens.
+  await queue.recover();
+  console.log('  queue:       recovered pending render jobs');
 
   const app = buildApp(
     {

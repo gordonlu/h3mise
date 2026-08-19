@@ -84,12 +84,16 @@ export function buildRoutes(services: AppServices): App {
     const out = await Promise.all(
       meta.map(async (m) => {
         let counts = { shotCount: 0, selectedTakeCount: 0 };
+        // openDetached never switches the current project (P0-1).
+        let ctx: import('../project-store.js').ProjectContext | null = null;
         try {
-          const db = await services.store.open(m.id);
-          counts.shotCount = (db.db.get<{ n: number }>('SELECT COUNT(*) as n FROM shots')?.n ?? 0);
-          counts.selectedTakeCount = (db.db.get<{ n: number }>("SELECT COUNT(*) as n FROM takes WHERE status = 'selected'")?.n ?? 0);
+          ctx = await services.store.openDetached(m.id);
+          counts.shotCount = (ctx.db.get<{ n: number }>('SELECT COUNT(*) as n FROM shots')?.n ?? 0);
+          counts.selectedTakeCount = (ctx.db.get<{ n: number }>("SELECT COUNT(*) as n FROM takes WHERE status = 'selected'")?.n ?? 0);
         } catch {
           /* unreadable project — keep zeros */
+        } finally {
+          ctx?.close();
         }
         return { ...m, ...counts };
       }),
@@ -114,12 +118,14 @@ export function buildRoutes(services: AppServices): App {
   app.post('/api/projects/:id/open', async (c) => {
     const meta = await services.store.open(c.req.param('id'));
     services.providers.refresh();
-    services.queue.recover();
+    await services.queue.recover();
     return c.json(meta);
   });
 
   app.post('/api/projects/:id/delete', async (c) => {
-    await services.store.delete(c.req.param('id'));
+    const id = c.req.param('id');
+    await services.store.delete(id);
+    services.queue.forgetProject(id);
     services.providers.refresh();
     return c.json({ ok: true });
   });
@@ -260,7 +266,7 @@ export function buildRoutes(services: AppServices): App {
 
   app.post('/api/shots/:id/context-package', async (c) => {
     const { task } = await c.req.json();
-    return c.json(promptMod.buildContextPackage(p(c), c.req.param('id'), String(task ?? 'Plan this shot')));
+    return c.json(promptMod.buildContextPackage(p(c), c.req.param('id'), String(task ?? 'Plan this shot'), services.providers.getProfile()));
   });
 
   // --- prompt --------------------------------------------------------------
@@ -300,27 +306,36 @@ export function buildRoutes(services: AppServices): App {
     const shotId = String(body.shotId);
     const promptVersionId = String(body.promptVersionId);
     const providerId = String(body.providerId ?? 'runninghub');
-    // No hidden paid actions: basic preflight gates every submission.
-    const preflight = await preflightMod.runBasicPreflight(ctx, services.providers, { shotId, promptVersionId, providerId });
+    // P0-2: build the EXACT render intent (client overrides included), gate
+    // on that intent, and only then submit. The intent hash is persisted on
+    // the job so any later re-submission can be audited against it.
+    const intent = await preflightMod.intentFromInput(ctx, services.providers, {
+      shotId,
+      promptVersionId,
+      providerId,
+      durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
+      aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
+      resolution: body.resolution,
+      providerParams: body.providerParams ?? {},
+    });
+    const preflight = await preflightMod.runBasicPreflightIntent(ctx, services.providers, intent);
     if (preflight.blocked) {
       return c.json({ error: 'preflight blocked', preflight }, 422);
     }
-    const prompt = promptMod.getPrompt(ctx, promptVersionId);
-    const shot = shotsMod.getShot(ctx, shotId);
+    const profile = services.providers.getProfile();
+    const intentHash = preflightMod.renderIntentHash(intent, { appId: profile?.appId ?? '', checkedAt: profile?.verification.checkedAt ?? null });
     const request = {
       provider: providerId,
       aiAppId: body.aiAppId ?? '2089265538441764866',
-      mode: prompt.h3Mode,
+      mode: intent.mode,
       promptVersionId,
-      durationSeconds: Number(body.durationSeconds ?? shot.durationSeconds),
-      aspectRatio: String(body.aspectRatio ?? shot.aspectRatio),
-      resolution: body.resolution,
-      references: ctx.db
-        .all<{ id: string; asset_id: string; type: string }>('SELECT * FROM reference_bindings WHERE shot_id = ?', [shotId])
-        .map((r) => ({ bindingId: r.id, assetId: r.asset_id, kind: r.type as 'image' | 'video' | 'audio' })),
-      providerParams: body.providerParams ?? {},
+      durationSeconds: intent.durationSeconds,
+      aspectRatio: intent.aspectRatio,
+      resolution: intent.resolution,
+      references: intent.references,
+      providerParams: intent.providerParams,
     };
-    const job = services.queue.submit({ shotId, promptVersionId, provider: providerId, request });
+    const job = services.queue.submit({ projectId: ctx.meta.id, shotId, promptVersionId, provider: providerId, request, intentHash });
     return c.json(job, 201);
   });
 
@@ -345,13 +360,22 @@ export function buildRoutes(services: AppServices): App {
 
   app.get('/api/takes/:id', (c) => c.json(takesMod.getTake(p(c), c.req.param('id'))));
   app.patch('/api/takes/:id', async (c) => c.json(takesMod.updateTake(p(c), c.req.param('id'), await c.req.json())));
-  app.post('/api/takes/:id/select', (c) => c.json(takesMod.selectTake(p(c), c.req.param('id'), services.bus)));
+  app.post('/api/takes/:id/select', (c) => {
+    const ctx = p(c);
+    const take = takesMod.selectTake(ctx, c.req.param('id'), services.bus);
+    // P1: a reselect invalidates the shot's old clips (old take is no longer
+    // selected; the timeline must never export it).
+    timelineMod.invalidateShotClips(ctx, take.shotId);
+    return c.json(take);
+  });
   app.post('/api/takes/:id/reject', (c) => c.json(takesMod.rejectTake(p(c), c.req.param('id'))));
   app.post('/api/takes/:id/select-commit', async (c) => {
     const ctx = p(c);
     const body = await c.req.json();
     const state = body.state ?? continuityMod.emptyVisualState();
-    return c.json(continuityMod.selectTakeAndCommit(ctx, c.req.param('id'), state, services.bus));
+    const result = continuityMod.selectTakeAndCommit(ctx, c.req.param('id'), state, services.bus);
+    timelineMod.invalidateShotClips(ctx, result.take.shotId);
+    return c.json(result);
   });
 
   // --- continuity ----------------------------------------------------------

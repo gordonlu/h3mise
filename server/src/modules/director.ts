@@ -85,6 +85,10 @@ export function parseDirectorPlanText(text: string): { ok: boolean; plan?: Direc
   const parse = (obj: unknown): { ok: boolean; plan?: DirectorPlan; error?: string } => {
     if (typeof obj !== 'object' || obj === null) return { ok: false, error: 'not an object' };
     const base = emptyDirectorPlan();
+    // P1: recursive snake_case → camelCase conversion. Previously only
+    // reality/movementQuality/generation/continuity were normalized; other
+    // sections (camera/performance/environment/…) kept snake_case keys, so
+    // applied plans silently lost data the compiler reads as camelCase.
     const deep = <T>(src: unknown, dst: T): T => {
       if (typeof src !== 'object' || src === null) return dst;
       for (const k of Object.keys(src as Record<string, unknown>)) {
@@ -92,15 +96,20 @@ export function parseDirectorPlanText(text: string): { ok: boolean; plan?: Direc
         if (v === null || v === undefined) continue;
         const key = k.replace(/[_-]([a-z])/g, (_, c: string) => c.toUpperCase());
         if (typeof v === 'object' && !Array.isArray(v)) {
-          if (key === 'reality' || key === 'movementQuality' || key === 'generation' || key === 'continuity') {
-            deep(v, (dst as Record<string, unknown>)[key] as never);
+          const target = (dst as Record<string, unknown>)[key];
+          if (target !== undefined && typeof target === 'object' && target !== null) {
+            // Merge into the known default structure (recursive normalize).
+            deep(v, target as never);
           } else {
-            (dst as Record<string, unknown>)[key] = v as never;
+            // Arbitrary nested section: normalize keys recursively.
+            (dst as Record<string, unknown>)[key] = deep(v, {} as never);
           }
         } else if (Array.isArray(v)) {
-          (dst as Record<string, unknown>)[key] = [...v] as never;
+          (dst as Record<string, unknown>)[key] = v.map((item) =>
+            typeof item === 'object' && item !== null ? deep(item, {} as never) : item,
+          );
         } else {
-          (dst as Record<string, unknown>)[key] = v as never;
+          (dst as Record<string, unknown>)[key] = v;
         }
       }
       return dst;

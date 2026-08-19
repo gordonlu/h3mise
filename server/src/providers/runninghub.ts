@@ -107,11 +107,13 @@ export class RunningHubAiAppProvider implements VideoProvider {
    */
   async discoverNodes(): Promise<AiAppProfile['nodes']> {
     const url = `${RH_BASE}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(this.key)}&webappId=${this.profile.appId}`;
+    // P1: never let the API key leak into error metadata / debug output.
+    const redactedUrl = url.replace(encodeURIComponent(this.key), '***');
     let res: Response;
     try {
       res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     } catch (e) {
-      throw new ProviderError(`node discovery failed: ${e instanceof Error ? e.message : e}`, 'submit', { url });
+      throw new ProviderError(`node discovery failed: ${e instanceof Error ? e.message : e}`, 'submit', { url: redactedUrl });
     }
     const json = (await res.json().catch(() => null)) as { code?: number; msg?: string; data?: { nodeInfoList?: Array<Record<string, unknown>> } } | null;
     const list = json?.data?.nodeInfoList;
@@ -196,9 +198,18 @@ export class RunningHubAiAppProvider implements VideoProvider {
     if (audioRef && inputs.audio) push(inputs.audio, audioRef.providerRef);
     push(inputs.duration, request.durationSeconds ? String(Math.round(request.durationSeconds)) : undefined);
     push(inputs.resolution, request.resolution);
+    // P0-4: providerParams are ONLY written through explicit per-key bindings
+    // from the profile. An unknown param is refused — never guessed into the
+    // prompt node or any other slot.
     for (const [k, v] of Object.entries(request.providerParams)) {
-      push(inputs.extra ?? inputs.prompt, String(v));
-      void k;
+      const binding = this.profile.providerParamBindings?.[k];
+      if (!binding) {
+        throw new ProviderError(
+          `unknown providerParam "${k}": add a providerParamBindings entry (nodeId/fieldName) to the AI App profile or remove the param`,
+          'submit',
+        );
+      }
+      push(binding, v === null || v === undefined ? undefined : String(v));
     }
     return out;
   }

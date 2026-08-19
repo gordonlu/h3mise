@@ -31,12 +31,12 @@ const busy = ref(false);
 const filter = ref('');
 const statusFilter = ref('');
 
-/** PRD §15: only expose modes the active provider profile supports. */
+/** PRD §15: only expose modes the active provider profile supports.
+ * Unknown capability = nothing offered (P1), never a theoretical fallback. */
 const availableModes = computed(() => {
   const rh = project.providers.find((p) => p.id === 'runninghub' && p.configured);
   const active = rh ?? project.providers[0];
-  if (active?.capabilities?.supportedModes?.length) return active.capabilities.supportedModes;
-  return H3_MODES;
+  return active?.capabilities?.supportedModes ?? [];
 });
 
 const RISK_BADGE: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'bad' };

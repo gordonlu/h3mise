@@ -100,7 +100,12 @@ export function importRawPrompt(p: ProjectContext, shotId: string, text: string,
 }
 
 /** Copy Context Package for external AI (PRD §21/§39). */
-export function buildContextPackage(p: ProjectContext, shotId: string, task: string): Record<string, unknown> {
+export function buildContextPackage(
+  p: ProjectContext,
+  shotId: string,
+  task: string,
+  profile?: { capabilities: { supportedModes?: string[]; maxDuration?: number; audioSupported?: boolean }; verification: { status: string } } | null,
+): Record<string, unknown> {
   const shot = getShot(p, shotId);
   const plan = latestPlan(p, shotId);
   const prompts = listPrompts(p, shotId);
@@ -118,19 +123,31 @@ export function buildContextPackage(p: ProjectContext, shotId: string, task: str
   return {
     project,
     story_context: story,
-    previous_selected_take: p.db.get<{ id: string; shot_id: string }>(
-      "SELECT id, shot_id FROM takes WHERE shot_id != ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1",
-      [shotId],
-    ),
+    previous_selected_take: (() => {
+      // P1: predecessor by shot order, not by created_at across the project.
+      const prev = p.db.get<{ id: string }>(
+        'SELECT id FROM shots WHERE ord < (SELECT ord FROM shots WHERE id = ?) ORDER BY ord DESC LIMIT 1',
+        [shotId],
+      );
+      if (!prev) return null;
+      return (
+        p.db.get<{ id: string; shot_id: string }>(
+          "SELECT id, shot_id FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1",
+          [prev.id],
+        ) ?? null
+      );
+    })(),
     continuity,
     assets,
     shot,
     director_plan: plan?.plan ?? null,
     prompt_versions: prompts,
     provider_constraints: {
-      modes: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'],
-      max_duration_seconds: 15,
-      audio_supported: true,
+      // P1: executable capability comes from the CURRENT provider profile,
+      // never from a hardcoded theoretical list; unverified = nothing claimed.
+      modes: profile?.verification.status === 'verified' ? (profile.capabilities.supportedModes ?? []) : [],
+      max_duration_seconds: profile?.verification.status === 'verified' ? (profile.capabilities.maxDuration ?? null) : null,
+      audio_supported: profile?.verification.status === 'verified' ? (profile.capabilities.audioSupported ?? null) : null,
     },
     task,
     output_schema: 'director_plan_yaml_or_json',

@@ -100,6 +100,13 @@ export function reorderClips(p: ProjectContext, ids: string[]): TimelineClip[] {
   return getTimeline(p).clips;
 }
 
+/** P1: reselecting a take invalidates the shot's old clips (their take is no
+ * longer selected, so the timeline must never export them). */
+export function invalidateShotClips(p: ProjectContext, shotId: string): number {
+  const r = p.db.run('DELETE FROM timeline_clips WHERE shot_id = ?', [shotId]);
+  return Number(r.changes ?? 0);
+}
+
 export interface TimelineExportResult {
   path: string; // absolute
   relPath: string;
@@ -116,11 +123,16 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
   let total = 0;
   for (const clip of tl.clips) {
     const take = getTake(p, clip.takeId);
+    // P1: the timeline only ever exports SELECTED takes. A reselect removes
+    // old clips (invalidateShotClips); this assert is the second net.
+    if (take.status !== 'selected') {
+      throw new Error(`clip ${clip.id}: take ${clip.takeId} is no longer selected — reselect the shot and re-add the clip`);
+    }
     const abs = p.resolveProjectPath(take.localVideoPath);
     const trimOut = clip.trimOut ?? take.duration;
     if (trimOut - clip.trimIn < 0.1) throw new Error(`clip ${clip.id}: invalid trim`);
     const tmp = join(p.paths.cache, `clip-${clip.id}.mp4`);
-    await ffmpeg.trim(abs, tmp, clip.trimIn, trimOut);
+    await ffmpeg.trim(abs, tmp, clip.trimIn, trimOut, { audio: clip.audio, ensureAudio: true });
     clips.push(tmp);
     total += trimOut - clip.trimIn;
     onProgress?.(clips.length, tl.clips.length);

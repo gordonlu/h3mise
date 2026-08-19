@@ -73,6 +73,11 @@ export async function createTake(
   },
   ffmpeg?: Ffmpeg,
 ): Promise<Take> {
+  // Idempotent (P0-3): one render job must never produce two takes, even if
+  // the process crashes after the INSERT but before the job is marked done.
+  // Enforced twice: here and by UNIQUE(render_job_id) on takes.
+  const existing = p.db.get<TakeRow>('SELECT * FROM takes WHERE render_job_id = ?', [input.renderJobId]);
+  if (existing) return takeFromRow(existing);
   const id = nextId(p.db, 'take');
   const now = new Date().toISOString();
   const framesDir = p.paths.shotFrames(input.shotId);
@@ -127,7 +132,7 @@ export async function createTake(
 export function updateTake(
   p: ProjectContext,
   id: string,
-  patch: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes' | 'status'>>,
+  patch: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes'>>,
 ): Take {
   const cols: string[] = [];
   const vals: unknown[] = [];
@@ -143,10 +148,6 @@ export function updateTake(
     cols.push('notes = ?');
     vals.push(patch.notes);
   }
-  if (patch.status !== undefined) {
-    cols.push('status = ?');
-    vals.push(patch.status);
-  }
   if (cols.length) {
     vals.push(id);
     p.db.run(`UPDATE takes SET ${cols.join(', ')} WHERE id = ?`, vals);
@@ -156,9 +157,10 @@ export function updateTake(
 
 export function selectTake(p: ProjectContext, takeId: string, bus?: EventBus): Take {
   const take = getTake(p, takeId);
-  const now = new Date().toISOString();
   p.db.tx(() => {
-    p.db.run('UPDATE takes SET status = ? WHERE shot_id = ?', ['rejected', take.shotId]);
+    // Keep the three-state model: the previous selected take goes back to
+    // candidate (only explicit Reject marks rejected, P1).
+    p.db.run("UPDATE takes SET status = 'candidate' WHERE shot_id = ? AND status = 'selected'", [take.shotId]);
     p.db.run('UPDATE takes SET status = ?, rating = COALESCE(rating, ?) WHERE id = ?', ['selected', 5, takeId]);
   });
   const shot = getShot(p, take.shotId);
@@ -166,7 +168,6 @@ export function selectTake(p: ProjectContext, takeId: string, bus?: EventBus): T
     advanceShotStatus(p, take.shotId, 'SELECTED');
   }
   bus?.emit({ type: 'take.selected', takeId, shotId: take.shotId });
-  void now;
   return getTake(p, takeId);
 }
 

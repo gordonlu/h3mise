@@ -1,7 +1,7 @@
 // Project store: global registry + current project lifecycle + storage layout.
 
 import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { ProjectConfig, ProjectFormat, ProjectMeta } from '@h3mise/shared';
 import { Db, jget } from './db/sqlite.js';
@@ -53,10 +53,17 @@ export class ProjectContext {
   /** Resolve a stored relative path, refusing traversal outside the project. */
   resolveProjectPath(rel: string): string {
     const abs = resolve(this.root, rel);
-    if (!abs.startsWith(this.root + '/') && abs !== this.root) {
+    // Use path.relative (not string prefix): on Windows the root may not end
+    // with '/' and a prefix test would reject legitimate project files.
+    const relFromRoot = relative(this.root, abs);
+    if (relFromRoot.startsWith('..') || isAbsolute(relFromRoot)) {
       throw new Error('path escapes project root');
     }
     return abs;
+  }
+
+  close(): void {
+    this.db.close();
   }
 }
 
@@ -149,6 +156,21 @@ export class ProjectStore {
     this.current?.db.close();
     this.current = ctx;
     return ctx;
+  }
+
+  /**
+   * Open a project DB WITHOUT touching `current` or last_opened_at. Used for
+   * read-only statistics and for the render queue (jobs must never depend on
+   * which project the UI happens to have open). Caller owns the context and
+   * must close() it when done.
+   */
+  async openDetached(id: string): Promise<ProjectContext> {
+    const meta = await this.get(id);
+    if (!meta) throw new Error('project not found');
+    const config = await this.readConfig(meta.dirPath);
+    const db = new Db(join(meta.dirPath, 'project.db'));
+    migrate(db, PROJECT_MIGRATIONS);
+    return new ProjectContext(db, meta, config);
   }
 
   async readConfig(dirPath: string): Promise<ProjectConfig> {

@@ -46,6 +46,10 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
   const { plan, references } = ctx;
   const num = numberReferences(references);
   const refLabel = (b: ReferenceBinding) => (b.label ? `(${b.label})` : '');
+  // P1: frame roles win over array order. An identity/style picture bound
+  // before the frames must not steal pictures[0]/[1].
+  const firstFrame = num.pictures.find((p) => p.binding.roles.includes('first_frame')) ?? num.pictures[0];
+  const lastFrame = num.pictures.find((p) => p.binding.roles.includes('last_frame')) ?? num.pictures[1];
 
   if (mode === 'ref2va') {
     const sections = [
@@ -61,19 +65,19 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
 
   const blocks: string[] = [];
   // Alignment line for frame-based modes (I2VA/FL2VA/L2VA).
-  if ((mode === 'i2va' || mode === 'fl2va') && num.pictures[0]) {
+  if ((mode === 'i2va' || mode === 'fl2va') && firstFrame) {
     blocks.push(
-      `For the target video, at 0.00 seconds into the target video, ${num.pictures[0].tag} ${refLabel(num.pictures[0].binding)} is fully referenced.`,
+      `For the target video, at 0.00 seconds into the target video, ${firstFrame.tag} ${refLabel(firstFrame.binding)} is fully referenced.`,
     );
   }
-  if (mode === 'l2va' && num.pictures[0]) {
+  if (mode === 'l2va' && lastFrame) {
     blocks.push(
-      `For the target video, the last frame should fully reference ${num.pictures[0].tag} ${refLabel(num.pictures[0].binding)}.`,
+      `For the target video, the last frame should fully reference ${lastFrame.tag} ${refLabel(lastFrame.binding)}.`,
     );
   }
-  if (mode === 'fl2va' && num.pictures[1]) {
+  if (mode === 'fl2va' && lastFrame) {
     blocks.push(
-      `For the target video, at the end of the video, ${num.pictures[1].tag} ${refLabel(num.pictures[1].binding)} is fully referenced.`,
+      `For the target video, at the end of the video, ${lastFrame.tag} ${refLabel(lastFrame.binding)} is fully referenced.`,
     );
   }
   const imd = integratedMultimodalDescription(ctx, num);

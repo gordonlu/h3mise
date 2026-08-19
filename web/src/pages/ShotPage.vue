@@ -45,7 +45,17 @@ const pasteText = ref('');
 const parseResult = ref<{ ok: boolean; plan?: DirectorPlan; error?: string } | null>(null);
 const planDirty = ref(false);
 
-const aiEnabled = computed(() => project.providers.some((p) => p.configured));
+// P1: AI availability comes from /api/ai/status, NOT from whether a render
+// provider is configured — the two are independent features.
+const aiEnabled = ref(false);
+async function refreshAiStatus() {
+  try {
+    const s = await get<{ aiConfigured?: boolean }>('/api/ai/status');
+    aiEnabled.value = Boolean(s.aiConfigured);
+  } catch {
+    aiEnabled.value = false;
+  }
+}
 
 /** Active render provider: prefer the real RunningHub when configured, else
  * whatever the server exposes (e.g. mock in offline mode). */
@@ -55,11 +65,11 @@ const activeProvider = computed(() => {
 });
 const providerId = computed(() => activeProvider.value?.id ?? 'runninghub');
 
-/** PRD §15: UI only opens modes the current provider profile actually supports. */
+/** PRD §15: UI only opens modes the current provider profile actually supports.
+ * Unknown capability = nothing offered (P1), never a theoretical fallback. */
 const availableModes = computed(() => {
   const caps = activeProvider.value?.capabilities;
-  if (caps?.supportedModes?.length) return caps.supportedModes;
-  return H3_MODES;
+  return caps?.supportedModes ?? [];
 });
 
 const userStatus = computed(() => (sShot.value ? SHOT_USER_STATUS[sShot.value.status] : 'draft'));
@@ -279,6 +289,7 @@ onMounted(async () => {
   await s.load();
   await loadMedia();
   await project.refreshProviders();
+  await refreshAiStatus();
   window.addEventListener('beforeunload', beforeUnload);
   off = subscribeEvents((e) => {
     if (e.type === 'take.created' || e.type === 'shot.updated' || e.type === 'render.job.succeeded') void s.load();

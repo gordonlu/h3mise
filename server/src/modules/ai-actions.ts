@@ -92,7 +92,7 @@ export async function runAction(
     }
     case 'continuity_check': {
       if (!shotId) throw new Error('shotId required');
-      const latest = continuityMod.latestContinuity(ctx, 'visual', 'actual');
+      const latest = continuityMod.predecessorContinuity(ctx, shotId, 'visual', 'actual');
       const text = await ai.model.complete({
         system: `You are a script-continuity reviewer. Compare the shot's planned start state against the committed actual continuity of the previous shot. Flag mismatches in character visual state, costume, hair, injury, held items, location, time/weather, screen direction, facing. Output "MISMATCH: ... | FIX: ..." lines and a verdict.`,
         messages: [
@@ -192,7 +192,7 @@ function planShotPrompt(ctx: ProjectContext, shotId: string, body: Record<string
   const plan = directorMod.latestPlan(ctx, shotId)?.plan ?? null;
   const prompts = promptMod.listPrompts(ctx, shotId);
   const refs = assetsMod.listBindings(ctx, shotId);
-  const latest = continuityMod.latestContinuity(ctx, 'visual', 'actual');
+  const latest = continuityMod.predecessorContinuity(ctx, shotId, 'visual', 'actual');
   const entities = assetsMod.listEntities(ctx);
   const states = assetsMod.listCharacterStates(ctx);
   const story = storyMod.getStory(ctx);

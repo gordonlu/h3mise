@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
-import { t } from '../stores/locale';
+import { locale, t } from '../stores/locale';
 import type { AiAppProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
@@ -16,6 +16,23 @@ const editingProfile = ref(false);
 const apiKeyInfo = ref<{ source: 'settings' | 'env' | 'none'; configured: boolean } | null>(null);
 const apiKeyInput = ref('');
 const savingKey = ref(false);
+
+// P0-6 semantics: only a successful real submit marks the profile verified;
+// discovery alone only ever reaches "nodes_detected".
+const VERIF: Record<string, { cls: string; cn: string; en: string }> = {
+  unconfigured: { cls: 'muted', cn: '未配置', en: 'Unconfigured' },
+  nodes_detected: { cls: 'warn', cn: '已探测节点（未确认）', en: 'Nodes detected (unverified)' },
+  verified: { cls: 'ok', cn: '已验证（真实渲染成功）', en: 'Verified (real render ok)' },
+  failed: { cls: 'bad', cn: '检测失败', en: 'Detection failed' },
+};
+function verifClass(s: string | undefined): string {
+  return VERIF[s ?? 'unconfigured']?.cls ?? 'muted';
+}
+function verifLabel(s: string | undefined): string {
+  const v = VERIF[s ?? 'unconfigured'];
+  if (!v) return '';
+  return locale.value === 'en' ? v.en : v.cn;
+}
 
 async function load() {
   // Load independently: a failing endpoint must not blank the whole page.
@@ -130,8 +147,8 @@ async function saveApiKey() {
               <template v-else-if="apiKeyInfo?.source === 'env'">API Key: 已配置（环境变量）</template>
               <template v-else>API Key: 未配置（mock 模式可离线渲染）</template>
             </span>
-            <span class="badge" :class="profile?.verification.status === 'verified' ? 'ok' : profile?.verification.status === 'failed' ? 'bad' : 'muted'">
-              {{ profile?.verification.status === 'verified' ? '已验证节点' : profile?.verification.status === 'failed' ? '检测失败' : '未检测' }}
+            <span class="badge" :class="verifClass(profile?.verification.status)">
+              {{ verifLabel(profile?.verification.status) }}
             </span>
           </div>
           <label class="field">

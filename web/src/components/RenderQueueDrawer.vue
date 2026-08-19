@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useRenderStore } from '../stores/render';
 import { post } from '../api/client';
+import { confirmDialog } from '../stores/confirm';
 import type { RenderJob } from '@h3mise/shared';
 
 const render = useRenderStore();
@@ -36,7 +37,22 @@ const totalCost = computed(() => {
   return hasCost ? credits : null;
 });
 
+const CANCELLABLE = ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'];
+
+// P1: RunningHub has no remote cancel for AI App tasks — cancelling only
+// stops local polling; the remote task may still run and cost money.
+const cancelWarnsRemote = (job: RenderJob) => job.provider !== 'mock' && ['QUEUED', 'RUNNING'].includes(job.status);
+
 async function cancel(job: RenderJob) {
+  if (cancelWarnsRemote(job)) {
+    const ok = await confirmDialog({
+      title: '取消任务',
+      message: 'RunningHub 无法远程取消任务。取消后本地将停止跟踪，但云端任务可能继续运行并产生费用。仍要取消吗？',
+      confirmLabel: '仍要取消',
+      danger: true,
+    });
+    if (!ok) return;
+  }
   await post(`/api/render/${job.id}/cancel`);
   await render.refresh();
 }

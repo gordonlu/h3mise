@@ -117,13 +117,39 @@ export class Ffmpeg {
   }
 
   /** Trim input to [start, end] into outPath (mp4, h264+aac). */
-  async trim(input: string, outPath: string, start: number, end: number): Promise<void> {
+  async trim(
+    input: string,
+    outPath: string,
+    start: number,
+    end: number,
+    options?: { audio?: { volume?: number; mute?: boolean }; ensureAudio?: boolean },
+  ): Promise<void> {
     await mkdir(dirname(outPath), { recursive: true });
-    await run(
-      'ffmpeg',
-      ['-y', '-ss', String(start), '-i', input, '-t', String(Math.max(0.1, end - start)), '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', '-movflags', '+faststart', outPath],
-      input,
-    );
+    const audio = options?.audio;
+    const args = ['-y', '-ss', String(start), '-i', input];
+    const mapAudio = !audio?.mute;
+    if (audio?.mute) {
+      args.push('-an');
+    }
+    if (options?.ensureAudio && mapAudio) {
+      // Guarantee a mono/stereo audio track for later amix/xfade (P1): a clip
+      // without any audio stream would otherwise break the export graph.
+      args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+    }
+    args.push('-t', String(Math.max(0.1, end - start)));
+    if (audio?.volume !== undefined && audio.volume !== 1) {
+      args.push('-af', `volume=${Number(audio.volume).toFixed(3)}`);
+    }
+    args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
+    if (mapAudio) {
+      if (options?.ensureAudio) {
+        args.push('-map', '0:v', '-map', '1:a');
+      } else {
+        args.push('-c:a', 'aac');
+      }
+    }
+    args.push('-shortest', '-movflags', '+faststart', outPath);
+    await run('ffmpeg', args, input);
   }
 
   /**
@@ -139,14 +165,34 @@ export class Ffmpeg {
     }
     const xfade = options?.crossfade ?? 0;
     if (xfade <= 0) {
-      const list = clips.map((c) => `file '${c.replace(/'/g, "'\\''")}'`).join('\n');
-      const listPath = outPath + '.concat.txt';
-      await import('node:fs/promises').then((fs) => fs.writeFile(listPath, list + '\n'));
-      await run(
-        'ffmpeg',
-        ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outPath],
-        outPath,
-      );
+      // P1: only -c copy when all clips share resolution; otherwise normalize
+      // via a scale+concat filter graph (different H3 params could produce
+      // mismatched sizes that would fail a raw concat).
+      const infos = await Promise.all(clips.map((c) => this.probe(c).catch(() => null)));
+      const sizes = new Set(infos.map((i) => (i ? `${i.width}x${i.height}` : 'unknown')));
+      if (sizes.size === 1) {
+        const list = clips.map((c) => `file '${c.replace(/'/g, "'\\''")}'`).join('\n');
+        const listPath = outPath + '.concat.txt';
+        await import('node:fs/promises').then((fs) => fs.writeFile(listPath, list + '\n'));
+        await run(
+          'ffmpeg',
+          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outPath],
+          outPath,
+        );
+      } else {
+        const inputs: string[] = [];
+        let filter = '';
+        clips.forEach((c, i) => {
+          inputs.push('-i', c);
+          filter += `[${i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}];`;
+        });
+        filter += clips.map((_, i) => `[v${i}]`).join('') + `concat=n=${clips.length}:v=1:a=0[vout]`;
+        await run(
+          'ffmpeg',
+          ['-y', ...inputs, '-filter_complex', filter, '-map', '[vout]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-movflags', '+faststart', outPath],
+          outPath,
+        );
+      }
       return;
     }
     // xfade chain: scale all to same size first

@@ -171,11 +171,20 @@ export function buildRoutes(services: AppServices): App {
         "SELECT COUNT(*) as n FROM render_jobs WHERE shot_id = ? AND status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
         [s.id],
       )!.n;
+      // PRD §9 card fields: missing-asset hint + latest preflight risk flag.
+      const missing = assetsMod
+        .shotAssetRequirements(ctx, s)
+        .filter((r) => r.level === 'required')
+        .map((r) => r.label);
+      const risk =
+        ctx.db.get<{ risk: string }>('SELECT risk FROM preflight_reports WHERE shot_id = ? ORDER BY created_at DESC LIMIT 1', [s.id])?.risk ?? null;
       return {
         ...s,
         takeCount,
         selectedTakeId: selected?.id ?? null,
         activeJobs,
+        missing,
+        risk,
         cover: selected
           ? (ctx.db.get<{ poster_path: string | null }>('SELECT poster_path FROM takes WHERE id = ?', [selected.id])?.poster_path ?? null)
           : null,

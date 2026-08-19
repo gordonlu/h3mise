@@ -2,10 +2,13 @@
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useProjectStore } from '../stores/project';
+import { useToastStore } from '../stores/toast';
+import { confirmDialog } from '../stores/confirm';
 import { post } from '../api/client';
 
 const project = useProjectStore();
 const router = useRouter();
+const toasts = useToastStore();
 const creating = ref(false);
 const form = ref({ title: '', format: 'single_shot', defaultAspectRatio: '16:9', defaultDurationSeconds: 5 });
 const error = ref('');
@@ -24,7 +27,8 @@ async function createProject() {
   }
   creating.value = true;
   try {
-    const meta = await project.createProject({ ...form.value, format: form.value.format as never });
+    await project.createProject({ ...form.value, format: form.value.format as never });
+    toasts.push({ kind: 'ok', text: `项目「${form.value.title}」已创建` });
     router.push('/shots');
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -38,9 +42,16 @@ async function openProject(id: string) {
   router.push('/shots');
 }
 
-async function removeProject(id: string) {
-  if (!confirm('删除项目将移除本地项目目录（含媒体与 Take）。确定？')) return;
+async function removeProject(id: string, title: string) {
+  const ok = await confirmDialog({
+    title: `删除项目「${title}」？`,
+    message: '将移除本地项目目录（含媒体资产、全部 Take、Prompt 与连续性记录）。此操作不可恢复。',
+    confirmLabel: '永久删除',
+    danger: true,
+  });
+  if (!ok) return;
   await post(`/api/projects/${id}/delete`);
+  toasts.push({ kind: 'ok', text: `项目「${title}」已删除` });
   await project.refreshProjects();
 }
 
@@ -105,7 +116,7 @@ onMounted(() => project.refreshProjects());
               </div>
             </div>
             <button class="primary sm" @click="openProject(p.id)">打开</button>
-            <button class="danger sm" title="删除项目" @click="removeProject(p.id)">删除</button>
+            <button class="danger sm" title="删除项目" @click="removeProject(p.id, p.title)">删除</button>
           </div>
         </div>
       </div>
@@ -115,7 +126,7 @@ onMounted(() => project.refreshProjects());
 
 <style scoped>
 .page { padding: 28px 32px; max-width: 1100px; margin: 0 auto; }
-h1 { font-size: 22px; margin: 0 0 4px; }
+h1 { font-size: 24px; margin: 0 0 4px; font-family: var(--serif); }
 .grid.create { grid-template-columns: 1fr 1.3fr; align-items: start; margin-top: 20px; }
 .format-opt {
   display: flex;

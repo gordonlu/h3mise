@@ -51,7 +51,12 @@ const STATUS_MAP: Record<string, RenderStatus['status']> = {
 
 export class RunningHubAiAppProvider implements VideoProvider {
   readonly id = 'runninghub';
-  readonly name = `RunningHub AI App ${this.profile.appId}`;
+
+  // NB: getter, NOT a field initializer — field initializers run before the
+  // constructor assigns `options`, which would crash on `this.options.profile`.
+  get name(): string {
+    return `RunningHub AI App ${this.profile.appId}`;
+  }
 
   constructor(private readonly options: RunningHubOptions) {}
 

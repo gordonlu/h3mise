@@ -248,6 +248,13 @@ CREATE TABLE kv (
 );
 `,
   },
+  {
+    version: 2,
+    name: 'media-poster',
+    sql: `
+ALTER TABLE media_assets ADD COLUMN poster_path TEXT;
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

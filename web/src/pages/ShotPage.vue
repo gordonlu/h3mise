@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, onUnmounted, ref, toRaw } from 'vue';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useShot } from '../composables/useShot';
 import { useProjectStore } from '../stores/project';
-import { get, post, takeVideoUrl, subscribeEvents } from '../api/client';
-import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
+import { useToastStore } from '../stores/toast';
+import { confirmDialog } from '../stores/confirm';
+import { get, post, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
+import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan, MediaAsset } from '@h3mise/shared';
 import PlanEditor from '../components/director/PlanEditor.vue';
 import PromptPanel from '../components/director/PromptPanel.vue';
@@ -14,8 +16,10 @@ import ReferencesPanel from '../components/director/ReferencesPanel.vue';
 import VideoPlayer from '../components/VideoPlayer.vue';
 
 const route = useRoute();
+const router = useRouter();
 const shotId = route.params.id as string;
 const project = useProjectStore();
+const toasts = useToastStore();
 const emptyPlan = () => emptyDirectorPlan();
 function aiText(v: unknown): string {
   return (v as { text?: string })?.text ?? '';
@@ -36,12 +40,10 @@ const tab = ref<'plan' | 'references' | 'prompt' | 'preflight' | 'external'>('pl
 const media = ref<MediaAsset[]>([]);
 const aiJobs = ref<Record<string, string>>({}); // actionKey -> jobId
 const aiResults = ref<Record<string, unknown>>({});
-const aiError = ref('');
 const externalTask = ref('Plan Shot');
-const externalPkg = ref<Record<string, unknown> | null>(null);
 const pasteText = ref('');
 const parseResult = ref<{ ok: boolean; plan?: DirectorPlan; error?: string } | null>(null);
-const notice = ref('');
+const planDirty = ref(false);
 
 const aiEnabled = computed(() => project.providers.some((p) => p.configured));
 
@@ -60,10 +62,7 @@ const availableModes = computed(() => {
   return H3_MODES;
 });
 
-const STATUS_BADGE: Record<string, string> = {
-  DRAFT: '', PLANNED: 'info', ASSETS_READY: 'info', DIRECTED: 'info', PREFLIGHT_READY: 'accent',
-  RENDERING: 'warn', HAS_TAKES: '', SELECTED: 'ok', CONTINUITY_COMMITTED: 'ok', LOCKED: 'accent',
-};
+const userStatus = computed(() => (sShot.value ? SHOT_USER_STATUS[sShot.value.status] : 'draft'));
 
 const EXTERNAL_TASKS = [
   { id: 'Plan Shot', key: 'plan_shot' },
@@ -79,9 +78,23 @@ function latestPrompt() {
   return sDetail.value?.prompts.at(-1) ?? null;
 }
 
-function statusOf(shot: { status: string }): string {
-  return SHOT_STATUS_LABEL[shot.status as keyof typeof SHOT_STATUS_LABEL] ?? shot.status;
+function mediaOf(assetId: string): MediaAsset | null {
+  return media.value.find((m) => m.id === assetId) ?? null;
 }
+
+function thumbOf(assetId: string): string | null {
+  const m = mediaOf(assetId);
+  if (!m) return null;
+  if (m.kind === 'image') return `/api/media/${m.id}`;
+  if (m.posterPath) return fileUrl(m.posterPath);
+  return null;
+}
+
+/** First-frame binding preview for the empty stage. */
+const firstFrameThumb = computed(() => {
+  const b = sDetail.value?.bindings.find((x) => x.roles.includes('first_frame'));
+  return b ? thumbOf(b.assetId) : null;
+});
 
 async function loadMedia() {
   media.value = await get<MediaAsset[]>('/api/assets/media');
@@ -89,7 +102,6 @@ async function loadMedia() {
 
 /** Run an AI action as a background job; poll until done; return result. */
 async function runAi(action: string, body: Record<string, unknown>): Promise<unknown> {
-  aiError.value = '';
   const key = `${action}:${JSON.stringify(body).slice(0, 40)}`;
   const res = await post<{ jobId: string; status: string }>(`/api/ai/actions/${action}`, body);
   aiJobs.value[key] = res.jobId;
@@ -108,60 +120,82 @@ async function runAi(action: string, body: Record<string, unknown>): Promise<unk
   throw new Error('AI job timeout');
 }
 
+const aiBusy = computed(() => Object.keys(aiJobs.value).length > 0);
+
+async function guarded(fn: () => Promise<unknown>, okMsg?: string) {
+  try {
+    await fn();
+    if (okMsg) toasts.push({ kind: 'ok', text: okMsg });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 async function aiSuggest(section: string) {
   const body: Record<string, unknown> = { shotId };
   const action = section === 'full' ? 'plan_shot' : section === 'camera' ? 'improve_camera' : section === 'performance' ? 'improve_performance' : 'plan_shot';
-  if (section === 'reality') {
-    aiResults.value.reality = await runAi('reality_check', body);
-    notice.value = 'Reality check 结果见下方';
-    return;
-  }
-  const result = await runAi(action, body);
-  const plan = (result as { plan?: DirectorPlan })?.plan;
-  if (plan) {
-    await s.savePlan(plan, 'builtin_ai');
-    notice.value = `AI 建议已生成（${action}），已保存为新 DirectorPlan 版本 — 可继续手工调整`;
-  } else {
-    notice.value = 'AI 未返回可用的计划';
-  }
+  await guarded(async () => {
+    if (section === 'reality') {
+      aiResults.value.reality = await runAi('reality_check', body);
+      toasts.push({ kind: 'info', text: 'Reality check 完成，结果见计划分区下方' });
+      return;
+    }
+    const result = await runAi(action, body);
+    const plan = (result as { plan?: DirectorPlan })?.plan;
+    if (plan) {
+      await s.savePlan(plan, 'builtin_ai');
+      toasts.push({ kind: 'ok', text: `AI 建议已保存为新 DirectorPlan 版本（${action}），可继续手工调整` });
+    } else {
+      toasts.push({ kind: 'err', text: 'AI 未返回可用的计划' });
+    }
+  });
 }
 
 async function aiCompile() {
-  const result = await runAi('compile_prompt', { shotId });
-  const text = (result as { text?: string })?.text;
-  if (text) {
-    const pv = await s.importRawPrompt(text, sShot.value?.h3Mode ?? 't2va');
-    void pv;
-    notice.value = 'AI 编译的 Prompt 已保存为新 PromptVersion';
-  }
+  await guarded(async () => {
+    const result = await runAi('compile_prompt', { shotId });
+    const text = (result as { text?: string })?.text;
+    if (text) {
+      await s.importRawPrompt(text, sShot.value?.h3Mode ?? 't2va');
+      toasts.push({ kind: 'ok', text: 'AI 编译的 Prompt 已保存为新 PromptVersion' });
+    }
+  });
 }
 
 async function aiDiagnose(takeId: string) {
-  const result = await runAi('diagnose_take', { takeId });
-  aiResults.value[`diag:${takeId}`] = result;
-  notice.value = '诊断完成，见 Take 区域下方';
+  await guarded(async () => {
+    const result = await runAi('diagnose_take', { takeId });
+    aiResults.value[`diag:${takeId}`] = result;
+    toasts.push({ kind: 'ok', text: 'AI 诊断完成，见 Take 区域下方' });
+  });
 }
 
 async function aiPreflight(_promptId: string) {
   const prompt = latestPrompt();
   if (!prompt) return null;
-  const result = await runAi('continuity_check', { shotId });
-  aiResults.value.continuity = result;
-  const report = await s.runPreflight(prompt.id);
-  notice.value = 'Basic Preflight 已运行；AI 语义检查结果见 Preflight 面板下方';
+  let report: Awaited<ReturnType<typeof s.runPreflight>> | null = null;
+  await guarded(async () => {
+    const result = await runAi('continuity_check', { shotId });
+    aiResults.value.continuity = result;
+    report = await s.runPreflight(prompt.id);
+    toasts.push({ kind: 'ok', text: 'Basic Preflight + AI 语义检查完成' });
+  });
   return report;
 }
 
 async function doRender(promptId: string) {
-  const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds);
-  notice.value = `已提交渲染任务 ${job.id} — 状态会实时推送，见渲染队列`;
+  await guarded(async () => {
+    const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds);
+    toasts.push({ kind: 'ok', text: `渲染任务 ${job.id} 已提交 — 状态实时推送` });
+  });
 }
 
 async function copyContextPackage() {
-  const pkg = await s.contextPackage(externalTask.value);
-  externalPkg.value = pkg;
-  await navigator.clipboard.writeText(JSON.stringify(pkg, null, 2));
-  notice.value = 'Context Package 已复制到剪贴板（未调用任何 API）';
+  await guarded(async () => {
+    const pkg = await s.contextPackage(externalTask.value);
+    await navigator.clipboard.writeText(JSON.stringify(pkg, null, 2));
+    toasts.push({ kind: 'ok', text: 'Context Package 已复制到剪贴板（未调用任何 API）' });
+  });
 }
 
 async function parsePaste() {
@@ -171,9 +205,10 @@ async function parsePaste() {
 async function applyParsed() {
   if (parseResult.value?.plan) {
     await s.savePlan(parseResult.value.plan, 'external_ai');
-    notice.value = '外部 AI 的 DirectorPlan 已应用为新版本';
+    toasts.push({ kind: 'ok', text: '外部 AI 的 DirectorPlan 已应用为新版本' });
     parseResult.value = null;
     pasteText.value = '';
+    tab.value = 'plan';
   }
 }
 
@@ -182,10 +217,10 @@ async function applyParsed() {
 async function inheritContinuity() {
   const actual = sDetail.value?.continuityLatest?.visualActual?.state;
   if (!actual) {
-    notice.value = '没有已提交的 Actual Continuity 可继承（先在上一镜头 Select + Commit）';
+    toasts.push({ kind: 'err', text: '没有已提交的 Actual Continuity 可继承（先在上一镜头 Select + Commit）' });
     return;
   }
-  const plan = sPlan.value?.plan ? structuredClone(sPlan.value.plan) : emptyPlan();
+  const plan = sPlan.value?.plan ? structuredClone(toRaw(sPlan.value.plan)) : emptyPlan();
   const parts = [
     actual.location && `location: ${actual.location}`,
     actual.timeOfDay && `time: ${actual.timeOfDay}`,
@@ -199,13 +234,13 @@ async function inheritContinuity() {
   ].filter(Boolean);
   plan.continuity.plannedStartState = `Inherited from previous shot actual: ${parts.join('; ')}`;
   await s.savePlan(plan);
-  notice.value = '已将上一镜头的 Actual Continuity 继承为本镜头的 Planned Start State（新计划版本）';
+  toasts.push({ kind: 'ok', text: '已将上一镜头的 Actual Continuity 继承为本镜头的 Planned Start State' });
 }
 
 async function useTakeFrame(takeId: string, which: 'first' | 'last') {
   const target = media.value.find((m) => m.label.includes(`Take ${takeId} ${which} frame`));
   if (!target) {
-    notice.value = `未找到 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧资产`;
+    toasts.push({ kind: 'err', text: `未找到 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧资产` });
     return;
   }
   await s.addBinding({
@@ -213,8 +248,30 @@ async function useTakeFrame(takeId: string, which: 'first' | 'last') {
     roles: ['first_frame'],
     label: `Frame bridge from ${takeId} (${which === 'last' ? 'last' : 'first'} frame)`,
   });
-  notice.value = `已把 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧绑定为本镜头的 First Frame`;
+  toasts.push({ kind: 'ok', text: `已把 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧绑定为本镜头的 First Frame` });
 }
+
+/** Drag an asset from the rail library onto the shot → bind as reference. */
+async function quickBind(assetId: string, roles: string[]) {
+  const m = mediaOf(assetId);
+  await s.addBinding({ assetId, roles, label: m?.label });
+  toasts.push({ kind: 'ok', text: `已绑定 ${m?.label ?? assetId}（${roles.join(', ')}）` });
+}
+
+// --- unsaved-plan guards -----------------------------------------------------
+function beforeUnload(e: BeforeUnloadEvent) {
+  if (planDirty.value) e.preventDefault();
+}
+
+onBeforeRouteLeave(async () => {
+  if (!planDirty.value) return true;
+  return confirmDialog({
+    title: '放弃未保存的修改？',
+    message: 'DirectorPlan 有未保存的编辑。离开此页面将丢弃这些修改（不会生成新版本）。',
+    confirmLabel: '放弃修改',
+    danger: true,
+  });
+});
 
 let off: (() => void) | null = null;
 
@@ -222,13 +279,25 @@ onMounted(async () => {
   await s.load();
   await loadMedia();
   await project.refreshProviders();
+  window.addEventListener('beforeunload', beforeUnload);
   off = subscribeEvents((e) => {
     if (e.type === 'take.created' || e.type === 'shot.updated' || e.type === 'render.job.succeeded') void s.load();
     if (e.type === 'take.created') void loadMedia();
   });
 });
 
-onUnmounted(() => off?.());
+onUnmounted(() => {
+  off?.();
+  window.removeEventListener('beforeunload', beforeUnload);
+});
+
+const TABS = [
+  { id: 'plan', cn: '导演计划', en: 'DirectorPlan' },
+  { id: 'references', cn: '参考绑定', en: 'References' },
+  { id: 'prompt', cn: 'Prompt', en: 'Prompt' },
+  { id: 'preflight', cn: '预检渲染', en: 'Preflight' },
+  { id: 'external', cn: '外部 AI', en: 'External AI' },
+] as const;
 </script>
 
 <template>
@@ -236,80 +305,141 @@ onUnmounted(() => off?.());
   <div v-else-if="sError" class="page badge bad">{{ sError }}</div>
 
   <div v-else-if="sShot" class="desk">
-    <!-- Header -->
+    <!-- Breadcrumb + header -->
+    <div class="crumbs">
+      <router-link to="/shots" class="crumb-link">← Shotboard</router-link>
+      <span class="muted">/</span>
+      <span class="mono muted">{{ sShot.id }}</span>
+    </div>
     <header class="desk-header">
       <div class="row wrap">
-        <h1 class="mono">{{ sShot.id }}</h1>
-        <h1>{{ sShot.title }}</h1>
-        <span :class="['badge', STATUS_BADGE[sShot.status]]">{{ statusOf(sShot) }}</span>
-        <span class="badge accent">{{ H3_MODE_LABEL[sShot.h3Mode ?? 't2va'] }}</span>
-        <span class="badge">{{ sShot.durationSeconds }}s</span>
-        <span class="badge">{{ sShot.aspectRatio }}</span>
-        <span class="badge">{{ sShot.shotFunction }}</span>
-        <span v-if="sShot.sequenceId" class="badge info">{{ sDetail?.sequences.find((x) => x.id === sShot?.sequenceId)?.title }}</span>
+        <h1>{{ sShot.title || sShot.id }}</h1>
+        <span :class="['st', `st-${userStatus}`]" :title="`内部状态：${SHOT_STATUS_LABEL[sShot.status]}（${sShot.status}）`">
+          <i />{{ SHOT_USER_STATUS_LABEL[userStatus] }}
+        </span>
+        <span class="badge accent no-dot">{{ H3_MODE_LABEL[sShot.h3Mode ?? 't2va'] }}</span>
+        <span class="badge no-dot">{{ sShot.durationSeconds }}s</span>
+        <span class="badge no-dot">{{ sShot.aspectRatio }}</span>
+        <span class="badge no-dot">{{ sShot.shotFunction }}</span>
+        <span v-if="sShot.sequenceId" class="badge info no-dot">{{ sDetail?.sequences.find((x) => x.id === sShot?.sequenceId)?.title }}</span>
       </div>
       <div class="row controls">
-        <select v-model="sShot.h3Mode" class="mode-select" @change="s.updateShot({ h3Mode: sShot?.h3Mode ?? 't2va' })">
-          <option v-for="m in availableModes" :key="m" :value="m">{{ m.toUpperCase() }}</option>
-        </select>
-        <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" title="时长" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
-        <select v-model="sShot.storyBeatId" class="beat-select" @change="s.updateShot({ storyBeatId: sShot?.storyBeatId })">
-          <option :value="null">— StoryBeat —</option>
-          <option v-for="b in sDetail?.beats ?? []" :key="b.id" :value="b.id">{{ b.title }}</option>
-        </select>
-        <select v-model="sShot.primaryCharacterId" @change="s.updateShot({ primaryCharacterId: sShot?.primaryCharacterId })">
-          <option :value="null">— 主角色 —</option>
-          <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'character') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
-        </select>
-        <select v-model="sShot.sceneId" @change="s.updateShot({ sceneId: sShot?.sceneId })">
-          <option :value="null">— 场景 —</option>
-          <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'scene') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
-        </select>
+        <label class="ctl">
+          <span class="ctl-label">H3 Mode</span>
+          <select v-model="sShot.h3Mode" @change="s.updateShot({ h3Mode: sShot?.h3Mode ?? 't2va' })">
+            <option v-for="m in availableModes" :key="m" :value="m">{{ m.toUpperCase() }}</option>
+          </select>
+        </label>
+        <label class="ctl">
+          <span class="ctl-label">时长</span>
+          <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
+        </label>
+        <label class="ctl">
+          <span class="ctl-label">StoryBeat</span>
+          <select v-model="sShot.storyBeatId" @change="s.updateShot({ storyBeatId: sShot?.storyBeatId })">
+            <option :value="null">— 未关联 —</option>
+            <option v-for="b in sDetail?.beats ?? []" :key="b.id" :value="b.id">{{ b.title }}</option>
+          </select>
+        </label>
+        <label class="ctl">
+          <span class="ctl-label">主角色</span>
+          <select v-model="sShot.primaryCharacterId" @change="s.updateShot({ primaryCharacterId: sShot?.primaryCharacterId })">
+            <option :value="null">— 未设定 —</option>
+            <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'character') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
+          </select>
+        </label>
+        <label class="ctl">
+          <span class="ctl-label">场景</span>
+          <select v-model="sShot.sceneId" @change="s.updateShot({ sceneId: sShot?.sceneId })">
+            <option :value="null">— 未设定 —</option>
+            <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'scene') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
+          </select>
+        </label>
       </div>
-      <p v-if="notice" class="notice">{{ notice }}</p>
     </header>
 
     <!-- Three-column core -->
     <div class="core">
       <!-- Assets rail -->
-      <aside class="rail panel">
-        <div class="panel-title">Assets / 需求</div>
-        <div class="panel-body col">
-          <div v-for="r in sDetail?.requirements ?? []" :key="r.kind" class="row">
-            <span :class="['badge', r.level === 'ok' ? 'ok' : r.level === 'required' ? 'bad' : 'muted']">
-              {{ r.level === 'ok' ? '✓' : r.level === 'required' ? '⚠' : '○' }} {{ r.label }}
-            </span>
-            <span class="muted">{{ r.detail }}</span>
+      <aside class="rail">
+        <div class="panel">
+          <div class="panel-title">资产需求</div>
+          <div class="panel-body col">
+            <div v-for="r in sDetail?.requirements ?? []" :key="r.kind" class="req-row">
+              <span :class="['badge', r.level === 'ok' ? 'ok' : r.level === 'required' ? 'bad' : 'no-dot muted']">
+                {{ r.level === 'ok' ? '✓' : r.level === 'required' ? '⚠' : '' }} {{ r.label }}
+              </span>
+              <div class="muted req-detail">{{ r.detail }}</div>
+            </div>
+            <router-link to="/assets" class="rail-link">＋ 去资产库导入 / 建状态</router-link>
           </div>
-          <div class="sep" />
-          <div class="muted">
-            <div class="row"><span class="status-dot" style="background: var(--ok)"></span>已提交 Actual Continuity</div>
-            <div class="row"><span class="status-dot" style="background: var(--info)"></span>Planned Continuity</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title spread">
+            <span>已绑定参考</span>
+            <button class="sm ghost" @click="tab = 'references'">管理 →</button>
           </div>
-          <div v-if="sDetail?.continuityLatest?.visualActual?.state" class="muted mono state-box">
-            {{ JSON.stringify(sDetail.continuityLatest.visualActual.state, null, 1).slice(0, 500) }}
+          <div class="panel-body col">
+            <div v-if="!sDetail?.bindings.length" class="muted">未绑定（T2VA 不需要；I2VA/FL2VA 需要首帧）</div>
+            <div v-for="b in sDetail?.bindings ?? []" :key="b.id" class="ref-card">
+              <div class="ref-thumb">
+                <img v-if="thumbOf(b.assetId)" :src="thumbOf(b.assetId)!" :alt="b.label" />
+                <span v-else class="mono muted">{{ b.type === 'audio' ? '♪' : '▶' }}</span>
+              </div>
+              <div class="ref-meta">
+                <div class="ref-label" :title="b.label">{{ b.label || b.id }}</div>
+                <div class="ref-roles">{{ b.roles.join(' · ') }}</div>
+              </div>
+            </div>
           </div>
-          <button class="sm" @click="tab = 'plan'">编辑计划连续性 →</button>
-          <button class="sm" :disabled="!sDetail?.continuityLatest?.visualActual?.state" @click="inheritContinuity">
-            继承上一镜头 Actual → Planned
-          </button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">连续性</div>
+          <div class="panel-body col">
+            <div class="row"><span class="status-dot" :style="{ background: sDetail?.continuityLatest?.visualActual?.state ? 'var(--ok)' : 'var(--line-2)' }"></span><span class="muted">Actual（已提交）</span></div>
+            <div class="row"><span class="status-dot" :style="{ background: sPlan?.plan.continuity.plannedStartState ? 'var(--info)' : 'var(--line-2)' }"></span><span class="muted">Planned（计划）</span></div>
+            <div v-if="sDetail?.continuityLatest?.visualActual?.state" class="muted mono state-box">
+              {{ JSON.stringify(sDetail.continuityLatest.visualActual.state, null, 1).slice(0, 500) }}
+            </div>
+            <button class="sm" @click="tab = 'plan'">编辑计划连续性 →</button>
+            <button class="sm" :disabled="!sDetail?.continuityLatest?.visualActual?.state" @click="inheritContinuity">
+              继承上一镜头 Actual → Planned
+            </button>
+          </div>
         </div>
       </aside>
 
       <!-- Stage -->
       <section class="stage panel">
-        <div class="panel-title">Stage / Preview</div>
+        <div class="panel-title spread">
+          <span>Stage / 导演监视器</span>
+          <span v-if="sSelected" class="badge ok no-dot">SELECTED {{ sSelected.id }}</span>
+        </div>
         <div class="panel-body">
           <VideoPlayer
             v-if="sSelected"
             :src="takeVideoUrl(sSelected.id)"
-            :poster="sSelected.posterPath ? `/api/file/${encodeURIComponent(sSelected.posterPath)}` : undefined"
+            :poster="sSelected.posterPath ? fileUrl(sSelected.posterPath) : undefined"
             :label="`Selected take ${sSelected.id}`"
+            :max-height="520"
           />
-          <div v-else class="empty-stage muted">还没有 Selected Take。<br />下方 Take 区域选择后这里播放。</div>
+          <div v-else class="empty-stage">
+            <img v-if="firstFrameThumb" :src="firstFrameThumb" class="ff-preview" alt="first frame" />
+            <div class="empty-stage-text">
+              <template v-if="(sDetail?.takes.length ?? 0) > 0">
+                已有 {{ sDetail?.takes.length }} 条 Take，<b>待选片</b>。<br />在下方 Takes 区域选片后，这里播放 Selected Take。
+              </template>
+              <template v-else>
+                舞台待命。<br />
+                <span class="muted">导演计划 → Prompt → 预检 → 渲染，第一条 Take 将出现在这里。</span>
+              </template>
+            </div>
+          </div>
           <div v-if="sSelected" class="muted selected-info">
-            当前 Selected：{{ sSelected.id }} · {{ sSelected.duration.toFixed(1) }}s
-            <button class="sm" @click="s.rejectTake(sSelected.id)">取消选择</button>
+            当前 Selected：<span class="mono">{{ sSelected.id }}</span> · {{ sSelected.duration.toFixed(1) }}s
+            <button class="sm ghost" @click="guarded(() => s.rejectTake(sSelected!.id), '已取消选择')">取消选择</button>
           </div>
         </div>
       </section>
@@ -317,49 +447,56 @@ onUnmounted(() => off?.());
       <!-- Inspector -->
       <section class="inspector panel">
         <div class="tabs">
-          <button v-for="t in ([{ id: 'plan', label: 'DirectorPlan' }, { id: 'references', label: 'References' }, { id: 'prompt', label: 'Prompt' }, { id: 'preflight', label: 'Preflight' }, { id: 'external', label: 'External AI' }] as const)" :key="t.id" :class="['tab', { active: tab === t.id }]" @click="tab = t.id">
-            {{ t.label }}
+          <button v-for="t in TABS" :key="t.id" :class="['tab', { active: tab === t.id }]" @click="tab = t.id">
+            {{ t.cn }}
+            <span v-if="t.id === 'plan' && planDirty" class="dirty-dot" title="未保存">●</span>
           </button>
         </div>
 
-        <div v-if="tab === 'plan'" class="tab-body">
+        <!-- keep-alive via v-show: unsaved drafts survive tab switches -->
+        <div v-show="tab === 'plan'" class="tab-body">
           <PlanEditor
             :plan="sPlan?.plan ?? { ...emptyPlan(), version: 0 }"
             :ai-enabled="aiEnabled"
+            :ai-busy="aiBusy"
             :on-ai-suggest="aiSuggest"
-            @save="(p: DirectorPlan) => s.savePlan(p)"
+            @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), 'DirectorPlan 已保存为新版本')"
             @paste="tab = 'external'"
+            @dirty-change="(d: boolean) => (planDirty = d)"
           />
         </div>
 
-        <div v-else-if="tab === 'references'" class="tab-body">
+        <div v-show="tab === 'references'" class="tab-body">
           <ReferencesPanel
             :bindings="sDetail?.bindings ?? []"
             :media="media"
-            :on-add="s.addBinding"
+            :on-add="(input) => guarded(() => s.addBinding(input), '已绑定参考')"
             :on-update="s.updateBinding"
-            :on-remove="s.removeBinding"
+            :on-remove="(id: string) => guarded(() => s.removeBinding(id), '已移除绑定')"
           />
         </div>
 
-        <div v-else-if="tab === 'prompt'" class="tab-body">
+        <div v-show="tab === 'prompt'" class="tab-body">
           <PromptPanel
             :prompts="sDetail?.prompts ?? []"
             :current-mode="sShot.h3Mode"
+            :available-modes="availableModes"
             :ai-enabled="aiEnabled"
-            :on-compile="(m: string) => s.compilePrompt(m)"
-            :on-raw="(t: string, m: string) => s.importRawPrompt(t, m)"
+            :on-compile="(m: string) => guarded(() => s.compilePrompt(m), 'Prompt 已编译为新版本')"
+            :on-raw="(t: string, m: string) => guarded(() => s.importRawPrompt(t, m), 'Raw Prompt 已导入')"
             :on-ai-compile="aiCompile"
           />
         </div>
 
-        <div v-else-if="tab === 'preflight'" class="tab-body">
+        <div v-show="tab === 'preflight'" class="tab-body">
           <PreflightPanel
             :reports="sDetail?.preflights ?? []"
             :prompt="latestPrompt()"
-            :provider-id="providerId"
+            :provider="activeProvider"
+            :duration-seconds="sShot.durationSeconds"
+            :aspect-ratio="sShot.aspectRatio"
             :ai-enabled="aiEnabled"
-            :on-basic="(pid: string) => s.runPreflight(pid)"
+            :on-basic="(pid: string) => guarded(() => s.runPreflight(pid), 'Basic Preflight 完成') as never"
             :on-ai-check="aiPreflight"
             :on-render="doRender"
           />
@@ -369,7 +506,7 @@ onUnmounted(() => off?.());
           </div>
         </div>
 
-        <div v-else-if="tab === 'external'" class="tab-body">
+        <div v-show="tab === 'external'" class="tab-body">
           <div class="col">
             <label class="field">
               任务模板
@@ -378,7 +515,9 @@ onUnmounted(() => off?.());
               </select>
             </label>
             <p class="muted">Copy Context Package = 只复制上下文，不调用任何 API。把内容丢给 ChatGPT / Claude 等外部 AI。</p>
-            <button class="primary sm" @click="copyContextPackage">Copy Context Package</button>
+            <div>
+              <button class="primary sm" @click="copyContextPackage">Copy Context Package</button>
+            </div>
 
             <div class="sep" />
             <label class="field">
@@ -387,64 +526,84 @@ onUnmounted(() => off?.());
             </label>
             <div class="row">
               <button class="sm" @click="parsePaste">解析预览</button>
-              <button v-if="parseResult?.ok" class="primary sm" @click="applyParsed">Preview Diff → Apply</button>
+              <button v-if="parseResult?.ok" class="primary sm" @click="applyParsed">应用为新版本</button>
             </div>
-            <div v-if="parseResult && !parseResult.ok" class="badge bad">解析失败：{{ parseResult.error }} — 可保存为 Note 手工搬字段</div>
-            <div v-if="parseResult?.ok" class="muted">解析成功，Apply 后作为新 DirectorPlan 版本保存。</div>
+            <div v-if="parseResult && !parseResult.ok" class="badge bad">解析失败：{{ parseResult.error }} — 可手工搬字段</div>
+            <div v-if="parseResult?.ok" class="muted">解析成功，应用后作为新 DirectorPlan 版本保存。</div>
           </div>
         </div>
       </section>
     </div>
 
     <!-- Takes -->
-    <section class="takes-section">
-      <div class="panel-title">Takes / Render Variants</div>
-      <div class="panel-body">
-        <TakesPanel
-          :takes="sDetail?.takes ?? []"
-          :selected-take-id="sSelected?.id ?? null"
-          :ai-enabled="aiEnabled"
-          :actual-state="sDetail?.continuityLatest?.visualActual?.state ?? null"
-          :on-select="s.selectTake"
-          :on-reject="s.rejectTake"
-          :on-update="s.updateTake"
-          :on-ai-diagnose="aiDiagnose"
-          :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"
-          :on-use-last-frame="(tid: string) => useTakeFrame(tid, 'last')"
-          :on-use-first-frame="(tid: string) => useTakeFrame(tid, 'first')"
-        />
-        <div v-for="(v, k) in aiResults" :key="k" v-show="k.startsWith('diag:')" class="panel ai-note">
-          <div class="panel-title">AI Diagnosis — {{ k }}</div>
-          <pre class="ai-text">{{ aiText(v) }}</pre>
-        </div>
+    <section class="takes-section filmstrip">
+      <div class="spread takes-head">
+        <h2>Takes <span class="muted">{{ sDetail?.takes.length ?? 0 }} 条</span></h2>
+        <span class="muted">Shot 是意图，Take 是生成结果（PRD §6）</span>
+      </div>
+      <TakesPanel
+        :takes="sDetail?.takes ?? []"
+        :selected-take-id="sSelected?.id ?? null"
+        :ai-enabled="aiEnabled"
+        :actual-state="sDetail?.continuityLatest?.visualActual?.state ?? null"
+        :entities="sDetail?.entities ?? []"
+        :character-states="sDetail?.characterStates ?? []"
+        :on-select="s.selectTake"
+        :on-reject="s.rejectTake"
+        :on-update="s.updateTake"
+        :on-ai-diagnose="aiDiagnose"
+        :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"
+        :on-use-last-frame="(tid: string) => useTakeFrame(tid, 'last')"
+        :on-use-first-frame="(tid: string) => useTakeFrame(tid, 'first')"
+      />
+      <div v-for="(v, k) in aiResults" :key="k" v-show="k.startsWith('diag:')" class="panel ai-note">
+        <div class="panel-title">AI 诊断 — {{ k }}</div>
+        <pre class="ai-text">{{ aiText(v) }}</pre>
       </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.desk { padding: 20px 28px 40px; max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-.desk-header { display: flex; flex-direction: column; gap: 8px; }
-.desk-header h1 { font-size: 19px; margin: 0; }
+.desk { padding: 18px 28px 40px; max-width: 1720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.crumbs { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.crumb-link { color: var(--text-2); }
+.crumb-link:hover { color: var(--accent); text-decoration: none; }
+.desk-header { display: flex; flex-direction: column; gap: 10px; }
+.desk-header h1 { font-size: 22px; margin: 0; font-family: var(--serif); letter-spacing: 0.01em; }
 .wrap { flex-wrap: wrap; }
-.mode-select { width: 100px; }
-.dur { width: 64px; }
-.beat-select { max-width: 180px; }
-.controls { flex-wrap: wrap; }
-.controls select, .controls input { max-width: 180px; }
-.notice { margin: 0; color: var(--accent); font-size: 13px; }
-.core { display: grid; grid-template-columns: 200px 1fr 420px; gap: 14px; align-items: start; }
-@media (max-width: 1200px) { .core { grid-template-columns: 1fr; } }
-.rail { position: sticky; top: 66px; }
-.stage .empty-stage { padding: 60px 0; text-align: center; color: var(--text-3); }
+.controls { flex-wrap: wrap; gap: 10px; }
+.ctl { display: flex; align-items: center; gap: 6px; }
+.ctl-label { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.ctl select, .ctl input { max-width: 150px; }
+.dur { width: 60px; }
+.core { display: grid; grid-template-columns: 264px 1fr 460px; gap: 14px; align-items: start; }
+@media (max-width: 1280px) { .core { grid-template-columns: 1fr; } }
+.rail { position: sticky; top: 66px; display: flex; flex-direction: column; gap: 12px; }
+.req-row { display: flex; flex-direction: column; gap: 2px; }
+.req-detail { padding-left: 4px; }
+.rail-link { font-size: 12px; }
+.ref-card { display: flex; gap: 8px; align-items: center; }
+.ref-thumb { width: 56px; height: 38px; flex: none; border-radius: 5px; overflow: hidden; background: var(--inset); display: flex; align-items: center; justify-content: center; }
+.ref-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ref-meta { min-width: 0; }
+.ref-label { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-roles { font-size: 10.5px; color: var(--text-3); }
+.stage .empty-stage { min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-2); text-align: center; }
+.ff-preview { max-height: 260px; max-width: 80%; border-radius: var(--radius-sm); box-shadow: var(--shadow-2); opacity: 0.85; }
+.empty-stage-text { line-height: 1.7; }
 .selected-info { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.tabs { display: flex; border-bottom: 1px solid var(--line); }
-.tab { border: none; background: transparent; border-radius: 0; border-bottom: 2px solid transparent; color: var(--text-2); padding: 10px 12px; }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.tab-body { padding: 12px; max-height: calc(100vh - 240px); overflow: auto; }
-.takes-section { border-top: 1px solid var(--line); padding-top: 10px; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 6px; }
+.tab { border: none; background: transparent; border-radius: 0; border-bottom: 2px solid transparent; color: var(--text-2); padding: 11px 13px; box-shadow: none; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.dirty-dot { color: var(--warn); font-size: 9px; margin-left: 3px; }
+.tab-body { padding: 14px; max-height: calc(100vh - 230px); overflow: auto; }
+.takes-section { border-top: 1px solid var(--line); margin-top: 4px; }
+.takes-head { padding: 4px 2px 10px; }
+.takes-head h2 { margin: 0; font-size: 16px; font-family: var(--serif); }
 .sep { border-top: 1px dashed var(--line); margin: 8px 0; }
-.state-box { font-size: 11px; white-space: pre-wrap; background: var(--bg); border-radius: 4px; padding: 6px; max-height: 180px; overflow: auto; }
+.state-box { font-size: 11px; white-space: pre-wrap; background: var(--inset); border-radius: 4px; padding: 6px; max-height: 180px; overflow: auto; }
 .ai-note { margin-top: 10px; }
 .ai-text { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; padding: 10px; margin: 0; color: var(--text-2); }
 </style>

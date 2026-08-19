@@ -3,7 +3,7 @@
 // BEFORE mounting the routes sub-app, so they always run first.
 
 import { serveStatic } from '@hono/node-server/serve-static';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Hono } from 'hono';
 import { hostGuard, originGuard, sessionGuard } from './security.js';
@@ -30,7 +30,7 @@ export function buildApp(services: AppServices, webDist: string | null): Hono<{ 
       const path = c.req.path;
       if (path.startsWith('/api/')) return next();
       const filePath = join(webDist, path === '/' ? 'index.html' : path.slice(1));
-      if (existsSync(filePath)) {
+      if (existsSync(filePath) && statSync(filePath).isFile()) {
         return serveStatic({ root: webDist })(c, next);
       }
       const html = readFileSync(join(webDist, 'index.html'));

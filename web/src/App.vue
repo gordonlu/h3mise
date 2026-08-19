@@ -2,18 +2,25 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import { useProjectStore } from './stores/project';
 import { useRenderStore } from './stores/render';
+import { useToastStore } from './stores/toast';
+import { useThemeStore } from './stores/theme';
 import { subscribeEvents, get } from './api/client';
 import RenderQueueDrawer from './components/RenderQueueDrawer.vue';
+import ToastHost from './components/ToastHost.vue';
+import ConfirmHost from './components/ConfirmHost.vue';
 import type { AppEvent, RenderJob } from '@h3mise/shared';
 
 const project = useProjectStore();
 const render = useRenderStore();
+const toasts = useToastStore();
+const theme = useThemeStore();
 const health = ref<{ ffmpeg: { available: boolean }; runningHubConfigured: boolean; aiConfigured: boolean } | null>(null);
 let off: (() => void) | null = null;
 
+// PRD §4 top-level IA: Story / Shots / Assets / Timeline.
 const nav = [
-  { to: '/shots', label: 'Shots' },
   { to: '/story', label: 'Story' },
+  { to: '/shots', label: 'Shots' },
   { to: '/assets', label: 'Assets' },
   { to: '/timeline', label: 'Timeline' },
 ];
@@ -22,7 +29,29 @@ function activeJobCount(): number {
   return render.jobs.filter((j: RenderJob) => ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)).length;
 }
 
+/** Global SSE → toast notifications (render lifecycle, takes, continuity). */
+function notify(e: AppEvent) {
+  switch (e.type) {
+    case 'render.job.succeeded':
+      toasts.push({ kind: 'ok', text: `渲染成功，Take 已就绪（Shot ${e.shotId}）`, actionLabel: '去选片', actionTo: `/shots/${e.shotId}` });
+      break;
+    case 'render.job.failed':
+      toasts.push({ kind: 'err', text: `渲染失败（Shot ${e.shotId}）：${e.error?.slice(0, 120) ?? ''}`, actionLabel: '查看', actionTo: `/shots/${e.shotId}` });
+      break;
+    case 'take.selected':
+      toasts.push({ kind: 'info', text: `已选片（Shot ${e.shotId}）` });
+      break;
+    case 'continuity.committed':
+      toasts.push({ kind: 'ok', text: `${e.scope === 'visual' ? '视觉' : '叙事'}连续性已提交（Shot ${e.shotId}）` });
+      break;
+    case 'render.job.created':
+      toasts.push({ kind: 'info', text: `渲染任务已创建（Shot ${e.shotId}）` });
+      break;
+  }
+}
+
 onMounted(async () => {
+  theme.apply();
   await project.bootstrap();
   await render.refresh();
   try {
@@ -32,6 +61,7 @@ onMounted(async () => {
   }
   off = subscribeEvents((e: AppEvent) => {
     render.onEvent(e.type, e as unknown as Record<string, unknown>);
+    notify(e);
     if (e.type === 'take.created' || e.type === 'shot.updated' || e.type === 'continuity.committed' || e.type === 'project.updated') {
       void project.refreshCurrent();
     }
@@ -67,17 +97,21 @@ onUnmounted(() => off?.());
           RH {{ health?.runningHubConfigured ? '✓' : '—' }}
         </span>
         <span
-          :class="['badge', health?.aiConfigured ? 'ok' : 'muted']"
+          :class="['badge', health?.aiConfigured ? 'ok' : 'no-dot muted']"
           :title="health?.aiConfigured ? 'built-in AI configured' : 'built-in AI not configured (AI-optional)'"
         >
           AI {{ health?.aiConfigured ? '✓' : '—' }}
         </span>
         <button class="ghost" @click="render.drawerOpen = true">
           渲染队列
-          <span v-if="activeJobCount()" class="badge accent">{{ activeJobCount() }}</span>
+          <span v-if="activeJobCount()" class="badge accent no-dot">{{ activeJobCount() }}</span>
         </button>
         <router-link to="/settings" class="ghost-link">Settings</router-link>
       </template>
+
+      <button class="ghost theme-toggle" :title="theme.theme === 'light' ? '切换到深色主题' : '切换到浅色主题'" @click="theme.toggle()">
+        {{ theme.theme === 'light' ? '☾' : '☀' }}
+      </button>
     </header>
 
     <main class="main">
@@ -85,6 +119,8 @@ onUnmounted(() => off?.());
     </main>
 
     <RenderQueueDrawer v-if="render.drawerOpen" @close="render.drawerOpen = false" />
+    <ToastHost />
+    <ConfirmHost />
   </div>
 </template>
 
@@ -95,39 +131,42 @@ onUnmounted(() => off?.());
   align-items: center;
   gap: 14px;
   padding: 0 18px;
-  height: 52px;
+  height: 54px;
   border-bottom: 1px solid var(--line);
-  background: rgba(17, 20, 24, 0.85);
-  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--bg-2) 86%, transparent);
+  backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
   z-index: 20;
 }
-.brand { display: flex; align-items: baseline; gap: 6px; text-decoration: none; }
+.brand { display: flex; align-items: baseline; gap: 7px; text-decoration: none; }
 .brand-mark {
   font-family: var(--mono);
   font-weight: 700;
-  font-size: 17px;
-  color: #201503;
-  background: linear-gradient(180deg, #f0b14e, var(--accent-2));
-  padding: 2px 7px;
-  border-radius: 6px;
+  font-size: 16px;
+  color: #241a05;
+  background: linear-gradient(160deg, var(--accent-bright), var(--accent-2));
+  padding: 2.5px 8px;
+  border-radius: 7px;
   letter-spacing: -0.5px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(138,95,13,0.35);
 }
-.brand-name { font-size: 17px; font-weight: 600; color: var(--text); }
+.brand-name { font-size: 18px; font-weight: 600; color: var(--text); font-family: var(--serif); letter-spacing: 0.02em; }
 .nav { display: flex; gap: 4px; }
 .nav-item {
-  padding: 6px 13px;
-  border-radius: 6px;
+  padding: 6px 14px;
+  border-radius: 7px;
   color: var(--text-2);
   font-size: 13.5px;
   text-decoration: none;
+  transition: all 0.13s;
 }
-.nav-item:hover { color: var(--text); background: var(--bg-3); text-decoration: none; }
-.nav-item.active { color: var(--accent); background: var(--bg-3); }
+.nav-item:hover { color: var(--text); background: var(--accent-soft); text-decoration: none; }
+.nav-item.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .spacer { flex: 1; }
 .project-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ghost-link { color: var(--text-2); font-size: 13px; padding: 6px 8px; border-radius: 6px; }
-.ghost-link:hover { color: var(--text); background: var(--bg-3); text-decoration: none; }
+.ghost-link { color: var(--text-2); font-size: 13px; padding: 6px 9px; border-radius: 7px; }
+.ghost-link:hover { color: var(--text); background: var(--accent-soft); text-decoration: none; }
+.theme-toggle { font-size: 15px; padding: 5px 9px; }
 .main { flex: 1; overflow: auto; }
 </style>

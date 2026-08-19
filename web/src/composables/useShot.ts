@@ -98,7 +98,7 @@ export function useShot(shotId: string) {
     await load();
   }
 
-  async function updateTake(takeId: string, patchData: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes'>>) {
+  async function updateTake(takeId: string, patchData: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes' | 'status'>>) {
     await patch(`/api/takes/${takeId}`, patchData);
     await load();
   }

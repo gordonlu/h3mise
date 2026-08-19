@@ -3,6 +3,7 @@
 > 依据：`.doc/MiniMax-H3-Director-Workstation-PRD-v0.4.md`
 > 完成日期：2026-08-19（首个开发周期）
 > 结论：**PRD §49 v0.1 必须实现清单全部交付**；PRD §52 四类硬标准与 §51 验收场景 A–E 全部脚本化验证通过。
+> 第二轮（同日）：**UI 打磨轮** — 浅色主题（默认）+ 深色主题切换、非极简精致化设计系统、P0/P1/P2 review 项全修复，浏览器冒烟无 console 错误。
 
 ---
 
@@ -162,7 +163,11 @@ Origin 守卫 403 ✅ · Session 守卫 401 ✅ · Host 守卫 403 ✅ · 路径
 
 ### 构建与启动
 
-`pnpm --filter @h3mise/server build`（tsc）✅ · `pnpm --filter @h3mise/web build`（Vite）✅ · `node server/dist/index.js` 生产启动 + SPA 托管 ✅ · Vite dev 代理 ✅
+`pnpm --filter @h3mise/server build`（tsc）✅ · `pnpm --filter @h3mise/web build`（Vite）✅ · `node server/dist/index.js` 生产启动 + SPA 托管 ✅ · Vite dev 代理 ✅ · `pnpm -r typecheck` 三包全绿 ✅
+
+### UI 冒烟（headless Chrome，UI 打磨轮新增）
+
+7 页面（projects / story / shots / assets / timeline / settings / shot desk）全部加载：**零 console error、零失败请求**；主题 light→dark 切换并持久化；shot 详情 5 个 tab 渲染；takes 面板 / A-B 播放器 / 左栏资产需求齐全；timeline 12 clip 比例条带 + 点击 clip 出 trim 面板（入点/出点按钮）；assets 媒体 tab 67 缩略图；StoryPage Beat↔Shot 关联徽章。
 
 ---
 
@@ -190,7 +195,7 @@ pnpm dev                          # 并行：server :4789 + Vite :5173
    - 若字段映射需调整：Settings → 编辑 Profile（JSON），只影响适配器。
 2. **内置 AI 动作未在线验证** — `AI_BASE_URL / AI_API_KEY / AI_MODEL` 配置后可用（plan_shot / improve_camera / improve_performance / reality_check / continuity_check / compile_prompt / diagnose_take / story_to_beats / beats_to_shots / auto_director）。未配置时优雅降级为 External AI 模板，全产品可用。
 3. **内置 Director Skills 为 starter 版** — 三份 skill 文档为精简指引，可后续扩充（`server/skills/` 或 `~/.h3mise/skills/` 覆盖）。
-4. **浏览器端 UI 交互未被真实浏览器 E2E 覆盖** — 沙箱环境 headless Chrome 的 fetch 被环境阻断；UI 的渲染挂载已验证，交互逻辑与 API 层通过服务端脚本全覆盖。
+4. **浏览器端 UI 交互测试为冒烟级** — headless Chrome 冒烟覆盖全部页面加载、主题切换、tab/trim 面板交互与 console 错误检查（零错误）；深路径交互（拖拽排序、A/B 同步播放、连续性表单）由服务端 e2e 脚本覆盖 API 层。
 5. **服务端暂无单元测试** — 现有验收为集成脚本（覆盖主干）；后续可补模块级测试。
 
 ---
@@ -221,8 +226,57 @@ server/src/
 web/src/
   pages/     # Projects Story Shots ShotPage(Desk) Assets Timeline Settings
   components/director/  # PlanEditor PromptPanel PreflightPanel TakesPanel ReferencesPanel
-  components/           # RenderQueueDrawer VideoPlayer
-  stores/ composables/ api/ router.ts style.css
+  components/           # RenderQueueDrawer VideoPlayer ToastHost ConfirmHost EmptyState
+  stores/    # project render toast confirm theme
+  composables/ api/ router.ts style.css
 scripts/     # 验收与运维脚本
 .doc/        # PRD + 本文档
 ```
+
+---
+
+## 9. UI 打磨轮（2026-08-19 第二轮）
+
+第一轮交付后对全部页面做了一轮 UI review（P0/P1/P2 分级），用户确认"全部修复 + 浅色主题 + 精致化（不做极简风）"。本轮成果：
+
+### 主题系统
+- **浅色为默认主题**（暖纸色调 `#ece6d8` 系），深色主题保留并细化（影院暗色）；
+- 顶栏 ☾/☀ 一键切换，`localStorage h3mise-theme` 持久化，刷新/重开保留；
+- `style.css` 全量重写为双主题设计系统：CSS token（颜色/圆角/阴影/字体栈）、纸感面板、层级按钮（primary/ghost/danger）、徽章、输入框、滚动条、kbd、toast、对话框、empty-state；
+- 字体栈：中文正文思源宋体 `var(--serif)` + 数字/编号 `var(--mono)`，精致化而非极简。
+
+### 基础设施
+- `stores/toast.ts` + `ToastHost.vue`：全局 toast（ok/err/info，可带 action 跳转），替代散落的 notice；
+- `stores/confirm.ts` + `ConfirmHost.vue`：promise 化确认对话框（Enter/Escape 快捷键），替代 `window.confirm`；
+- `EmptyState.vue`：各页统一空态（图标 + 标题 + 说明 + 可选行动按钮）；
+- `stores/theme.ts`；`api/client.ts` 新增 `fileUrl(relPath)`（poster/导出文件直链）。
+
+### 页面重写
+| 页面 | 关键改动 |
+|---|---|
+| ShotsPage | 5 态筛选（draft/ready/rendering/review/done）、搜索、新建/粘贴面板、卡片五态徽章 + 场景/主角 badge + 缺失资产行（⚠）+ Risk badge + 封面占位 |
+| ShotPage | tab 改 `v-show` 保活（草稿切 tab 不丢）、planDirty 守卫（路由离开 + beforeunload + 确认框）、面包屑、头部五态徽章（tooltip 显示内部态）、264px 左栏（资产需求/参考缩略图/连续性+继承按钮）、空态显示首帧预览 |
+| PlanEditor | 手风琴分区（默认只开 Intent，状态记忆）、中文主标签 + 英文副标签、dirty 实时检测 + 保存按钮态 |
+| TakesPanel | 按 Take 状态出主操作（candidate→选片/选片+提交/拒片；selected→提交连续性/取消；rejected→恢复/改选）、A/B 对比槽 + 同步播放（镜像守卫）、星级评分、失败标签折叠、S/R/A/B 快捷键、完整连续性提交表单（逐角色服装/发型/伤势/手持物 + CharacterState 下拉 + 载具状态） |
+| PreflightPanel | 成本预览面板（Provider/Mode/时长/画幅/分辨率 ×1 Take）、渲染主按钮、props 收敛 |
+| ReferencesPanel | 缩略图（图片直显 / 视频用 poster）、角色按组（帧/身份外观/运动/声音）、资产选择网格 |
+| PromptPanel | `availableModes` prop、按钮忙碌态、列表逆序、复制反馈 |
+| StoryPage | Beat↔Shot 关联徽章（从 `/api/shots` 按 storyBeatId 统计）+ 跳转链接、EmptyState |
+| AssetsPage | 视频卡片显示 poster 封面 + 抽帧按钮、confirmDialog、EmptyState、媒体导入拖拽区 |
+| TimelinePage | clip 条带按时长等比（14px/s）+ poster 缩略图 + 拖拽排序（HTML5 DnD）+ 点击出 trim 面板（播放器打点设入/出点）+ 转场选择 + 导出进度条；总时长用真实 Take 时长 |
+| ProjectsPage | confirmDialog + toast |
+| App.vue | 导航按 PRD §4 改为 Story/Shots/Assets/Timeline、主题切换按钮、挂 ToastHost/ConfirmHost、SSE→toast（渲染成功/失败可跳转、选片、连续性提交）、ffmpeg/RH/AI 状态徽章 |
+
+### 服务端配套
+- `/api/shots` 新增 `missing`（required 需求标签缺口）与 `risk`（最近 preflight 风险）；
+- 迁移 v2 `media-poster`：`media_assets.poster_path`，视频导入自动 ffmpeg 抽封面（失败不阻断）；`/api/file` 直链；
+- shared 新增 `SHOT_USER_STATUS`（10 内部态 → 5 用户态映射）+ `SHOT_USER_STATUS_LABEL`；
+- **修复**：`RunningHubAiAppProvider.name` 字段初始化器在构造函数前读取 `options.profile` 导致默认 runninghub 模式启动崩溃 → 改为 getter。
+
+### 修复的真实 bug（浏览器实测发现）
+1. `structuredClone` 克隆 Vue reactive 代理抛 `DataCloneError` → 4 处改用 `toRaw`（PlanEditor / TakesPanel / ShotPage）；
+2. `/assets` 前端路由 404：SPA fallback 对 `webDist/assets/`（构建产物目录）误走 serveStatic → `app.ts` 改为仅 `statSync().isFile()` 才静态服务；
+3. Vue 模板内联箭头函数不支持 TS 对象字面量类型注解 → 移除 `:on-add` 注解。
+
+### 验证
+`pnpm -r typecheck` 三包全绿 ✅ · web build ✅ · e2e-mock 全绿（渲染→选片→连续性→时间线→导出）✅ · headless Chrome 冒烟 7 页面零 console error / 零失败请求 ✅ · 主题切换持久化 ✅ · 默认 runninghub 模式启动不再崩溃 ✅

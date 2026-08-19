@@ -62,6 +62,11 @@ export function takeVideoUrl(takeId: string): string {
   return `/api/takes/${takeId}/video`;
 }
 
+/** Serve a project-relative file path (poster, frame, export) via the file API. */
+export function fileUrl(relPath: string): string {
+  return `/api/file/${encodeURIComponent(relPath)}`;
+}
+
 /** Subscribe to server events over SSE with auto-reconnect. */
 export function subscribeEvents(onEvent: (e: import('@h3mise/shared').AppEvent) => void): () => void {
   let es: EventSource | null = null;

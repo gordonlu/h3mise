@@ -119,6 +119,8 @@ export interface MediaAsset {
   width?: number;
   height?: number;
   durationSeconds?: number;
+  /** Poster frame (relative path) — auto-generated for video imports. */
+  posterPath?: string | null;
   source: 'import' | 'frame_extract' | 'render_download' | 'other';
   label: string;
   tags: string[];
@@ -209,6 +211,31 @@ export const SHOT_STATUS_LABEL: Record<ShotStatus, string> = {
   SELECTED: '已选片',
   CONTINUITY_COMMITTED: '连续性已提交',
   LOCKED: '已锁定',
+};
+
+/** PRD §9 user-visible states (5) — the internal 10-state machine (§10) is
+ * folded into these for display; internal states remain available as detail. */
+export type ShotUserStatus = 'draft' | 'ready' | 'rendering' | 'review' | 'done';
+
+export const SHOT_USER_STATUS: Record<ShotStatus, ShotUserStatus> = {
+  DRAFT: 'draft',
+  PLANNED: 'ready',
+  ASSETS_READY: 'ready',
+  DIRECTED: 'ready',
+  PREFLIGHT_READY: 'ready',
+  RENDERING: 'rendering',
+  HAS_TAKES: 'review',
+  SELECTED: 'done',
+  CONTINUITY_COMMITTED: 'done',
+  LOCKED: 'done',
+};
+
+export const SHOT_USER_STATUS_LABEL: Record<ShotUserStatus, string> = {
+  draft: '待导演',
+  ready: '准备生成',
+  rendering: '生成中',
+  review: '待选片',
+  done: '已完成',
 };
 
 export interface Shot {

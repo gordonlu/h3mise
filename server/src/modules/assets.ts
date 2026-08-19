@@ -166,6 +166,7 @@ interface MediaRow {
   width: number | null;
   height: number | null;
   duration_seconds: number | null;
+  poster_path: string | null;
   source: string;
   label: string;
   tags_json: string;
@@ -182,6 +183,7 @@ export function mediaFromRow(r: MediaRow): MediaAsset {
     width: r.width ?? undefined,
     height: r.height ?? undefined,
     durationSeconds: r.duration_seconds ?? undefined,
+    posterPath: r.poster_path ?? null,
     source: r.source as MediaAsset['source'],
     label: r.label,
     tags: jget<string[]>(r.tags_json, []),
@@ -204,12 +206,12 @@ export function getMedia(p: ProjectContext, id: string): MediaAsset {
 
 export function insertMedia(
   p: ProjectContext,
-  input: { id?: string; kind: MediaKind; fileName: string; mimeType: string; sizeBytes: number; width?: number; height?: number; durationSeconds?: number; source?: MediaAsset['source']; label?: string; tags?: string[] },
+  input: { id?: string; kind: MediaKind; fileName: string; mimeType: string; sizeBytes: number; width?: number; height?: number; durationSeconds?: number; posterPath?: string | null; source?: MediaAsset['source']; label?: string; tags?: string[] },
 ): MediaAsset {
   const id = input.id ?? nextId(p.db, 'media');
   const now = new Date().toISOString();
   p.db.run(
-    'INSERT INTO media_assets (id, kind, file_name, mime_type, size_bytes, width, height, duration_seconds, source, label, tags_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO media_assets (id, kind, file_name, mime_type, size_bytes, width, height, duration_seconds, poster_path, source, label, tags_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       id,
       input.kind,
@@ -219,12 +221,18 @@ export function insertMedia(
       input.width ?? null,
       input.height ?? null,
       input.durationSeconds ?? null,
+      input.posterPath ?? null,
       input.source ?? 'import',
       input.label ?? '',
       j(input.tags ?? []),
       now,
     ],
   );
+  return getMedia(p, id);
+}
+
+export function setMediaPoster(p: ProjectContext, id: string, posterPath: string | null): MediaAsset {
+  p.db.run('UPDATE media_assets SET poster_path = ? WHERE id = ?', [posterPath, id]);
   return getMedia(p, id);
 }
 

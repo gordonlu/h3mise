@@ -7,7 +7,7 @@ import type { MediaAsset, MediaKind } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
 import type { Ffmpeg } from '../ffmpeg.js';
-import { getMedia, insertMedia, listMedia } from './assets.js';
+import { getMedia, insertMedia, listMedia, setMediaPoster } from './assets.js';
 
 export type { MediaAsset, MediaKind };
 
@@ -58,7 +58,7 @@ async function probeAndInsert(
       /* ignore */
     }
   }
-  return insertMedia(p, {
+  const asset = insertMedia(p, {
     kind,
     fileName: input.relPath,
     mimeType: input.mimeType,
@@ -69,6 +69,17 @@ async function probeAndInsert(
     source: input.source,
     label: input.label ?? basename(input.relPath),
   });
+  // Auto-generate a poster frame for video assets so the library has thumbnails.
+  if (kind === 'video') {
+    try {
+      const posterRel = join('assets', `${asset.id}-poster.jpg`);
+      await ffmpeg.poster(p.resolveProjectPath(input.relPath), p.resolveProjectPath(posterRel), Math.min(0.1, (duration ?? 1) / 2));
+      return setMediaPoster(p, asset.id, posterRel);
+    } catch {
+      // poster is best-effort; the asset is already registered
+    }
+  }
+  return asset;
 }
 
 /** Save an uploaded buffer into the project assets dir and register it. */

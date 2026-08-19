@@ -15,7 +15,6 @@ dist/
 .h3mise-home/
 *.h3studio/
 .rh-research/
-.doc/
 
 # --- misc ---
 .DS_Store

@@ -144,12 +144,11 @@ onUnmounted(() => off?.());
   font-family: var(--mono);
   font-weight: 700;
   font-size: 16px;
-  color: #241a05;
-  background: linear-gradient(160deg, var(--accent-bright), var(--accent-2));
+  color: #fff;
+  background: var(--accent);
   padding: 2.5px 8px;
   border-radius: 7px;
   letter-spacing: -0.5px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(138,95,13,0.35);
 }
 .brand-name { font-size: 18px; font-weight: 600; color: var(--text); font-family: var(--serif); letter-spacing: 0.02em; }
 .nav { display: flex; gap: 4px; }
@@ -161,12 +160,17 @@ onUnmounted(() => off?.());
   text-decoration: none;
   transition: all 0.13s;
 }
-.nav-item:hover { color: var(--text); background: var(--accent-soft); text-decoration: none; }
-.nav-item.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.nav-item:hover { color: var(--text); background: var(--bg-subtle); text-decoration: none; }
+.nav-item.active {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 .spacer { flex: 1; }
 .project-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ghost-link { color: var(--text-2); font-size: 13px; padding: 6px 9px; border-radius: 7px; }
-.ghost-link:hover { color: var(--text); background: var(--accent-soft); text-decoration: none; }
+.ghost-link:hover { color: var(--text); background: var(--bg-subtle); text-decoration: none; }
 .theme-toggle { font-size: 15px; padding: 5px 9px; }
 .main { flex: 1; overflow: auto; }
 </style>

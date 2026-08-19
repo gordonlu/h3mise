@@ -213,7 +213,7 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .create-panel { margin: 16px 0; }
 .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-top: 18px; }
 .card { display: block; text-decoration: none; color: inherit; overflow: hidden; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
-.card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-2); text-decoration: none; }
+.card:hover { border-color: var(--accent-line); transform: translateY(-2px); box-shadow: var(--shadow-2); text-decoration: none; }
 .cover { position: relative; height: 142px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
 .cover-idx { font-family: var(--mono); letter-spacing: 0.25em; color: var(--text-3); text-align: center; line-height: 1.8; font-size: 12px; }

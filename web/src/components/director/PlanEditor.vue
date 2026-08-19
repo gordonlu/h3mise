@@ -237,5 +237,5 @@ function save() {
 .f-label { display: flex; align-items: baseline; gap: 6px; }
 .f-en { color: var(--text-3); font-size: 10.5px; font-weight: 400; }
 .pulse { animation: savepulse 1.6s ease-in-out infinite; }
-@keyframes savepulse { 0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 6px rgba(138,95,13,0.35); } 50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 14px rgba(138,95,13,0.6); } }
+@keyframes savepulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 108, 55, 0.0); } 50% { box-shadow: 0 0 0 4px rgba(255, 108, 55, 0.18); } }
 </style>

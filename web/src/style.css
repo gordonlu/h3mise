@@ -1,5 +1,6 @@
-/* H3Mise design system — warm cinema palette, film-strip touches.
-   Themes: [data-theme="light"] (default, warm paper) / [data-theme="dark"]. */
+/* H3Mise design system — orange-white brand (H3Mise UI Color Standard).
+   Primary #FF6C37 accents a white / warm-neutral base; orange is a guide,
+   never a filler. Themes: [data-theme="light"] (default) / [data-theme="dark"]. */
 
 :root {
   --radius: 10px;
@@ -12,69 +13,122 @@
 /* ------------------------------------------------------------------ light */
 :root, [data-theme='light'] {
   color-scheme: light;
-  --bg: #ece6d8;
-  --bg-2: #f4efe3;
-  --bg-3: #faf7ee;
-  --bg-4: #ffffff;
-  --inset: #e9e2d0;
-  --line: #ddd2ba;
-  --line-2: #c7b996;
-  --text: #2c2517;
-  --text-2: #6b5f47;
-  --text-3: #9a8c6d;
-  --accent: #a97a1c;
-  --accent-2: #8a5f0d;
-  --accent-bright: #d29f33;
-  --accent-soft: rgba(169, 122, 28, 0.12);
-  --ok: #2e7d52;
-  --ok-soft: rgba(46, 125, 82, 0.12);
-  --warn: #b3620e;
-  --warn-soft: rgba(179, 98, 14, 0.12);
-  --bad: #b8402f;
-  --bad-soft: rgba(184, 64, 47, 0.12);
-  --info: #2f6da3;
-  --info-soft: rgba(47, 109, 163, 0.12);
-  --violet: #6d5cae;
-  --violet-soft: rgba(109, 92, 174, 0.13);
-  --shadow-1: 0 1px 2px rgba(84, 62, 21, 0.07), 0 2px 8px rgba(84, 62, 21, 0.06);
-  --shadow-2: 0 2px 6px rgba(84, 62, 21, 0.09), 0 10px 28px rgba(84, 62, 21, 0.11);
-  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  --glow: radial-gradient(1100px 480px at 72% -12%, rgba(210, 159, 51, 0.13), transparent 62%);
-  --sprocket: rgba(120, 100, 60, 0.16);
+
+  /* Brand orange */
+  --orange-50: #FFF3EF;
+  --orange-100: #FFE9E1;
+  --orange-200: #FFD3C3;
+  --orange-300: #FFB69B;
+  --orange-400: #FF9169;
+  --orange-500: #FF6C37;
+  --orange-600: #E05F30;
+  --orange-700: #BF5129;
+  --orange-800: #A64624;
+
+  --accent: #FF6C37;
+  --accent-2: #E05F30;            /* hover / pressed-adjacent */
+  --accent-3: #BF5129;            /* pressed */
+  --accent-bright: #FF9169;       /* secondary accent / selected border */
+  --accent-text: #D1592D;         /* orange text on soft/neutral backgrounds */
+  --accent-soft: #FFF3EF;         /* orange-50 */
+  --accent-soft-2: #FFE9E1;       /* orange-100 */
+  --accent-line: #FFD3C3;         /* orange-200 labels/light borders */
+  --accent-disabled: #FFD3C3;
+
+  /* Background — white is the body, warm neutral supports it */
+  --bg: #FAFAF9;
+  --bg-2: #FFFFFF;
+  --bg-3: #FFFFFF;
+  --bg-4: #FFFFFF;
+  --bg-subtle: #F7F6F4;
+  --bg-muted: #F2F1EF;
+  --inset: #F2F1EF;
+
+  /* Border */
+  --line: #ECEAE7;
+  --line-2: #DEDCD8;
+  --line-3: #CFCBC6;
+
+  /* Text — never pure black */
+  --text: #1F1D1B;
+  --text-2: #66615D;
+  --text-3: #918B86;
+  --text-disabled: #B8B2AD;
+
+  /* Semantic status — low saturation so states stay distinguishable */
+  --ok: #2E9B67;
+  --ok-soft: #EDF8F2;
+  --warn: #C98519;
+  --warn-soft: #FFF7E8;
+  --bad: #D84C4C;
+  --bad-soft: #FFF0F0;
+  --info: #4E78A8;
+  --info-soft: #EFF5FB;
+  --violet: #7C6BB5;
+  --violet-soft: #F1EEFA;
+
+  --focus-ring: 0 0 0 3px rgba(255, 108, 55, 0.18);
+  --shadow-1: 0 1px 2px rgba(31, 29, 27, 0.04), 0 2px 8px rgba(31, 29, 27, 0.05);
+  --shadow-2: 0 8px 24px rgba(31, 29, 27, 0.08);
+  --shadow-modal: 0 16px 48px rgba(31, 29, 27, 0.14);
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --glow: radial-gradient(1100px 480px at 72% -12%, rgba(255, 108, 55, 0.05), transparent 62%);
+  --sprocket: rgba(31, 29, 27, 0.10);
+  --scrollbar: #D8D4D0;
+  --scrollbar-hover: #BDB7B2;
 }
 
 /* ------------------------------------------------------------------- dark */
 [data-theme='dark'] {
   color-scheme: dark;
+
+  --accent: #FF6C37;
+  --accent-2: #FF9169;            /* hover reads lighter on dark */
+  --accent-3: #E05F30;
+  --accent-bright: #FF9169;
+  --accent-text: #FF9169;
+  --accent-soft: rgba(255, 108, 55, 0.16);
+  --accent-soft-2: rgba(255, 108, 55, 0.24);
+  --accent-line: rgba(255, 108, 55, 0.45);
+  --accent-disabled: #6b3a22;
+
   --bg: #0b0d10;
   --bg-2: #111418;
   --bg-3: #171b21;
   --bg-4: #1f242d;
+  --bg-subtle: #14171c;
+  --bg-muted: #1a1e25;
   --inset: #0c0e12;
+
   --line: #2a313b;
   --line-2: #3d4653;
+  --line-3: #4d5868;
+
   --text: #eae7e0;
   --text-2: #a9aeb6;
   --text-3: #70767f;
-  --accent: #e5a63b;
-  --accent-2: #c87f1e;
-  --accent-bright: #f0bd55;
-  --accent-soft: rgba(229, 166, 59, 0.13);
+  --text-disabled: #4d545e;
+
   --ok: #4caf7d;
   --ok-soft: rgba(76, 175, 125, 0.14);
-  --warn: #e08a3c;
-  --warn-soft: rgba(224, 138, 60, 0.15);
-  --bad: #d9635c;
-  --bad-soft: rgba(217, 99, 92, 0.14);
-  --info: #5b9bd5;
-  --info-soft: rgba(91, 155, 213, 0.15);
+  --warn: #e0a03c;
+  --warn-soft: rgba(224, 160, 60, 0.15);
+  --bad: #e5736b;
+  --bad-soft: rgba(217, 99, 92, 0.16);
+  --info: #6fa8dc;
+  --info-soft: rgba(91, 155, 213, 0.16);
   --violet: #9b8ce8;
   --violet-soft: rgba(155, 140, 232, 0.16);
+
+  --focus-ring: 0 0 0 3px rgba(255, 108, 55, 0.28);
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.25);
-  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.38);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.42);
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.5);
   --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --glow: radial-gradient(1200px 500px at 70% -10%, rgba(229, 166, 59, 0.06), transparent 60%);
-  --sprocket: rgba(200, 180, 140, 0.10);
+  --glow: radial-gradient(1100px 480px at 72% -12%, rgba(255, 108, 55, 0.06), transparent 62%);
+  --sprocket: rgba(220, 210, 200, 0.10);
+  --scrollbar: #3d4653;
+  --scrollbar-hover: #4d5868;
 }
 
 * { box-sizing: border-box; }
@@ -90,9 +144,9 @@ body {
   transition: background 0.25s, color 0.25s;
 }
 
-::selection { background: var(--accent-soft); }
+::selection { background: var(--accent-soft-2); }
 
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--accent-text); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* ---------------------------------------------------------------- buttons */
@@ -100,35 +154,40 @@ button {
   font-family: inherit;
   font-size: 13px;
   color: var(--text);
-  background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  padding: 6px 13px;
+  padding: 9px 16px;
   cursor: pointer;
-  box-shadow: var(--inset-hi), 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s, transform 0.1s, box-shadow 0.15s;
+  box-shadow: var(--inset-hi);
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s, transform 0.1s;
 }
-button:hover { border-color: var(--accent); color: var(--accent); }
+button:hover { background: var(--accent-soft); border-color: var(--accent-line); }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
-button.primary {
-  background: linear-gradient(180deg, var(--accent-bright), var(--accent-2));
-  color: #241a05;
-  border-color: var(--accent-2);
-  font-weight: 600;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(138, 95, 13, 0.35);
-}
-[data-theme='dark'] button.primary { color: #201503; }
-button.primary:hover { filter: brightness(1.07); color: #241a05; }
-button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-button.danger:hover { background: var(--bad-soft); border-color: var(--bad); }
-button.ghost { background: transparent; border-color: transparent; color: var(--text-2); box-shadow: none; }
-button.ghost:hover { color: var(--text); background: var(--accent-soft); border-color: transparent; }
-button.sm { padding: 3px 9px; font-size: 12px; }
 
-:is(button, a, input, select, textarea, .tab, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* Primary — clean solid orange, no gradient / glow / heavy shadow */
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+  box-shadow: none;
+}
+button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+button.primary:active { background: var(--accent-3); border-color: var(--accent-3); }
+button.primary:disabled { background: var(--accent-disabled); border-color: var(--accent-disabled); color: rgba(255, 255, 255, 0.9); }
+
+button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+button.danger:hover { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+button.ghost { background: transparent; border-color: transparent; color: var(--text-2); box-shadow: none; }
+button.ghost:hover { background: var(--bg-subtle); border-color: transparent; color: var(--text); }
+button.sm { padding: 5px 11px; font-size: 12px; }
+
+:is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 /* ----------------------------------------------------------------- inputs */
@@ -137,18 +196,18 @@ input, select, textarea {
   font-size: 13px;
   color: var(--text);
   background: var(--bg-4);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
+  padding: 8px 12px;
   outline: none;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: inset 0 1px 2px rgba(31, 29, 27, 0.03);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 input::placeholder, textarea::placeholder { color: var(--text-3); }
-input:hover, select:hover, textarea:hover { border-color: var(--line-2); }
+input:hover, select:hover, textarea:hover { border-color: var(--line-3); }
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(255, 108, 55, 0.12);
 }
 textarea { resize: vertical; line-height: 1.5; }
 label.field { display: block; margin-bottom: 10px; font-size: 12px; font-weight: 500; color: var(--text-2); }
@@ -156,10 +215,10 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
 
 /* ----------------------------------------------------------------- panels */
 .panel {
-  background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
+  background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-1), var(--inset-hi);
+  box-shadow: var(--shadow-1);
 }
 .panel-title {
   position: relative;
@@ -181,7 +240,7 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
   width: 42px;
   height: 2px;
   border-radius: 1px;
-  background: linear-gradient(90deg, var(--accent), transparent);
+  background: var(--accent);
 }
 .panel-body { padding: 14px; }
 
@@ -196,7 +255,7 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
   border-radius: 20px;
   border: 1px solid var(--line-2);
   color: var(--text-2);
-  background: var(--bg-3);
+  background: var(--bg-subtle);
   white-space: nowrap;
 }
 .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.55; }
@@ -205,15 +264,16 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
 .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 42%, transparent); background: var(--warn-soft); }
 .badge.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 42%, transparent); background: var(--bad-soft); }
 .badge.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 42%, transparent); background: var(--info-soft); }
-.badge.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); }
+.badge.accent { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-soft); }
 .badge.violet { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 45%, transparent); background: var(--violet-soft); }
 
-/* user-visible shot status (PRD §9) */
+/* user-visible shot status (PRD §9): draft neutral / ready info /
+   rendering orange / review violet / done green */
 .st { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 2.5px 10px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
 .st i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.st-draft { color: var(--text-2); border-color: var(--line-2); background: var(--bg-3); }
+.st-draft { color: var(--text-2); border-color: var(--line-2); background: var(--bg-subtle); }
 .st-ready { color: var(--info); border-color: color-mix(in srgb, var(--info) 42%, transparent); background: var(--info-soft); }
-.st-rendering { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-soft); }
+.st-rendering { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); }
 .st-rendering i { animation: pulse 1.1s ease-in-out infinite; }
 .st-review { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 45%, transparent); background: var(--violet-soft); }
 .st-done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 42%, transparent); background: var(--ok-soft); }
@@ -231,8 +291,8 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
 .grid { display: grid; gap: 10px; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-3); border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ------------------------------------------------------------------- tags */
@@ -241,16 +301,16 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 5px;
-  background: var(--bg-4);
-  border: 1px solid var(--line);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
   color: var(--text-2);
   margin-right: 4px;
   margin-bottom: 4px;
   cursor: pointer;
   transition: all 0.12s;
 }
-.tag:hover { border-color: var(--accent); color: var(--accent); }
-.tag.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 500; }
+.tag:hover { border-color: var(--accent-line); color: var(--accent-text); }
+.tag.active { border-color: var(--accent-line); color: var(--accent-text); background: var(--accent-soft); font-weight: 500; }
 
 /* ------------------------------------------------------------- film strip */
 .filmstrip { position: relative; padding-top: 12px; padding-bottom: 12px; }
@@ -272,11 +332,11 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--text-2);
-  background: var(--bg-4);
+  background: var(--bg-subtle);
   border: 1px solid var(--line-2);
   border-bottom-width: 2px;
   border-radius: 4px;
-  padding: 1px 5px;
+  padding: 2px 6px;
 }
 
 /* ------------------------------------------------------------------ toast */
@@ -288,7 +348,7 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
   padding: 11px 14px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: var(--bg-4);
+  background: var(--bg-2);
   box-shadow: var(--shadow-2);
   font-size: 13px;
   animation: toast-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
@@ -302,7 +362,7 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
 .toast.info { border-left: 3px solid var(--info); }
 .toast.info .t-icon { color: var(--info); }
 .toast .t-body { flex: 1; min-width: 0; }
-.toast .t-action { color: var(--accent); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.toast .t-action { color: var(--accent-text); font-weight: 600; cursor: pointer; white-space: nowrap; }
 .toast .t-action:hover { text-decoration: underline; }
 .toast .t-close { color: var(--text-3); cursor: pointer; flex: none; }
 .toast .t-close:hover { color: var(--text); }
@@ -314,7 +374,7 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
 .dlg-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(30, 22, 8, 0.42);
+  background: rgba(31, 29, 27, 0.28);
   backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
@@ -325,10 +385,10 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
 .dlg {
   width: 420px;
   max-width: 92vw;
-  background: var(--bg-3);
+  background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--shadow-modal);
   animation: dlg-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.15);
 }
 .dlg-head { padding: 16px 18px 0; font-size: 15px; font-weight: 600; font-family: var(--serif); }
@@ -355,9 +415,9 @@ label.field > *:not(:first-child) { margin-top: 4px; display: block; width: 100%
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border: 1px solid var(--accent-line);
 }
 .empty-state .e-title { font-size: 14px; font-weight: 600; color: var(--text-2); }
 .empty-state .e-desc { font-size: 12.5px; max-width: 340px; line-height: 1.6; }

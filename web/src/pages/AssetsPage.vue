@@ -252,7 +252,7 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .page-sub { margin: 8px 0 14px; }
 .tabs { display: flex; gap: 4px; }
 .tab { border: none; background: transparent; color: var(--text-2); padding: 8px 13px; border-bottom: 2px solid transparent; border-radius: 0; box-shadow: none; }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab.active { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
 .create-row { margin-bottom: 12px; }
 .create-row input { flex: 1; }
 .kind-filter { margin-bottom: 6px; }

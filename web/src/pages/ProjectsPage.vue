@@ -137,7 +137,7 @@ h1 { font-size: 24px; margin: 0 0 4px; font-family: var(--serif); }
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.format-opt.on { border-color: var(--accent); background: rgba(229, 166, 59, 0.06); }
+.format-opt.on { border-color: var(--accent); background: var(--accent-soft); }
 .format-label { font-weight: 600; font-size: 13px; }
 .proj-row {
   display: flex;

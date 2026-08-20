@@ -340,7 +340,15 @@ export function buildRoutes(services: AppServices): App {
       references: intent.references,
       providerParams: intent.providerParams,
     };
-    const job = services.queue.submit({ projectId: ctx.meta.id, shotId, promptVersionId, provider: providerId, request, intentHash });
+    let job;
+    try {
+      job = services.queue.submit({ projectId: ctx.meta.id, shotId, promptVersionId, provider: providerId, request, intentHash });
+    } catch (e) {
+      if (e instanceof Error && /already active/.test(e.message)) {
+        return c.json({ error: e.message }, 409);
+      }
+      throw e;
+    }
     return c.json(job, 201);
   });
 

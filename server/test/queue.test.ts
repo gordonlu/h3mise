@@ -96,6 +96,34 @@ test('jobs live in the owning project DB and submit in the open project', async 
   pB.close();
 });
 
+test('submit rejects a duplicate active job for the same intent', async () => {
+  const { root, store } = await makeStore('queue');
+  roots.push(root);
+  const p = await makeProjectDetached(store, 'dupP');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  advanceTo(p, shotId, 'PREFLIGHT_READY');
+  const registry = makeRegistry(store.registry);
+  const queue = makeQueue(store, registry, 999_999);
+  const cur = await store.open(p.meta.id);
+  p.close();
+
+  const request = { provider: 'mock', aiAppId: 'x', mode: 't2va' as const, promptVersionId, durationSeconds: 1, aspectRatio: '16:9', references: [], providerParams: {} };
+  queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request, intentHash: 'same' });
+  // exact same intent while the first job is active -> rejected (no double cost)
+  assert.throws(() =>
+    queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request, intentHash: 'same' }),
+    /already active/,
+  );
+  // a DIFFERENT intent (changed duration) is allowed
+  const job2 = queue.submit({
+    projectId: p.meta.id, shotId, promptVersionId, provider: 'mock',
+    request: { ...request, durationSeconds: 2 }, intentHash: 'other',
+  });
+  assert.notEqual(job2.id, undefined);
+  queue.forgetProject(p.meta.id);
+  cur.close();
+});
+
 test('retry creates a NEW job and keeps the old failure record', async () => {
   const { root, store } = await makeStore('queue');
   roots.push(root);

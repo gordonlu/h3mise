@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, toRaw } from 'vue';
+import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useShot } from '../composables/useShot';
 import { useProjectStore } from '../stores/project';
@@ -354,6 +354,10 @@ onMounted(async () => {
     if (e.type === 'take.created') void loadMedia();
   });
 });
+
+// Deep links (?guide=…) switch tabs without remounting the page, so
+// unsaved editor drafts survive (v-show tab bodies stay alive).
+watch(() => route.query.guide, applyGuideQuery);
 
 onUnmounted(() => {
   off?.();

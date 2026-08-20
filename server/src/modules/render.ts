@@ -231,6 +231,15 @@ export class RenderQueue {
     if (input.projectId !== p.meta.id) throw new Error('render job must be created in the open project');
     const shot = getShot(p, input.shotId);
     const prompt = getPrompt(p, input.promptVersionId);
+    // Idempotency: the same intent already active for this shot is rejected —
+    // covers double-click, multi-tab, and network replay (no double cost).
+    const active = p.db.get<{ id: string; status: string }>(
+      `SELECT id, status FROM render_jobs WHERE shot_id = ? AND render_intent_hash = ? AND status IN (${ACTIVE_STATUSES.map(() => '?').join(',')}) ORDER BY created_at DESC LIMIT 1`,
+      [input.shotId, input.intentHash, ...ACTIVE_STATUSES],
+    );
+    if (active) {
+      throw new Error(`a render job for this exact intent is already active (${active.id}, ${active.status}) — wait for it to finish or change parameters`);
+    }
     const id = nextId(p.db, 'job');
     const now = new Date().toISOString();
     const dpvId = prompt.directorPlanVersionId;

@@ -106,18 +106,32 @@ onMounted(async () => {
     notify(e);
     if (e.type === 'take.created' || e.type === 'shot.updated' || e.type === 'continuity.committed' || e.type === 'project.updated') {
       void project.refreshCurrent();
-      void refreshProjectGuide();
+      void scheduleGuideRefresh();
     }
-    if (e.type.startsWith('render.job.') || e.type === 'take.selected') void refreshProjectGuide();
+    // Only terminal/milestone render events refresh the guide; polling
+    // status ticks (render.job.updated) are handled by the debounce.
+    if (e.type === 'render.job.created' || e.type === 'render.job.succeeded' || e.type === 'render.job.failed' || e.type === 'take.selected') {
+      void scheduleGuideRefresh();
+    }
   });
 });
 
+let guideTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleGuideRefresh() {
+  if (guideTimer) clearTimeout(guideTimer);
+  guideTimer = setTimeout(() => {
+    guideTimer = null;
+    void refreshProjectGuide();
+  }, 300);
+}
+
 onUnmounted(() => {
   off?.();
+  if (guideTimer) clearTimeout(guideTimer);
   document.removeEventListener('mousedown', onProjectsClickOutside);
 });
 
-watch(() => route.fullPath, () => void refreshProjectGuide());
+watch(() => route.path, () => void scheduleGuideRefresh());
 </script>
 
 <template>
@@ -186,7 +200,7 @@ watch(() => route.fullPath, () => void refreshProjectGuide());
     <ProjectGuideBar v-if="project.current" :summary="projectGuide" />
 
     <main class="main">
-      <router-view :key="$route.fullPath" />
+      <router-view :key="$route.path" />
     </main>
 
     <RenderQueueDrawer v-if="render.drawerOpen" @close="render.drawerOpen = false" />

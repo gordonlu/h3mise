@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import type { PreflightReport, PromptVersion, ProviderStatus } from '@h3mise/shared';
 import { H3_MODE_LABEL } from '@h3mise/shared';
 
@@ -16,6 +16,14 @@ const props = defineProps<{
 }>();
 
 const busy = ref('');
+const latestMatchingReport = computed(() => props.prompt
+  ? props.reports.find((report) => report.promptVersionId === props.prompt?.id) ?? null
+  : null);
+const canRender = computed(() => Boolean(latestMatchingReport.value && !latestMatchingReport.value.blocked));
+const providerSupportsPrompt = computed(() => props.prompt && Boolean(
+  props.provider?.capabilities?.supportedModes.includes(props.prompt.h3Mode),
+));
+const renderReady = computed(() => canRender.value && providerSupportsPrompt.value);
 
 async function run(kind: 'basic' | 'ai') {
   if (!props.prompt) return;
@@ -45,7 +53,7 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
 <template>
   <div class="col">
     <div class="row">
-      <button class="sm" :disabled="busy !== '' || !prompt" @click="run('basic')">Basic Check</button>
+      <button class="sm" :disabled="busy !== '' || !prompt" @click="run('basic')">运行生成检查</button>
       <button v-if="aiEnabled" class="sm" :disabled="busy !== '' || !prompt" @click="run('ai')">AI 语义检查</button>
       <span v-if="busy === 'basic'" class="muted">检查中…</span>
       <span v-if="busy === 'ai'" class="muted">AI 语义检查中…（后台任务）</span>
@@ -57,10 +65,10 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
       <div class="spread">
         <span class="muted mono">{{ r.id }} · {{ new Date(r.createdAt).toLocaleString() }}</span>
         <div class="row">
-          <span v-if="r.aiSemanticRun" class="badge info">AI semantic</span>
-          <span v-else class="muted">AI semantic checks: Not run</span>
-          <span :class="['badge', RISK_COLOR[r.risk]]">Risk: {{ r.risk }}</span>
-          <span :class="['badge', r.blocked ? 'bad' : 'ok']">{{ r.blocked ? 'BLOCKED' : 'READY' }}</span>
+          <span v-if="r.aiSemanticRun" class="badge info">已运行 AI 语义检查</span>
+          <span v-else class="muted">未运行 AI 语义检查</span>
+          <span :class="['badge', RISK_COLOR[r.risk]]">风险：{{ r.risk }}</span>
+          <span :class="['badge', r.blocked ? 'bad' : 'ok']">{{ r.blocked ? '未通过' : '可生成' }}</span>
         </div>
       </div>
       <div class="sections">
@@ -98,10 +106,10 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
       </div>
     </div>
 
-    <button class="primary render-btn" :disabled="busy !== '' || !prompt" @click="render">
-      {{ busy === 'render' ? '提交中…' : 'Generate / Render（RunningHub）' }}
+    <button class="primary render-btn" :disabled="busy !== '' || !prompt || !renderReady" @click="render">
+      {{ busy === 'render' ? '提交中…' : renderReady ? '生成视频 · 创建 1 个新 Take' : canRender && !providerSupportsPrompt ? '当前 Provider 不支持此模式' : '生成检查通过后可生成' }}
     </button>
-    <p class="muted">渲染前会强制重跑 Basic Preflight；BLOCKED 时不会提交，避免浪费生成费用。</p>
+    <p class="muted">点击后会显示最终参数确认；提交前还会强制重跑生成检查，未通过时不会产生生成任务。</p>
   </div>
 </template>
 

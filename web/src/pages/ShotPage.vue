@@ -16,6 +16,7 @@ import TakesPanel from '../components/director/TakesPanel.vue';
 import ReferencesPanel from '../components/director/ReferencesPanel.vue';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import GuideStepper from '../components/GuideStepper.vue';
+import WorkspacePanel from '../components/director/WorkspacePanel.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -39,7 +40,7 @@ const {
   error: sError,
 } = s;
 
-const tab = ref<'plan' | 'references' | 'prompt' | 'preflight' | 'external'>('plan');
+const tab = ref<'workspace' | 'plan' | 'references' | 'prompt' | 'preflight' | 'external'>('workspace');
 const media = ref<MediaAsset[]>([]);
 const aiJobs = ref<Record<string, string>>({}); // actionKey -> jobId
 const aiResults = ref<Record<string, unknown>>({});
@@ -237,9 +238,23 @@ async function aiPreflight(_promptId: string) {
 
 async function doRender(promptId: string) {
   await guarded(async () => {
+    const confirmed = await confirmDialog({
+      title: '确认生成 1 个新 Take？',
+      message: `${activeProvider.value?.name ?? '当前 Provider'} · ${H3_MODE_LABEL[sShot.value?.h3Mode ?? 't2va']} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'}。提交后将创建一次生成任务。`,
+      confirmLabel: '确认生成',
+    });
+    if (!confirmed) return;
     const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds);
     toasts.push({ kind: 'ok', text: `渲染任务 ${job.id} 已提交 — 状态实时推送` });
   });
+}
+
+function openWorkspaceTarget(target: 'plan' | 'references' | 'prompt' | 'preflight' | 'takes') {
+  if (target === 'takes') {
+    takesSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  tab.value = target;
 }
 
 async function copyContextPackage() {
@@ -346,10 +361,11 @@ onUnmounted(() => {
 });
 
 const TABS = [
+  { id: 'workspace', cn: '工作台', en: 'Workspace' },
   { id: 'plan', cn: '导演计划', en: 'DirectorPlan' },
-  { id: 'references', cn: '参考绑定', en: 'References' },
+  { id: 'references', cn: '参考素材', en: 'References' },
   { id: 'prompt', cn: 'Prompt', en: 'Prompt' },
-  { id: 'preflight', cn: '预检渲染', en: 'Preflight' },
+  { id: 'preflight', cn: '生成检查', en: 'Preflight' },
   { id: 'external', cn: '外部 AI', en: 'External AI' },
 ] as const;
 </script>
@@ -520,6 +536,26 @@ const TABS = [
         </div>
 
         <!-- keep-alive via v-show: unsaved drafts survive tab switches -->
+        <div v-show="tab === 'workspace'" class="tab-body workspace-body">
+          <WorkspacePanel
+            v-if="sDetail?.guide"
+            :shot="sShot"
+            :plan="sPlan"
+            :bindings="sDetail.bindings"
+            :requirements="sDetail.requirements"
+            :prompt="latestPrompt()"
+            :reports="sDetail.preflights"
+            :provider="activeProvider"
+            :takes="sDetail.takes"
+            :selected-take="sSelected"
+            :guide="sDetail.guide.state"
+            :next-action="sDetail.guide.nextAction"
+            :next-action-label="guideActionLabel"
+            @open="openWorkspaceTarget"
+            @action="openGuideAction"
+          />
+        </div>
+
         <div v-show="tab === 'plan'" class="tab-body">
           <PlanEditor
             :plan="sPlan?.plan ?? { ...emptyPlan(), version: 0 }"
@@ -651,8 +687,8 @@ const TABS = [
 .ctl select, .ctl input { max-width: 150px; }
 .dur { width: 60px; }
 .core { display: grid; grid-template-columns: 264px 1fr 460px; gap: 14px; align-items: start; }
-@media (max-width: 1280px) { .core { grid-template-columns: 1fr; } }
 .rail { position: sticky; top: 124px; display: flex; flex-direction: column; gap: 12px; }
+.stage, .inspector { min-width: 0; }
 .req-row { display: flex; flex-direction: column; gap: 2px; }
 .req-detail { padding-left: 4px; }
 .rail-link { font-size: 12px; }
@@ -667,11 +703,12 @@ const TABS = [
 .empty-stage-text { line-height: 1.7; }
 .selected-info { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 6px; }
-.tab { border: none; background: transparent; border-radius: 0; border-bottom: 2px solid transparent; color: var(--text-2); padding: 11px 13px; box-shadow: none; }
+.tab { border: none; background: transparent; border-radius: 0; border-bottom: 2px solid transparent; color: var(--text-2); padding: 11px 10px; box-shadow: none; white-space: nowrap; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
 .dirty-dot { color: var(--warn); font-size: 9px; margin-left: 3px; }
 .tab-body { padding: 14px; max-height: calc(100vh - 230px); overflow: auto; }
+.workspace-body { padding: 12px; }
 .takes-section { border-top: 1px solid var(--line); margin-top: 4px; }
 .takes-head { padding: 4px 2px 10px; }
 .takes-head h2 { margin: 0; font-size: 16px; font-family: var(--serif); }

@@ -42,6 +42,11 @@ async function openProject(id: string) {
   router.push('/shots');
 }
 
+async function continueProject(id: string, to = '/shots') {
+  await project.openProject(id);
+  router.push(to);
+}
+
 async function removeProject(id: string, title: string) {
   const ok = await confirmDialog({
     title: `删除项目「${title}」？`,
@@ -110,12 +115,16 @@ onMounted(() => project.refreshProjects());
                 <span class="badge">{{ p.format }}</span>
               </div>
               <div class="muted mono">{{ p.dirPath }}</div>
-              <div class="muted">
-                {{ p.shotCount ?? 0 }} Shots · {{ p.selectedTakeCount ?? 0 }} Selected Takes ·
-                {{ new Date(p.updatedAt).toLocaleString() }}
+              <div class="project-progress" role="progressbar" :aria-valuenow="p.guide?.selectedTakeCount ?? 0" :aria-valuemax="p.guide?.shotCount ?? 0">
+                <span :style="{ width: `${p.guide?.shotCount ? (p.guide.selectedTakeCount / p.guide.shotCount) * 100 : 0}%` }" />
+              </div>
+              <div class="muted">{{ p.guide?.selectedTakeCount ?? p.selectedTakeCount ?? 0 }} / {{ p.guide?.shotCount ?? p.shotCount ?? 0 }} Shots 已选片 · {{ new Date(p.updatedAt).toLocaleString() }}</div>
+              <div v-if="p.guide" class="resume-copy">
+                <span class="resume-label">当前需要</span>
+                <span>{{ p.guide.attention.title }}</span>
               </div>
             </div>
-            <button class="primary sm" @click="openProject(p.id)">打开</button>
+            <button class="primary sm" @click="continueProject(p.id, p.guide?.attention.to)">继续制作</button>
             <button class="danger sm" title="删除项目" @click="removeProject(p.id, p.title)">删除</button>
           </div>
         </div>
@@ -149,4 +158,8 @@ h1 { font-size: 24px; margin: 0 0 4px; font-family: var(--serif); }
 }
 .proj-row:hover { border-color: var(--line-2); }
 .proj-title { font-weight: 600; font-size: 14.5px; }
+.project-progress { height: 5px; margin: 8px 0 5px; overflow: hidden; border-radius: 999px; background: var(--bg-muted); }
+.project-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.2s ease; }
+.resume-copy { display: flex; gap: 7px; align-items: center; margin-top: 5px; color: var(--text-2); font-size: 12px; }
+.resume-label { color: var(--accent-text); font-weight: 700; }
 </style>

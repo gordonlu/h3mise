@@ -206,7 +206,7 @@ function save() {
         <span class="grow" />
         <button v-if="sec.ai && aiEnabled" class="sm ghost" :disabled="aiBusy" @click.stop="props.onAiSuggest(sec.key)">AI 建议</button>
       </div>
-      <div v-if="open.has(sec.key)" class="panel-body grid two">
+      <div v-if="open.has(sec.key)" class="panel-body grid two" :class="{ 'intent-grid': sec.key === 'intent' }">
         <label v-for="f in sec.fields" :key="f.path.join('.')" class="field">
           <span class="f-label">{{ f.cn }} <span class="f-en">{{ f.en }}</span></span>
           <select v-if="f.type === 'select'" :value="fieldValue(f.path)" @change="setField(f.path, ($event.target as HTMLSelectElement).value)">
@@ -226,7 +226,10 @@ function save() {
 
 <style scoped>
 .two { grid-template-columns: 1fr 1fr; }
-@media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+.intent-grid { align-items: stretch; }
+.intent-grid .field { display: grid; grid-template-rows: 34px 68px; gap: 6px; margin-bottom: 0; }
+.intent-grid .field > :is(input, select, textarea) { height: 68px; min-height: 68px; resize: none; }
+.intent-grid .field:last-child { grid-column: 1 / -1; }
 .editor-bar { position: sticky; top: 0; z-index: 5; background: var(--bg-2); padding: 4px 0 8px; }
 .section { overflow: hidden; }
 .sec-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; user-select: none; }

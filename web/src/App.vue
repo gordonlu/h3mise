@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useProjectStore } from './stores/project';
 import { useRenderStore } from './stores/render';
 import { useToastStore } from './stores/toast';
@@ -10,13 +11,17 @@ import RenderQueueDrawer from './components/RenderQueueDrawer.vue';
 import ToastHost from './components/ToastHost.vue';
 import ConfirmHost from './components/ConfirmHost.vue';
 import type { AppEvent, RenderJob } from '@h3mise/shared';
+import type { ProjectGuideSummary } from '@h3mise/shared';
+import ProjectGuideBar from './components/ProjectGuideBar.vue';
 
 const project = useProjectStore();
+const route = useRoute();
 const render = useRenderStore();
 const toasts = useToastStore();
 const theme = useThemeStore();
 const health = ref<{ ffmpeg: { available: boolean }; runningHubConfigured: boolean; aiConfigured: boolean } | null>(null);
 const projectsOpen = ref(false);
+const projectGuide = ref<ProjectGuideSummary | null>(null);
 const projectsRef = ref<HTMLElement | null>(null);
 let off: (() => void) | null = null;
 
@@ -39,9 +44,22 @@ async function switchProject(id: string) {
     await project.openProject(id);
     await project.refreshProjects();
     await render.refresh();
+    await refreshProjectGuide();
     toasts.push({ kind: 'ok', text: `已切换到项目：${project.current?.config.title ?? id}` });
   } catch (e) {
     toasts.push({ kind: 'err', text: `切换项目失败：${e instanceof Error ? e.message : e}` });
+  }
+}
+
+async function refreshProjectGuide() {
+  if (!project.current) {
+    projectGuide.value = null;
+    return;
+  }
+  try {
+    projectGuide.value = await get<ProjectGuideSummary>('/api/guide/project');
+  } catch {
+    projectGuide.value = null;
   }
 }
 
@@ -76,6 +94,7 @@ onMounted(async () => {
   theme.apply();
   await project.bootstrap();
   await render.refresh();
+  await refreshProjectGuide();
   try {
     health.value = await get('/api/health');
   } catch {
@@ -87,7 +106,9 @@ onMounted(async () => {
     notify(e);
     if (e.type === 'take.created' || e.type === 'shot.updated' || e.type === 'continuity.committed' || e.type === 'project.updated') {
       void project.refreshCurrent();
+      void refreshProjectGuide();
     }
+    if (e.type.startsWith('render.job.') || e.type === 'take.selected') void refreshProjectGuide();
   });
 });
 
@@ -95,6 +116,8 @@ onUnmounted(() => {
   off?.();
   document.removeEventListener('mousedown', onProjectsClickOutside);
 });
+
+watch(() => route.fullPath, () => void refreshProjectGuide());
 </script>
 
 <template>
@@ -160,8 +183,10 @@ onUnmounted(() => {
       </button>
     </header>
 
+    <ProjectGuideBar v-if="project.current" :summary="projectGuide" />
+
     <main class="main">
-      <router-view />
+      <router-view :key="$route.fullPath" />
     </main>
 
     <RenderQueueDrawer v-if="render.drawerOpen" @close="render.drawerOpen = false" />

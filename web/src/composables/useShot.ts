@@ -13,6 +13,8 @@ import type {
   Shot,
   Take,
   VisualContinuityState,
+  ShotGuideState,
+  NextAction,
 } from '@h3mise/shared';
 
 export interface ShotDetail {
@@ -35,6 +37,7 @@ export interface ShotDetail {
     visualPlanned: { state: VisualContinuityState | null } | null;
     narrative: unknown;
   } | null;
+  guide: { state: ShotGuideState; nextAction: NextAction };
 }
 
 export function useShot(shotId: string) {

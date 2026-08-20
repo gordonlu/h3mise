@@ -12,3 +12,4 @@ export * from './continuity.js';
 export * from './timeline.js';
 export * from './provider.js';
 export * from './events.js';
+export * from './guide.js';

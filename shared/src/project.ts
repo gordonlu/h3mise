@@ -24,6 +24,7 @@ export interface ProjectMeta {
   lastOpenedAt?: string;
   shotCount?: number;
   selectedTakeCount?: number;
+  guide?: import('./guide.js').ProjectGuideSummary;
 }
 
 // ---------------------------------------------------------------------------

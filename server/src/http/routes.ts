@@ -28,6 +28,7 @@ import * as continuityMod from '../modules/continuity.js';
 import * as timelineMod from '../modules/timeline.js';
 import * as mediaMod from '../modules/media.js';
 import * as aiActions from '../modules/ai-actions.js';
+import * as guideMod from '../modules/guide.js';
 import { serveMedia } from './media-route.js';
 
 export interface AppServices {
@@ -83,13 +84,14 @@ export function buildRoutes(services: AppServices): App {
     const meta = await services.store.list();
     const out = await Promise.all(
       meta.map(async (m) => {
-        let counts = { shotCount: 0, selectedTakeCount: 0 };
+        let counts = { shotCount: 0, selectedTakeCount: 0, guide: undefined as ReturnType<typeof guideMod.projectGuideSummary> | undefined };
         // openDetached never switches the current project (P0-1).
         let ctx: import('../project-store.js').ProjectContext | null = null;
         try {
           ctx = await services.store.openDetached(m.id);
           counts.shotCount = (ctx.db.get<{ n: number }>('SELECT COUNT(*) as n FROM shots')?.n ?? 0);
           counts.selectedTakeCount = (ctx.db.get<{ n: number }>("SELECT COUNT(*) as n FROM takes WHERE status = 'selected'")?.n ?? 0);
+          counts.guide = guideMod.projectGuideSummary(ctx);
         } catch {
           /* unreadable project — keep zeros */
         } finally {
@@ -135,6 +137,8 @@ export function buildRoutes(services: AppServices): App {
     if (!ctx) return c.json(null);
     return c.json({ meta: ctx.meta, config: ctx.config });
   });
+
+  app.get('/api/guide/project', (c) => c.json(guideMod.projectGuideSummary(p(c))));
 
   app.patch('/api/current-project/config', async (c) => {
     const ctx = p(c);
@@ -223,6 +227,7 @@ export function buildRoutes(services: AppServices): App {
         visualPlanned: continuityMod.latestContinuity(ctx, 'visual', 'planned'),
         narrative: continuityMod.latestContinuity(ctx, 'narrative', 'actual'),
       },
+      guide: guideMod.shotGuidePayload(ctx, shot),
     });
   });
 

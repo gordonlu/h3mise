@@ -4,22 +4,25 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useShot } from '../composables/useShot';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
+import { useRenderStore } from '../stores/render';
 import { confirmDialog } from '../stores/confirm';
 import { get, post, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
-import type { DirectorPlan, MediaAsset } from '@h3mise/shared';
+import type { DirectorPlan, MediaAsset, NextAction } from '@h3mise/shared';
 import PlanEditor from '../components/director/PlanEditor.vue';
 import PromptPanel from '../components/director/PromptPanel.vue';
 import PreflightPanel from '../components/director/PreflightPanel.vue';
 import TakesPanel from '../components/director/TakesPanel.vue';
 import ReferencesPanel from '../components/director/ReferencesPanel.vue';
 import VideoPlayer from '../components/VideoPlayer.vue';
+import GuideStepper from '../components/GuideStepper.vue';
 
 const route = useRoute();
 const router = useRouter();
 const shotId = route.params.id as string;
 const project = useProjectStore();
 const toasts = useToastStore();
+const renderStore = useRenderStore();
 const emptyPlan = () => emptyDirectorPlan();
 function aiText(v: unknown): string {
   return (v as { text?: string })?.text ?? '';
@@ -44,6 +47,7 @@ const externalTask = ref('Plan Shot');
 const pasteText = ref('');
 const parseResult = ref<{ ok: boolean; plan?: DirectorPlan; error?: string } | null>(null);
 const planDirty = ref(false);
+const takesSection = ref<HTMLElement | null>(null);
 
 // P1: AI availability comes from /api/ai/status, NOT from whether a render
 // provider is configured — the two are independent features.
@@ -73,6 +77,44 @@ const availableModes = computed(() => {
 });
 
 const userStatus = computed(() => (sShot.value ? SHOT_USER_STATUS[sShot.value.status] : 'draft'));
+
+const guideActionLabel = computed(() => {
+  const kind = sDetail.value?.guide.nextAction.kind;
+  if (kind === 'design_shot') return '编辑镜头设计';
+  if (kind === 'add_reference') return '添加参考素材';
+  if (kind === 'review_prompt') return '准备 Prompt';
+  if (kind === 'run_preflight') return '开始生成检查';
+  if (kind === 'render') return '确认生成参数';
+  if (kind === 'wait_render') return '查看生成任务';
+  if (kind === 'select_take') return '比较 Takes';
+  if (kind === 'continue_next_shot') return '继续下一个镜头';
+  if (kind === 'open_timeline') return '进入成片编排';
+  return '前往导出';
+});
+
+function openGuideAction(action: NextAction) {
+  if (action.kind === 'wait_render') {
+    renderStore.drawerOpen = true;
+    return;
+  }
+  if (action.kind === 'select_take') {
+    takesSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  if (action.kind === 'design_shot') tab.value = 'plan';
+  else if (action.kind === 'add_reference') tab.value = 'references';
+  else if (action.kind === 'review_prompt') tab.value = 'prompt';
+  else if (action.kind === 'run_preflight' || action.kind === 'render') tab.value = 'preflight';
+  else void router.push(action.to);
+}
+
+function applyGuideQuery() {
+  const target = route.query.guide;
+  if (target === 'design') tab.value = 'plan';
+  else if (target === 'references') tab.value = 'references';
+  else if (target === 'prompt') tab.value = 'prompt';
+  else if (target === 'preflight') tab.value = 'preflight';
+}
 
 const EXTERNAL_TASKS = [
   { id: 'Plan Shot', key: 'plan_shot' },
@@ -287,6 +329,7 @@ let off: (() => void) | null = null;
 
 onMounted(async () => {
   await s.load();
+  applyGuideQuery();
   await loadMedia();
   await project.refreshProviders();
   await refreshAiStatus();
@@ -368,6 +411,18 @@ const TABS = [
         </label>
       </div>
     </header>
+
+    <section v-if="sDetail?.guide" class="panel shot-guide">
+      <GuideStepper :stages="sDetail.guide.state.steps" class="shot-guide-steps" />
+      <div class="next-action">
+        <div class="next-copy">
+          <span class="next-kicker">下一步</span>
+          <strong>{{ sDetail.guide.nextAction.title }}</strong>
+          <span class="muted">{{ sDetail.guide.nextAction.description }}</span>
+        </div>
+        <button class="primary" @click="openGuideAction(sDetail.guide.nextAction)">{{ guideActionLabel }}</button>
+      </div>
+    </section>
 
     <!-- Three-column core -->
     <div class="core">
@@ -547,7 +602,7 @@ const TABS = [
     </div>
 
     <!-- Takes -->
-    <section class="takes-section filmstrip">
+    <section id="takes" ref="takesSection" class="takes-section filmstrip">
       <div class="spread takes-head">
         <h2>Takes <span class="muted">{{ sDetail?.takes.length ?? 0 }} 条</span></h2>
         <span class="muted">Shot 是意图，Take 是生成结果</span>
@@ -582,6 +637,13 @@ const TABS = [
 .crumb-link:hover { color: var(--accent-text); text-decoration: none; }
 .desk-header { display: flex; flex-direction: column; gap: 10px; }
 .desk-header h1 { font-size: 22px; margin: 0; font-family: var(--serif); letter-spacing: 0.01em; }
+.shot-guide { padding: 16px 20px; display: grid; grid-template-columns: minmax(420px, 0.9fr) minmax(360px, 1.1fr); gap: 28px; align-items: center; border-color: var(--accent-line); }
+.shot-guide-steps { --guide-count: 4; }
+.next-action { min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.next-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.next-copy strong { font-size: 14px; }
+.next-kicker { color: var(--accent-text); font-size: 10.5px; font-weight: 800; letter-spacing: 0.12em; }
+.next-action button { flex: none; }
 .wrap { flex-wrap: wrap; }
 .controls { flex-wrap: wrap; gap: 10px; }
 .ctl { display: flex; align-items: center; gap: 6px; }
@@ -590,7 +652,7 @@ const TABS = [
 .dur { width: 60px; }
 .core { display: grid; grid-template-columns: 264px 1fr 460px; gap: 14px; align-items: start; }
 @media (max-width: 1280px) { .core { grid-template-columns: 1fr; } }
-.rail { position: sticky; top: 66px; display: flex; flex-direction: column; gap: 12px; }
+.rail { position: sticky; top: 124px; display: flex; flex-direction: column; gap: 12px; }
 .req-row { display: flex; flex-direction: column; gap: 2px; }
 .req-detail { padding-left: 4px; }
 .rail-link { font-size: 12px; }

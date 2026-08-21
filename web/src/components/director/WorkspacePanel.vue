@@ -170,8 +170,8 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
           <div class="eyebrow">生成</div>
           <strong>{{ provider?.name ?? 'Provider 未配置' }}</strong>
         </div>
-        <span :class="['badge', currentModeSupported === true ? 'ok' : currentModeSupported === false ? 'bad' : 'warn']">
-          {{ currentModeSupported === true ? '模式可执行' : currentModeSupported === false ? '模式不支持' : '能力待确认' }}
+        <span v-if="currentModeSupported !== true" :class="['badge', currentModeSupported === false ? 'bad' : 'warn']">
+          {{ currentModeSupported === false ? '当前模式不受支持' : '生成能力未确认' }}
         </span>
       </div>
       <div class="generation-spec">

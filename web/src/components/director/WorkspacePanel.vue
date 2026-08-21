@@ -186,7 +186,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
       <div class="check-list">
         <button class="check-row" @click="emit('open', 'prompt')">
           <span :class="['check-mark', prompt ? 'ready' : 'waiting']">{{ prompt ? '✓' : '○' }}</span>
-          <span>Prompt {{ prompt ? '已准备' : '待准备' }}</span>
+          <span>提示词{{ prompt ? '已准备' : '待准备' }}</span>
           <span class="muted">查看 →</span>
         </button>
         <button class="check-row" @click="emit('open', 'preflight')">

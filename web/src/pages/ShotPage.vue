@@ -149,7 +149,7 @@ const guideActionLabel = computed(() => {
   const kind = sDetail.value?.guide.nextAction.kind;
   if (kind === 'design_shot') return '编辑镜头设计';
   if (kind === 'add_reference') return '添加参考素材';
-  if (kind === 'review_prompt') return '准备 Prompt';
+  if (kind === 'review_prompt') return '准备提示词';
   if (kind === 'run_preflight') return '开始生成检查';
   if (kind === 'render') return '确认生成参数';
   if (kind === 'wait_render') return '查看生成任务';
@@ -269,7 +269,7 @@ const aiBusy = computed(() => Object.keys(aiJobs.value).length > 0);
 async function deleteThisShot() {
   const ok = await confirmDialog({
     title: `删除 Shot「${sShot.value?.title || shotId}」？`,
-    message: '将同时删除其导演计划、Prompt 版本、Takes、生成任务和 Timeline 片段，不可恢复。',
+    message: '将同时删除其导演计划、提示词版本、成片、生成任务和时间线片段，不可恢复。',
     confirmLabel: '删除',
     danger: true,
   });
@@ -305,7 +305,7 @@ async function aiSuggest(section: string) {
     const plan = (result as { plan?: DirectorPlan })?.plan;
     if (plan) {
       await s.savePlan(plan, 'builtin_ai');
-      toasts.push({ kind: 'ok', text: `AI 建议已保存为新 DirectorPlan 版本（${action}），可继续手工调整` });
+      toasts.push({ kind: 'ok', text: 'AI 建议已保存为新的导演计划版本，可继续手工调整' });
     } else {
       toasts.push({ kind: 'err', text: 'AI 未返回可用的计划' });
     }
@@ -318,7 +318,7 @@ async function aiCompile() {
     const text = (result as { text?: string })?.text;
     if (text) {
       await s.importRawPrompt(text, sShot.value?.h3Mode ?? 't2va');
-      toasts.push({ kind: 'ok', text: 'AI 编译的 Prompt 已保存为新 PromptVersion' });
+      toasts.push({ kind: 'ok', text: 'AI 编译的提示词已保存为新版本' });
     }
   });
 }
@@ -389,7 +389,7 @@ ${DIRECTOR_PLAN_EXAMPLE}
 Context Package：
 ${JSON.stringify(pkg, null, 2)}`;
     await navigator.clipboard.writeText(prompt);
-    toasts.push({ kind: 'ok', text: '完整 Prompt 已复制，可直接粘贴给任意外部 AI' });
+    toasts.push({ kind: 'ok', text: '完整提示词已复制，可直接粘贴给任意外部 AI' });
   });
 }
 
@@ -412,7 +412,7 @@ async function parsePaste() {
 async function applyParsed() {
   if (parseResult.value?.plan && parsedMissingFields.value.length === 0) {
     await s.savePlan(parseResult.value.plan, 'external_ai');
-    toasts.push({ kind: 'ok', text: '外部 AI 的 DirectorPlan 已应用为新版本' });
+    toasts.push({ kind: 'ok', text: '外部 AI 的导演计划已应用为新版本' });
     parseResult.value = null;
     pasteText.value = '';
     tab.value = 'plan';
@@ -474,7 +474,7 @@ onBeforeRouteLeave(async () => {
   if (!planDirty.value) return true;
   return confirmDialog({
     title: '放弃未保存的修改？',
-    message: 'DirectorPlan 有未保存的编辑。离开此页面将丢弃这些修改（不会生成新版本）。',
+    message: '导演计划有未保存的编辑。离开此页面将丢弃这些修改（不会生成新版本）。',
     confirmLabel: '放弃修改',
     danger: true,
   });
@@ -508,7 +508,7 @@ const TABS = [
   { id: 'workspace', cn: '工作台', en: 'Workspace' },
   { id: 'plan', cn: '导演计划', en: 'DirectorPlan' },
   { id: 'references', cn: '参考素材', en: 'References' },
-  { id: 'prompt', cn: 'Prompt', en: 'Prompt' },
+  { id: 'prompt', cn: '提示词', en: 'Prompt' },
   { id: 'preflight', cn: '生成检查', en: 'Preflight' },
   { id: 'external', cn: '外部 AI', en: 'External AI' },
 ] as const;
@@ -668,7 +668,7 @@ const TABS = [
               </template>
               <template v-else>
                 舞台待命。<br />
-                <span class="muted">导演计划 → Prompt → 预检 → 渲染，第一条 Take 将出现在这里。</span>
+                <span class="muted">导演计划 → 提示词 → 生成检查 → 渲染，第一条成片将出现在这里。</span>
               </template>
             </div>
           </div>
@@ -715,7 +715,7 @@ const TABS = [
             :ai-enabled="aiEnabled"
             :ai-busy="aiBusy"
             :on-ai-suggest="aiSuggest"
-            @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), 'DirectorPlan 已保存为新版本')"
+            @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), '导演计划已保存为新版本')"
             @paste="tab = 'external'"
             @dirty-change="(d: boolean) => (planDirty = d)"
           />
@@ -739,8 +739,8 @@ const TABS = [
             :current-mode="sShot.h3Mode"
             :available-modes="availableModes"
             :ai-enabled="aiEnabled"
-            :on-compile="(m: string) => guarded(() => s.compilePrompt(m), 'Prompt 已编译为新版本')"
-            :on-raw="(t: string, m: string) => guarded(() => s.importRawPrompt(t, m), 'Raw Prompt 已导入')"
+            :on-compile="(m: string) => guarded(() => s.compilePrompt(m), '提示词已编译为新版本')"
+            :on-raw="(t: string, m: string) => guarded(() => s.importRawPrompt(t, m), '提示词已导入')"
             :on-ai-compile="aiCompile"
           />
         </div>
@@ -785,10 +785,10 @@ const TABS = [
             <section class="external-step">
               <span class="step-number">2</span>
               <div class="step-content">
-                <strong>复制 Prompt，粘贴给外部 AI</strong>
-                <p class="muted">Prompt 已包含当前故事、镜头、参考素材、四项必填要求和返回格式。</p>
+                <strong>复制提示词，粘贴给外部 AI</strong>
+                <p class="muted">提示词已包含当前故事、镜头、参考素材、四项必填要求和返回格式。</p>
                 <div class="row">
-                  <button class="primary sm" @click="copyExternalAiPrompt">复制给 AI 的完整 Prompt</button>
+                  <button class="primary sm" @click="copyExternalAiPrompt">复制给 AI 的完整提示词</button>
                   <button class="sm ghost" @click="copyContextPackageOnly">仅复制数据包</button>
                 </div>
               </div>

@@ -59,7 +59,7 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
       <span v-if="busy === 'ai'" class="muted">AI 语义检查中…（后台任务）</span>
     </div>
 
-    <div v-if="!prompt" class="muted">先编译或粘贴 Prompt。</div>
+    <div v-if="!prompt" class="muted">请先编译或粘贴提示词。</div>
 
     <div v-for="r in reports.slice(0, 3)" :key="r.id" class="panel preflight">
       <div class="spread">

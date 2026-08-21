@@ -109,8 +109,8 @@ async function pasteShots() {
       // 按行拆分会误建成多个 Shot —— 先让用户确认。
       if (lines.length > 1 && lines.every((l) => l.startsWith('【'))) {
         const proceed = await confirmDialog({
-          title: '看起来像单条 Prompt？',
-          message: `检测到 ${lines.length} 段以【】开头的段落，通常是同一条 Prompt 的分段而不是 Shot 列表。确认要按行拆分成 ${lines.length} 个 Shot 吗？\n\n如需整段导入 Prompt，请到 Shot 页 → Prompt → 粘贴 Raw Prompt。`,
+          title: '看起来像单条提示词？',
+          message: `检测到 ${lines.length} 段以【】开头的段落，通常是同一条提示词的分段，而不是镜头列表。确认要按行拆分成 ${lines.length} 个镜头吗？\n\n如需整段导入提示词，请进入镜头制作页 → 提示词 → 粘贴现成提示词。`,
           confirmLabel: '仍要拆分',
           danger: true,
         });

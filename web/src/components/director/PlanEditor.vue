@@ -283,8 +283,8 @@ function save() {
           <textarea :value="fieldValue(f.path)" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
         </label>
       </div>
-      <div v-if="!isRequiredComplete" class="required-hint">还需填写 {{ essentialFields.length - requiredFilledCount }} 项，完成后即可保存并继续准备 Prompt。</div>
-      <div v-else class="required-hint complete">镜头设计已完整，可以保存并继续准备 Prompt。</div>
+      <div v-if="!isRequiredComplete" class="required-hint">还需填写 {{ essentialFields.length - requiredFilledCount }} 项，完成后即可保存并继续准备提示词。</div>
+      <div v-else class="required-hint complete">镜头设计已完整，可以保存并继续准备提示词。</div>
     </section>
 
     <section class="advanced-wrap">

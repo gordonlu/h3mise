@@ -21,10 +21,10 @@ const busy = ref('');
 const copied = ref('');
 
 const SOURCE_LABEL: Record<string, string> = {
-  deterministic_compiler: 'Standard',
-  ai_compiler: 'AI',
-  external_ai: 'External',
-  manual: 'Raw',
+  deterministic_compiler: '标准编译',
+  ai_compiler: 'AI 编译',
+  external_ai: '外部 AI',
+  manual: '手动导入',
 };
 
 async function run(kind: string, fn: () => Promise<unknown>) {
@@ -50,19 +50,19 @@ async function copy(text: string) {
         <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
       </select>
       <button class="primary sm" :disabled="busy !== ''" @click="run('compile', () => onCompile(mode))">
-        {{ busy === 'compile' ? '编译中…' : 'Standard Compile' }}
+        {{ busy === 'compile' ? '编译中…' : '标准编译' }}
       </button>
       <button v-if="aiEnabled" class="sm" :disabled="busy !== ''" @click="run('ai', onAiCompile)">
-        {{ busy === 'ai' ? 'AI 编译中…' : 'AI Compile' }}
+        {{ busy === 'ai' ? 'AI 编译中…' : 'AI 编译' }}
       </button>
-      <button class="sm" @click="showRaw = !showRaw">粘贴 Raw Prompt</button>
+      <button class="sm" @click="showRaw = !showRaw">粘贴现成提示词</button>
     </div>
 
     <div v-if="showRaw" class="panel">
       <div class="panel-body col">
-        <textarea v-model="rawText" rows="5" placeholder="直接粘贴现成 H3 Prompt（Raw Prompt 路径，不需要 DirectorPlan）"></textarea>
+        <textarea v-model="rawText" rows="5" placeholder="直接粘贴现成的 H3 提示词，不需要先填写导演计划"></textarea>
         <div class="row">
-          <button class="primary sm" :disabled="busy !== '' || !rawText.trim()" @click="run('raw', () => onRaw(rawText, mode).then(() => { showRaw = false; rawText = ''; }))">导入 Raw Prompt</button>
+          <button class="primary sm" :disabled="busy !== '' || !rawText.trim()" @click="run('raw', () => onRaw(rawText, mode).then(() => { showRaw = false; rawText = ''; }))">导入提示词</button>
           <button class="sm" @click="showRaw = false">取消</button>
         </div>
       </div>
@@ -81,9 +81,9 @@ async function copy(text: string) {
           </div>
           <button class="sm ghost" @click="copy(pv.text)">复制</button>
         </div>
-        <pre class="prompt-text">{{ pv.text || '（空 Prompt）' }}</pre>
+        <pre class="prompt-text">{{ pv.text || '（空提示词）' }}</pre>
       </div>
-      <div v-if="!prompts.length" class="muted">还没有 Prompt。点击 Standard Compile 从 DirectorPlan 编译。</div>
+      <div v-if="!prompts.length" class="muted">还没有提示词。点击“标准编译”，从导演计划生成。</div>
     </div>
   </div>
 </template>

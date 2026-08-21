@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { MediaAsset, ReferenceBinding, ReferenceRole } from '@h3mise/shared';
+import type { H3Mode, MediaAsset, ReferenceBinding, ReferenceRole } from '@h3mise/shared';
 import { fileUrl, get, mediaUrl } from '../../api/client';
 
 const props = defineProps<{
   bindings: ReferenceBinding[];
   media: MediaAsset[];
+  currentMode: H3Mode;
   onAdd: (input: { assetId: string; roles: ReferenceRole[]; label?: string }) => Promise<void>;
   onUpdate: (id: string, patch: Partial<ReferenceBinding>) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
@@ -29,34 +30,40 @@ onMounted(async () => {
   slotsLoaded.value = true;
 });
 
-const ROLE_CN: Partial<Record<ReferenceRole, string>> = {
-  first_frame: '首帧',
-  last_frame: '尾帧',
-  motion: '动作',
-  body_motion: '身体动作',
-  camera_motion: '镜头运动',
-  audio: '音频',
-};
-
 interface RefGroup { id: string; cn: string; limit: number; items: MediaAsset[]; role?: ReferenceRole }
 
-/** Groups by workflow slot semantics. Frame mode (首帧+尾帧) and reference
- * mode (参考图/视频/音频, ref2va only) are mutually exclusive. */
+/** Only expose slots that the current generation path can actually submit. */
 const groups = computed<RefGroup[]>(() => {
   const images = props.media.filter((m) => m.kind === 'image');
   const audios = props.media.filter((m) => m.kind === 'audio');
   const out: RefGroup[] = [];
-  if (slots.value.firstFrame) out.push({ id: 'first', cn: '首帧图', limit: 1, items: images, role: 'first_frame' });
-  if (slots.value.lastFrame) out.push({ id: 'last', cn: '尾帧图', limit: 1, items: images, role: 'last_frame' });
-  if (slots.value.images > 0) out.push({ id: 'refimg', cn: '参考图（ref2va）', limit: slots.value.images, items: images });
-  if (slots.value.audios > 0) out.push({ id: 'refaudio', cn: '参考音频（ref2va）', limit: slots.value.audios, items: audios });
+  if (props.currentMode === 'ref2va') {
+    if (slots.value.images > 0) out.push({ id: 'refimg', cn: 'Ref2VA 参考图', limit: slots.value.images, items: images });
+    if (slots.value.audios > 0) out.push({ id: 'refaudio', cn: 'Ref2VA 参考音频', limit: slots.value.audios, items: audios });
+    return out;
+  }
+  if ((props.currentMode === 'i2va' || props.currentMode === 'fl2va') && slots.value.firstFrame) {
+    out.push({ id: 'first', cn: '首帧图', limit: 1, items: images, role: 'first_frame' });
+  }
+  if ((props.currentMode === 'l2va' || props.currentMode === 'fl2va') && slots.value.lastFrame) {
+    out.push({ id: 'last', cn: '尾帧图', limit: 1, items: images, role: 'last_frame' });
+  }
   return out;
 });
 
 const hasSlots = computed(() => groups.value.length > 0);
+const modeHint = computed(() => ({
+  t2va: 'T2VA 不需要参考素材',
+  i2va: 'I2VA 只使用首帧图',
+  l2va: 'L2VA 只使用尾帧图',
+  fl2va: 'FL2VA 使用首帧图和尾帧图',
+  ref2va: 'Ref2VA 至少需要一张参考图；参考音频可选',
+})[props.currentMode]);
 
 /** Official RunningHub cap is 12 total refs (slots may offer more). */
 const refTotalCap = computed(() => Math.min(slots.value.total, 12));
+const selectedGroup = computed(() => groups.value.find((group) => group.id === pickGroup.value) ?? null);
+const selectedGroupHasSpace = computed(() => selectedGroup.value ? remaining(selectedGroup.value) > 0 : false);
 
 function thumb(m: MediaAsset | undefined): string | null {
   if (!m) return null;
@@ -84,13 +91,19 @@ function remaining(g: RefGroup): number {
   }).length;
   return Math.max(0, g.limit - used);
 }
+
+function selectAsset(group: RefGroup, assetId: string) {
+  if (remaining(group) === 0) return;
+  pickAsset.value = assetId;
+  pickGroup.value = group.id;
+}
 </script>
 
 <template>
   <div class="col">
     <div class="row">
       <button class="primary sm" @click="pickerOpen = !pickerOpen">＋ 绑定 Reference</button>
-      <span v-if="!bindings.length" class="muted">未绑定（T2VA 不需要；I2VA/FL2VA 需要首帧）</span>
+      <span v-if="!bindings.length" class="muted">{{ modeHint }}</span>
     </div>
 
     <div v-if="pickerOpen" class="panel picker">
@@ -106,7 +119,7 @@ function remaining(g: RefGroup): number {
                 class="asset-opt"
                 :class="{ on: pickAsset === m.id && pickGroup === g.id }"
                 :style="{ opacity: remaining(g) === 0 ? 0.4 : 1 }"
-                @click="pickAsset = m.id; pickGroup = g.id"
+                @click="selectAsset(g, m.id)"
               >
                 <div class="opt-thumb">
                   <img v-if="thumb(m)" :src="thumb(m)!" :alt="m.label" />
@@ -115,21 +128,23 @@ function remaining(g: RefGroup): number {
                 <div class="opt-label" :title="m.label || m.id">{{ m.label || m.id }}</div>
                 <div class="muted">{{ m.kind }}</div>
               </div>
-              <div v-if="!g.items.length" class="muted">暂无{{ g.cn }}，先到 Assets 页导入。</div>
+              <div v-if="!g.items.length" class="muted">暂无{{ g.cn }}，<router-link to="/assets?tab=media">先去上传</router-link>。</div>
             </div>
           </div>
           <div class="note">
-            <strong>两种互斥模式</strong>：首帧+尾帧（i2va / l2va / fl2va）最多 2 张；参考图 ≤{{ slots.images }} 张、参考音频 ≤{{ slots.audios }} 个，合计 ≤{{ refTotalCap }} 个——参考模式仅在 Shot 模式为 <strong>ref2va</strong> 时生效（首帧+尾帧仅 2 张时参考图无效，反之亦然）。
-            音频每个 2–15s 且总计 ≤15s；音频不能单独作为唯一参考。
-            <br />身份 / 服装 / 场景 / 风格等描述性信息请写入 Prompt。
+            <template v-if="currentMode === 'ref2va'">
+              当前是 <strong>Ref2VA 参考模式</strong>：只提交 RefImages / RefAudios，不会提交首帧或尾帧。参考图 ≤{{ slots.images }} 张、参考音频 ≤{{ slots.audios }} 个，合计 ≤{{ refTotalCap }} 个；音频必须同时有参考图。
+            </template>
+            <template v-else>
+              当前是 <strong>{{ currentMode.toUpperCase() }} 帧控制模式</strong>：只提交 FirstFrame / LastFrame，不会提交 RefImages 或参考音频。
+            </template>
           </div>
         </template>
         <div v-else class="note">
-          {{ slotsLoaded ? '当前工作流未启用任何参考槽位（请在 Settings 完成节点探测）。' : '正在读取工作流槽位…' }}
-          <br />身份 / 服装 / 场景 / 风格等描述性信息请写入 Prompt，无需绑定。
+          {{ !slotsLoaded ? '正在读取工作流槽位…' : currentMode === 't2va' ? 'T2VA 是纯文字生成，不需要绑定参考素材。' : '当前 Provider 没有为这个模式提供可执行的参考槽位。' }}
         </div>
         <div class="row">
-          <button class="primary sm" :disabled="!pickAsset || !hasSlots" @click="add">绑定</button>
+          <button class="primary sm" :disabled="!pickAsset || !hasSlots || !selectedGroupHasSpace" @click="add">绑定</button>
           <button class="sm" @click="pickerOpen = false">取消</button>
         </div>
       </div>
@@ -148,6 +163,7 @@ function remaining(g: RefGroup): number {
             <span class="muted mono">{{ b.id }}</span>
           </div>
           <div class="tags">
+            <span v-if="!b.roles.length" class="tag active">{{ b.type === 'audio' ? 'RefAudio' : 'RefImage' }}</span>
             <span v-for="r in b.roles" :key="r" class="tag active">{{ r }}</span>
           </div>
           <div v-if="b.preserve.length || b.ignore.length" class="muted">

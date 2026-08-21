@@ -28,7 +28,7 @@ export function defaultAiAppProfile(): AiAppProfile {
       // trusted as executable capability in front of a paid render.
       supportedModes: [],
       maxImageRefs: 9,
-      maxVideoRefs: 3,
+      maxVideoRefs: 0,
       maxAudioRefs: 3,
       maxTotalRefs: 12,
       audioSupported: true,
@@ -69,15 +69,17 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
   const first = nodes.find(hasDesc(/首帧|first.?frame|start.?image|frame0/i));
   const last = nodes.find(hasDesc(/尾帧|last.?frame|end.?image/i));
   const frameIds = new Set([first?.nodeId, last?.nodeId].filter(Boolean));
-  const collect = (re: RegExp) =>
-    nodes.filter((n) => !frameIds.has(n.nodeId)).filter(has(re)).map((n) => ({ nodeId: n.nodeId, fieldName: n.fieldName }));
+  const collect = (pred: (n: AiAppProfile['nodes'][number]) => boolean) =>
+    nodes.filter((n) => !frameIds.has(n.nodeId)).filter(pred).map((n) => ({ nodeId: n.nodeId, fieldName: n.fieldName }));
+  const isAudioRef = has(/ref.?audio|audio_?\d|参考音频/i);
+  const isImageRef = (n: AiAppProfile['nodes'][number]) => has(/ref.?image|image_?\d|参考图/i)(n) && !isAudioRef(n);
   return {
     prompt: pick(has(/prompt|text|描述|提示词/i), inputs.prompt),
     mode: pick(has(/mode|模式/i), inputs.mode),
     firstFrame: first ? { nodeId: first.nodeId, fieldName: first.fieldName } : { nodeId: '', fieldName: 'first_frame' },
     lastFrame: last ? { nodeId: last.nodeId, fieldName: last.fieldName } : { nodeId: '', fieldName: 'last_frame' },
-    refImages: collect(/image|参考图|reference/i),
-    refAudios: collect(/ref.?audio|audio_?\d|参考音频/i),
+    refImages: collect(isImageRef),
+    refAudios: collect(isAudioRef),
     duration: pick(has(/duration|时长/i), inputs.duration),
     resolution: pick(has(/resolution|分辨率|比例/i), inputs.resolution),
     steps: pick(has(/^steps$|steps|采样/i), inputs.steps),
@@ -91,18 +93,18 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
  *  - i2va    needs a first-frame image input
  *  - l2va    needs a last-frame image input
  *  - fl2va   needs BOTH first and last frame
- *  - ref2va  needs a motion/audio reference slot or more than two image
- *            inputs (extra identity/style references beyond first/last frame)
+ *  - ref2va  needs at least one dedicated RefImages input; audio alone is not
+ *            a valid Ref2VA path
  */
-export function inferSupportedModes(inputs: AiAppProfile['inputs'], nodes: AiAppProfile['nodes']): H3Mode[] {
+export function inferSupportedModes(inputs: AiAppProfile['inputs'], _nodes: AiAppProfile['nodes']): H3Mode[] {
   const modes: H3Mode[] = [];
   const hasSlot = (slot: { nodeId: string; fieldName: string } | undefined) => Boolean(slot && slot.nodeId !== '');
   const hasArray = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.length > 0 && slots.every((s) => s.nodeId !== '');
   if (hasSlot(inputs.prompt)) modes.push('t2va');
-  if (hasSlot(inputs.firstFrame) || hasArray(inputs.refImages)) modes.push('i2va');
-  if (hasSlot(inputs.lastFrame) || hasArray(inputs.refImages)) modes.push('l2va');
+  if (hasSlot(inputs.firstFrame)) modes.push('i2va');
+  if (hasSlot(inputs.lastFrame)) modes.push('l2va');
   if (hasSlot(inputs.firstFrame) && hasSlot(inputs.lastFrame)) modes.push('fl2va');
-  if (hasArray(inputs.refImages) || hasArray(inputs.refAudios)) {
+  if (hasArray(inputs.refImages)) {
     modes.push('ref2va');
   }
   return modes;

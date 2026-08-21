@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { get, post, del, patch, mediaUrl, fileUrl } from '../api/client';
 import { useToastStore } from '../stores/toast';
 import { t } from '../stores/locale';
@@ -7,7 +8,11 @@ import { confirmDialog } from '../stores/confirm';
 import type { CharacterState, Entity, MediaAsset, ReferenceBinding } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
 
-const tab = ref<'entities' | 'states' | 'media' | 'bindings'>('entities');
+const route = useRoute();
+const requestedTab = route.query.tab;
+const tab = ref<'entities' | 'states' | 'media' | 'bindings'>(
+  requestedTab === 'states' || requestedTab === 'media' || requestedTab === 'bindings' ? requestedTab : 'entities',
+);
 const toasts = useToastStore();
 const entities = ref<Entity[]>([]);
 const states = ref<CharacterState[]>([]);
@@ -23,6 +28,9 @@ const newEntity = ref({ kind: 'character', name: '', description: '', traits: ''
 const newState = ref({ characterId: '', name: '', costume: '', hair: '', injury: '', heldItems: '' });
 const importPath = ref('');
 const importing = ref(false);
+const uploading = ref(0);
+const imageInput = ref<HTMLInputElement | null>(null);
+const audioInput = ref<HTMLInputElement | null>(null);
 
 type EditingItem =
   | { kind: 'entity'; item: Entity }
@@ -135,12 +143,33 @@ async function removeState(st: CharacterState) {
 }
 
 async function upload(file: File) {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('label', file.name);
-  await post('/api/assets/media/upload', form as never);
-  toasts.push({ kind: 'ok', text: `已导入 ${file.name}` });
-  await load();
+  if (file.type.startsWith('video/')) {
+    toasts.push({ kind: 'err', text: `不支持上传视频：${file.name}` });
+    return;
+  }
+  if (!file.type.startsWith('image/') && !file.type.startsWith('audio/')) {
+    toasts.push({ kind: 'err', text: `只支持图片或参考音频：${file.name}` });
+    return;
+  }
+  uploading.value += 1;
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('label', file.name);
+    await post('/api/assets/media/upload', form);
+    toasts.push({ kind: 'ok', text: `已导入 ${file.name}` });
+    await load();
+  } catch (e) {
+    toasts.push({ kind: 'err', text: `上传失败：${e instanceof Error ? e.message : e}` });
+  } finally {
+    uploading.value -= 1;
+  }
+}
+
+function onFilePick(e: Event) {
+  const input = e.target as HTMLInputElement;
+  for (const file of Array.from(input.files ?? [])) void upload(file);
+  input.value = '';
 }
 
 async function importLocalPath() {
@@ -280,18 +309,25 @@ onMounted(load);
 
     <!-- Media -->
     <section v-if="tab === 'media'" class="panel">
-      <div class="panel-title">媒体库 <span class="panel-note">图片 / 视频 / 音频 — 拖拽或本地路径导入，视频自动生成封面</span></div>
+      <div class="panel-title">媒体库 <span class="panel-note">图片与参考音频 — 视频不进入媒体库</span></div>
       <div class="panel-body">
+        <div class="upload-actions">
+          <input ref="imageInput" class="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple @change="onFilePick" />
+          <input ref="audioInput" class="file-input" type="file" accept="audio/mpeg,audio/wav,audio/aac,audio/flac,audio/mp4" multiple @change="onFilePick" />
+          <button class="primary" :disabled="uploading > 0" @click="imageInput?.click()">{{ uploading ? '上传中…' : '＋ 上传图片' }}</button>
+          <button :disabled="uploading > 0" @click="audioInput?.click()">＋ 上传参考音频</button>
+          <span class="muted">图片用于首尾帧或 Ref2VA；音频仅用于 Ref2VA。</span>
+        </div>
         <div class="drop" @dragover.prevent @drop.prevent="onDrop">
           <div class="drop-icon">⇩</div>
-          <div>拖拽文件到这里导入</div>
-          <div class="drop-hint">png · jpg · mp4 · webm · mp3 · wav</div>
+          <div>也可以拖拽图片或音频到这里</div>
+          <div class="drop-hint">png · jpg · webp · gif · mp3 · wav · m4a · flac</div>
         </div>
         <form class="toolbar" @submit.prevent="importLocalPath">
-          <input v-model="importPath" placeholder="或输入本地绝对路径（local-first 导入）" class="grow mono" />
+          <input v-model="importPath" placeholder="或输入图片 / 音频的本地绝对路径" class="grow mono" />
           <button class="primary" :disabled="importing || !importPath">{{ importing ? '导入中…' : '导入路径' }}</button>
         </form>
-        <EmptyState v-if="!media.length" icon="▦" title="媒体库为空" desc="首帧图、动作参考视频、音频参考都从这里进入项目。" />
+        <EmptyState v-if="!media.length" icon="▦" title="媒体库为空" desc="上传首尾帧、Ref2VA 参考图片或参考音频，之后再到 Shot 中绑定用途。" />
         <div v-else class="grid list">
           <article v-for="m in media" :key="m.id" class="card media-card">
             <div class="thumb">
@@ -456,6 +492,8 @@ onMounted(load);
   margin-bottom: 12px; cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
+.upload-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.file-input { display: none; }
 .drop:hover { border-color: var(--accent); background: var(--accent-soft); }
 .drop-icon { font-size: 20px; color: var(--accent); margin-bottom: 2px; }
 .drop-hint { font-size: 11.5px; color: var(--text-3); margin-top: 3px; }

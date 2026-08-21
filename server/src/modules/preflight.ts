@@ -72,17 +72,28 @@ export async function intentFromInput(
 ): Promise<RenderIntent> {
   const shot = getShot(p, input.shotId);
   const prompt = getPrompt(p, input.promptVersionId);
+  const mode = input.mode ?? prompt.h3Mode ?? 't2va';
+  const referenceRows = p.db
+    .all<{ id: string; asset_id: string; type: string; roles_json: string | null }>('SELECT * FROM reference_bindings WHERE shot_id = ?', [input.shotId])
+    .filter((row) => {
+      const roles = jget<string[]>(row.roles_json ?? '[]', []);
+      const first = roles.includes('first_frame');
+      const last = roles.includes('last_frame');
+      if (mode === 'ref2va') return !first && !last;
+      if (mode === 'i2va') return first;
+      if (mode === 'l2va') return last;
+      if (mode === 'fl2va') return first || last;
+      return false;
+    });
   return {
     shotId: input.shotId,
     promptVersionId: input.promptVersionId,
     providerId: input.providerId,
-    mode: input.mode ?? prompt.h3Mode ?? 't2va',
+    mode,
     durationSeconds: input.durationSeconds ?? shot.durationSeconds,
     aspectRatio: input.aspectRatio ?? shot.aspectRatio,
     resolution: input.resolution,
-    references: p.db
-      .all<{ id: string; asset_id: string; type: string }>('SELECT * FROM reference_bindings WHERE shot_id = ?', [input.shotId])
-      .map((r) => ({ bindingId: r.id, assetId: r.asset_id, kind: r.type as 'image' | 'video' | 'audio' })),
+    references: referenceRows.map((r) => ({ bindingId: r.id, assetId: r.asset_id, kind: r.type as 'image' | 'video' | 'audio' })),
     providerParams: input.providerParams ?? {},
   };
 }
@@ -170,12 +181,11 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     requiredRoles.add('first_frame');
     requiredRoles.add('last_frame');
   }
-  const bindingRows = bindings.length
-    ? p.db.all<{ id: string; roles_json: string | null; asset_id: string }>(
-        `SELECT id, roles_json, asset_id FROM reference_bindings WHERE shot_id = ?`,
-        [shot.id],
-      )
-    : [];
+  const relevantIds = new Set(bindings.map((binding) => binding.bindingId));
+  const bindingRows = p.db.all<{ id: string; roles_json: string | null; asset_id: string }>(
+    `SELECT id, roles_json, asset_id FROM reference_bindings WHERE shot_id = ?`,
+    [shot.id],
+  ).filter((binding) => relevantIds.has(binding.id));
   const haveRoles = new Set<string>();
   for (const b of bindingRows) {
     const roles = jget<string[]>(b.roles_json ?? '[]', []);
@@ -197,17 +207,25 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     }
   }
   if (caps) {
-    const nImage = bindingRows.length ? bindings.filter((r) => r.kind === 'image').length : 0;
-    const nVideo = bindingRows.length ? bindings.filter((r) => r.kind === 'video').length : 0;
-    const nAudio = bindingRows.length ? bindings.filter((r) => r.kind === 'audio').length : 0;
-    if (caps.maxImageRefs != null && nImage > caps.maxImageRefs) {
-      sections[3]!.checks.push({ key: 'ref.count.image', severity: 'error', message: `${nImage} image refs exceed provider max ${caps.maxImageRefs}` });
-    }
-    if (caps.maxVideoRefs != null && nVideo > caps.maxVideoRefs) {
-      sections[3]!.checks.push({ key: 'ref.count.video', severity: 'error', message: `${nVideo} video refs exceed provider max ${caps.maxVideoRefs}` });
-    }
-    if (caps.maxAudioRefs != null && nAudio > caps.maxAudioRefs) {
-      sections[3]!.checks.push({ key: 'ref.count.audio', severity: 'error', message: `${nAudio} audio refs exceed provider max ${caps.maxAudioRefs}` });
+    if (intent.mode === 'ref2va') {
+      const nImage = bindings.filter((r) => r.kind === 'image').length;
+      const nVideo = bindings.filter((r) => r.kind === 'video').length;
+      const nAudio = bindings.filter((r) => r.kind === 'audio').length;
+      if (nImage === 0) {
+        sections[3]!.checks.push({ key: 'ref.image.required', severity: 'error', message: 'Ref2VA requires at least one RefImage' });
+      }
+      if (nVideo > 0) {
+        sections[3]!.checks.push({ key: 'ref.video.unsupported', severity: 'error', message: 'Current Ref2VA workflow does not support video references' });
+      }
+      if (caps.maxImageRefs != null && nImage > caps.maxImageRefs) {
+        sections[3]!.checks.push({ key: 'ref.count.image', severity: 'error', message: `${nImage} image refs exceed provider max ${caps.maxImageRefs}` });
+      }
+      if (caps.maxVideoRefs != null && nVideo > caps.maxVideoRefs) {
+        sections[3]!.checks.push({ key: 'ref.count.video', severity: 'error', message: `${nVideo} video refs exceed provider max ${caps.maxVideoRefs}` });
+      }
+      if (caps.maxAudioRefs != null && nAudio > caps.maxAudioRefs) {
+        sections[3]!.checks.push({ key: 'ref.count.audio', severity: 'error', message: `${nAudio} audio refs exceed provider max ${caps.maxAudioRefs}` });
+      }
     }
   }
   for (const b of bindingRows) {

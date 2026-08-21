@@ -43,22 +43,32 @@ function numberReferences(references: ReferenceBinding[]): {
 }
 
 export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string {
-  const { plan, references } = ctx;
+  const { plan } = ctx;
+  // References are mode inputs, not a shared fallback pool. Ref2VA consumes
+  // generic image/audio bindings; frame modes consume only their explicit
+  // FirstFrame/LastFrame bindings.
+  const references = ctx.references.filter((reference) => {
+    const isFrame = reference.roles.includes('first_frame') || reference.roles.includes('last_frame');
+    if (mode === 'ref2va') return !isFrame && (reference.type === 'image' || reference.type === 'audio');
+    if (mode === 'i2va') return reference.roles.includes('first_frame');
+    if (mode === 'l2va') return reference.roles.includes('last_frame');
+    if (mode === 'fl2va') return isFrame;
+    return false;
+  });
+  const modeCtx = { ...ctx, references };
   const num = numberReferences(references);
   const refLabel = (b: ReferenceBinding) => (b.label ? `(${b.label})` : '');
-  // P1: frame roles win over array order. An identity/style picture bound
-  // before the frames must not steal pictures[0]/[1].
-  const firstFrame = num.pictures.find((p) => p.binding.roles.includes('first_frame')) ?? num.pictures[0];
-  const lastFrame = num.pictures.find((p) => p.binding.roles.includes('last_frame')) ?? num.pictures[1];
+  const firstFrame = num.pictures.find((p) => p.binding.roles.includes('first_frame'));
+  const lastFrame = num.pictures.find((p) => p.binding.roles.includes('last_frame'));
 
   if (mode === 'ref2va') {
     const sections = [
-      subjectDefinitions(ctx, num),
-      summary(ctx),
-      retentionAnalysis(ctx, num),
-      detailedDescription(ctx, num),
-      overallSoundscape(ctx),
-      nonDiegeticMusic(ctx),
+      subjectDefinitions(modeCtx, num),
+      summary(modeCtx),
+      retentionAnalysis(modeCtx, num),
+      detailedDescription(modeCtx, num),
+      overallSoundscape(modeCtx),
+      nonDiegeticMusic(modeCtx),
     ];
     return sections.filter(Boolean).join('\n\n');
   }
@@ -80,11 +90,11 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
       `For the target video, at the end of the video, ${lastFrame.tag} ${refLabel(lastFrame.binding)} is fully referenced.`,
     );
   }
-  const imd = integratedMultimodalDescription(ctx, num);
+  const imd = integratedMultimodalDescription(modeCtx, num);
   if (imd) blocks.push(imd);
-  const sound = overallSoundscape(ctx);
+  const sound = overallSoundscape(modeCtx);
   if (sound) blocks.push(sound);
-  const music = nonDiegeticMusic(ctx);
+  const music = nonDiegeticMusic(modeCtx);
   if (music) blocks.push(music);
   return blocks.filter(Boolean).join('\n\n');
 }

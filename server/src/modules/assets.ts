@@ -340,7 +340,7 @@ export function deleteBinding(p: ProjectContext, id: string): void {
 
 export interface AssetRequirement {
   level: 'required' | 'optional' | 'ok';
-  kind: 'character' | 'scene' | 'character_state' | 'first_frame' | 'last_frame' | 'motion' | 'audio';
+  kind: 'character' | 'scene' | 'character_state' | 'first_frame' | 'last_frame' | 'ref_images' | 'audio';
   label: string;
   detail: string;
 }
@@ -353,6 +353,8 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
   const states = listCharacterStates(p);
   const hasFirst = roles.has('first_frame');
   const hasLast = roles.has('last_frame');
+  const hasRefImage = bindings.some((binding) => binding.type === 'image' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'));
+  const hasRefAudio = bindings.some((binding) => binding.type === 'audio' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'));
 
   if (shot.primaryCharacterId) {
     out.push({ level: 'ok', kind: 'character', label: 'Character', detail: getEntity(p, shot.primaryCharacterId).name });
@@ -387,15 +389,17 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
         : { level: 'required', kind: 'last_frame', label: 'Last Frame missing', detail: 'L2VA/FL2VA needs a last frame' },
     );
   }
-  out.push(
-    roles.has('motion') || roles.has('body_motion')
-      ? { level: 'ok', kind: 'motion', label: 'Motion Reference', detail: 'bound' }
-      : { level: 'optional', kind: 'motion', label: 'Motion Reference', detail: 'optional' },
-  );
-  out.push(
-    roles.has('audio')
-      ? { level: 'ok', kind: 'audio', label: 'Audio Reference', detail: 'bound' }
-      : { level: 'optional', kind: 'audio', label: 'Audio Reference', detail: 'optional' },
-  );
+  if (mode === 'ref2va') {
+    out.push(
+      hasRefImage
+        ? { level: 'ok', kind: 'ref_images', label: 'RefImages', detail: '至少一张参考图已绑定' }
+        : { level: 'required', kind: 'ref_images', label: 'RefImages missing', detail: 'Ref2VA 至少需要一张参考图' },
+    );
+    out.push(
+      hasRefAudio
+        ? { level: 'ok', kind: 'audio', label: 'RefAudios', detail: '参考音频已绑定' }
+        : { level: 'optional', kind: 'audio', label: 'RefAudios', detail: '可选；必须与参考图一起使用' },
+    );
+  }
   return out;
 }

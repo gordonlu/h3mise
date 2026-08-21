@@ -20,6 +20,15 @@ const REQUIREMENT_LABEL: Record<string, string> = {
   character_state: '角色状态',
   first_frame: '首帧',
   last_frame: '尾帧',
+  ref_images: 'RefImages 参考图',
+};
+
+const MODE_PURPOSE: Record<H3Mode, string> = {
+  t2va: '纯文字生成',
+  i2va: '从首帧开始',
+  l2va: '控制结束画面',
+  fl2va: '控制开头和结尾',
+  ref2va: '多参考生成',
 };
 
 const props = defineProps<{
@@ -58,25 +67,36 @@ const planRows = computed(() => {
   ];
 });
 
-const roleSummary = computed(() => {
+const referenceSummary = computed(() => {
   const roles = props.bindings.flatMap((binding) => binding.roles);
-  return [
-    { label: '首帧', ready: roles.includes('first_frame') },
-    { label: '尾帧', ready: roles.includes('last_frame') },
-    { label: '人物 / 风格参考', ready: roles.some((role) => ['identity', 'costume', 'style'].includes(role)) },
-    { label: '动作 / 音频参考', ready: roles.some((role) => ['motion', 'body_motion', 'audio'].includes(role)) },
+  const mode = props.shot.h3Mode ?? 't2va';
+  if (mode === 'ref2va') {
+    const images = props.bindings.filter((binding) => binding.type === 'image' && !binding.roles.some((role) => role === 'first_frame' || role === 'last_frame')).length;
+    const audios = props.bindings.filter((binding) => binding.type === 'audio').length;
+    return [
+      { label: `RefImages ×${images}`, ready: images > 0 },
+      { label: `RefAudios ×${audios}`, ready: audios > 0 },
+    ];
+  }
+  if (mode === 'i2va') return [{ label: 'FirstFrame 首帧', ready: roles.includes('first_frame') }];
+  if (mode === 'l2va') return [{ label: 'LastFrame 尾帧', ready: roles.includes('last_frame') }];
+  if (mode === 'fl2va') return [
+    { label: 'FirstFrame 首帧', ready: roles.includes('first_frame') },
+    { label: 'LastFrame 尾帧', ready: roles.includes('last_frame') },
   ];
+  return [{ label: '无需参考素材', ready: true }];
 });
 
 const recommendedMode = computed<H3Mode | null>(() => {
   const supported = props.provider?.capabilities?.supportedModes;
   if (!supported) return null;
   const roles = new Set(props.bindings.flatMap((binding) => binding.roles));
+  const hasRefImage = props.bindings.some((binding) => binding.type === 'image' && !binding.roles.some((role) => role === 'first_frame' || role === 'last_frame'));
   const candidates: H3Mode[] = [];
   if (roles.has('first_frame') && roles.has('last_frame')) candidates.push('fl2va');
   if (roles.has('first_frame')) candidates.push('i2va');
   if (roles.has('last_frame')) candidates.push('l2va');
-  if (props.bindings.length > 0) candidates.push('ref2va');
+  if (hasRefImage) candidates.push('ref2va');
   candidates.push('t2va');
   return candidates.find((mode) => supported.includes(mode)) ?? null;
 });
@@ -90,6 +110,15 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
 
 <template>
   <div class="workspace">
+    <section class="next-card">
+      <div>
+        <div class="eyebrow">从这里开始</div>
+        <strong>{{ nextAction.title }}</strong>
+        <p>{{ nextAction.description }}</p>
+      </div>
+      <button class="primary" @click="emit('action', nextAction)">{{ nextActionLabel }}</button>
+    </section>
+
     <section class="workspace-section">
       <div class="section-head">
         <div>
@@ -118,7 +147,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
         </span>
       </div>
       <div class="readiness-grid">
-        <div v-for="item in roleSummary" :key="item.label" :class="['readiness-item', { ready: item.ready }]">
+        <div v-for="item in referenceSummary" :key="item.label" :class="['readiness-item', { ready: item.ready }]">
           <span>{{ item.ready ? '✓' : '○' }}</span>{{ item.label }}
         </div>
       </div>
@@ -146,7 +175,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
         </span>
       </div>
       <div class="generation-spec">
-        <span>{{ H3_MODE_LABEL[shot.h3Mode ?? 't2va'] }}</span>
+        <span>{{ MODE_PURPOSE[shot.h3Mode ?? 't2va'] }} · {{ H3_MODE_LABEL[shot.h3Mode ?? 't2va'] }}</span>
         <i />
         <span>{{ shot.durationSeconds }}s</span>
         <i />
@@ -190,19 +219,11 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
       <button class="sm" @click="emit('open', 'takes')">{{ takes.length ? '比较 Takes' : '查看 Takes 区域' }} →</button>
     </section>
 
-    <section class="next-card">
-      <div>
-        <div class="eyebrow">下一步</div>
-        <strong>{{ nextAction.title }}</strong>
-        <p>{{ nextAction.description }}</p>
-      </div>
-      <button class="primary sm" @click="emit('action', nextAction)">{{ nextActionLabel }}</button>
-    </section>
   </div>
 </template>
 
 <style scoped>
-.workspace { display: flex; flex-direction: column; gap: 12px; }
+.workspace { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .workspace-section { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-subtle); }
 .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .section-head strong { display: block; margin-top: 2px; font-size: 14px; }
@@ -231,8 +252,8 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
 .generate-cta { width: 100%; }
 .cta-note { margin: 7px 0 0; text-align: center; line-height: 1.4; }
 .take-copy { margin: 0 0 10px; }
-.next-card { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 14px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent-line); }
-.next-card strong { display: block; margin-top: 2px; }
-.next-card p { margin: 2px 0 0; color: var(--text-2); font-size: 11.5px; line-height: 1.4; }
+.next-card { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 18px 20px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.next-card strong { display: block; margin-top: 2px; font-size: 16px; }
+.next-card p { margin: 3px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
 .next-card button { flex: none; }
 </style>

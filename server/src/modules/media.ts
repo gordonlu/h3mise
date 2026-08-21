@@ -31,6 +31,13 @@ function kindForMime(mime: string): MediaKind | null {
   return MIME[mime] ?? (mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : null);
 }
 
+export function importableKindForMime(mime: string): 'image' | 'audio' {
+  const kind = kindForMime(mime);
+  if (!kind) throw new Error(`unsupported media type: ${mime}`);
+  if (kind === 'video') throw new Error('视频上传已关闭：当前工作流只接受图片和参考音频');
+  return kind;
+}
+
 async function probeAndInsert(
   p: ProjectContext,
   ffmpeg: Ffmpeg,
@@ -88,6 +95,7 @@ export async function importUpload(
   ffmpeg: Ffmpeg,
   input: { fileName: string; mimeType: string; data: Buffer; label?: string },
 ): Promise<MediaAsset> {
+  const kind = importableKindForMime(input.mimeType);
   const safe = basename(input.fileName).replace(/[^\w.\- ]+/g, '_');
   const id = nextId(p.db, 'media');
   const relPath = join('assets', `${id}-${safe}`);
@@ -95,7 +103,7 @@ export async function importUpload(
   await mkdir(join(p.root, 'assets'), { recursive: true });
   await writeFile(abs, input.data);
   const { size } = await stat(abs);
-  return probeAndInsert(p, ffmpeg, { relPath, mimeType: input.mimeType, sizeBytes: size, source: 'import', label: input.label });
+  return probeAndInsert(p, ffmpeg, { relPath, mimeType: input.mimeType, sizeBytes: size, source: 'import', label: input.label, kind });
 }
 
 /** Import an existing local file by absolute path (local-first feature). */
@@ -114,12 +122,13 @@ export async function importPath(
   }
   if (st.isDirectory()) throw new Error('path is a directory');
   const mime = mimeFromExt(abs);
+  const kind = importableKindForMime(mime);
   const id = nextId(p.db, 'media');
   const safeName = basename(abs).replace(/[^\w.\- ]+/g, '_');
   const relPath = join('assets', `${id}-${safeName}`);
   await mkdir(join(p.root, 'assets'), { recursive: true });
   await copyFile(abs, p.resolveProjectPath(relPath));
-  return probeAndInsert(p, ffmpeg, { relPath, mimeType: mime, sizeBytes: st.size, source: 'import', label: input.label });
+  return probeAndInsert(p, ffmpeg, { relPath, mimeType: mime, sizeBytes: st.size, source: 'import', label: input.label, kind });
 }
 
 function mimeFromExt(path: string): string {

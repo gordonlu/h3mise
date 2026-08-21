@@ -205,8 +205,9 @@ export class RunningHubAiAppProvider implements VideoProvider {
     const firstFrameRef = request.references.find((r) => r.roles.includes('first_frame'));
     const lastFrameRef = request.references.find((r) => r.roles.includes('last_frame'));
     if (request.mode === 'ref2va') {
-      const images = request.references.filter((r) => r.asset.kind === 'image').map((r) => r.providerRef);
-      const audios = request.references.filter((r) => r.asset.kind === 'audio').map((r) => r.providerRef);
+      const genericReferences = request.references.filter((r) => !r.roles.includes('first_frame') && !r.roles.includes('last_frame'));
+      const images = genericReferences.filter((r) => r.asset.kind === 'image').map((r) => r.providerRef);
+      const audios = genericReferences.filter((r) => r.asset.kind === 'audio').map((r) => r.providerRef);
       this.validateRefLimits(images.length, audios.length, request.references);
       pushArray(inputs.refImages, images);
       pushArray(inputs.refAudios, audios);
@@ -243,6 +244,9 @@ export class RunningHubAiAppProvider implements VideoProvider {
     refs: RenderRequestInput['references'],
   ): void {
     const cap = this.profile.capabilities;
+    if (refs.some((r) => r.asset.kind === 'video')) {
+      throw new ProviderError('当前 Ref2VA 工作流不支持视频参考，请使用参考图片或参考音频', 'submit');
+    }
     if (imageCount > (cap.maxImageRefs ?? 9)) throw new ProviderError(`参考图片最多 ${cap.maxImageRefs ?? 9} 张（当前 ${imageCount} 张）`, 'submit');
     if (audioCount > (cap.maxAudioRefs ?? 3)) throw new ProviderError(`参考音频最多 ${cap.maxAudioRefs ?? 3} 个（当前 ${audioCount} 个）`, 'submit');
     if (imageCount + audioCount > (cap.maxTotalRefs ?? 12)) {

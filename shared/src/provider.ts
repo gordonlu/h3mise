@@ -11,9 +11,8 @@ export interface ProviderCapabilities {
   maxDuration?: number;
   supportedAspectRatios?: string[];
   supportedResolutions?: string[];
-  /** RunningHub reference limits: ≤9 images, ≤3 videos, ≤3 audios,
-   * ≤12 total, each video/audio 2–15s and their combined length ≤15s,
-   * and audio can never be the only reference (needs ≥1 image or video). */
+  /** RunningHub reference limits: ≤9 images, no video references, ≤3 audios,
+   * ≤12 total; audio is 2–15s each / ≤15s combined and requires an image. */
   maxImageRefs?: number;
   maxVideoRefs?: number;
   maxAudioRefs?: number;

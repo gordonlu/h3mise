@@ -78,6 +78,13 @@ const availableModes = computed(() => {
 });
 
 const userStatus = computed(() => (sShot.value ? SHOT_USER_STATUS[sShot.value.status] : 'draft'));
+const referenceModeHint = computed(() => ({
+  t2va: '当前为 T2VA，无需参考素材',
+  i2va: '当前为 I2VA，需要首帧图',
+  l2va: '当前为 L2VA，需要尾帧图',
+  fl2va: '当前为 FL2VA，需要首帧图和尾帧图',
+  ref2va: '当前为 Ref2VA，需要参考图；参考音频可选',
+})[sShot.value?.h3Mode ?? 't2va']);
 
 const guideActionLabel = computed(() => {
   const kind = sDetail.value?.guide.nextAction.kind;
@@ -454,9 +461,9 @@ const TABS = [
       </div>
     </header>
 
-    <section v-if="sDetail?.guide" class="panel shot-guide">
+    <section v-if="sDetail?.guide" :class="['panel', 'shot-guide', { 'guide-workspace': tab === 'workspace' }]">
       <GuideStepper :stages="sDetail.guide.state.steps" class="shot-guide-steps" />
-      <div class="next-action">
+      <div v-if="tab !== 'workspace'" class="next-action">
         <div class="next-copy">
           <span class="next-kicker">下一步</span>
           <strong>{{ sDetail.guide.nextAction.title }}</strong>
@@ -467,7 +474,7 @@ const TABS = [
     </section>
 
     <!-- Three-column core -->
-    <div class="core">
+    <div :class="['core', { 'workspace-mode': tab === 'workspace' }]">
       <!-- Assets rail -->
       <aside class="rail">
         <div class="panel">
@@ -479,7 +486,7 @@ const TABS = [
               </span>
               <div class="muted req-detail">{{ r.detail }}</div>
             </div>
-            <router-link to="/assets" class="rail-link">＋ 去资产库导入 / 建状态</router-link>
+            <router-link to="/assets?tab=media" class="rail-link">＋ 上传图片 / 参考音频</router-link>
           </div>
         </div>
 
@@ -489,7 +496,7 @@ const TABS = [
             <button class="sm ghost" @click="tab = 'references'">管理 →</button>
           </div>
           <div class="panel-body col">
-            <div v-if="!sDetail?.bindings.length" class="muted">未绑定（T2VA 不需要；I2VA/FL2VA 需要首帧）</div>
+            <div v-if="!sDetail?.bindings.length" class="muted">{{ referenceModeHint }}</div>
             <div v-for="b in sDetail?.bindings ?? []" :key="b.id" class="ref-card">
               <div class="ref-thumb">
                 <img v-if="thumbOf(b.assetId)" :src="thumbOf(b.assetId)!" :alt="b.label" />
@@ -497,7 +504,7 @@ const TABS = [
               </div>
               <div class="ref-meta">
                 <div class="ref-label" :title="b.label">{{ b.label || b.id }}</div>
-                <div class="ref-roles">{{ b.roles.join(' · ') }}</div>
+                <div class="ref-roles">{{ b.roles.join(' · ') || (b.type === 'audio' ? 'RefAudio' : 'RefImage') }}</div>
               </div>
             </div>
           </div>
@@ -520,7 +527,7 @@ const TABS = [
       </aside>
 
       <!-- Stage -->
-      <section class="stage panel">
+      <section v-show="tab !== 'workspace'" class="stage panel">
         <div class="panel-title spread">
           <span>Stage / 导演监视器</span>
           <span v-if="sSelected" class="badge ok no-dot">SELECTED {{ sSelected.id }}</span>
@@ -598,6 +605,7 @@ const TABS = [
           <ReferencesPanel
             :bindings="sDetail?.bindings ?? []"
             :media="media"
+            :current-mode="sShot.h3Mode ?? 't2va'"
             :on-add="(input) => guarded(() => s.addBinding(input), '已绑定参考')"
             :on-update="s.updateBinding"
             :on-remove="(id: string) => guarded(() => s.removeBinding(id), '已移除绑定')"
@@ -713,6 +721,10 @@ const TABS = [
 .ctl select, .ctl input { max-width: 150px; }
 .dur { width: 60px; }
 .core { display: grid; grid-template-columns: 264px 1fr 460px; gap: 14px; align-items: start; }
+.core.workspace-mode { grid-template-columns: 264px minmax(0, 1fr); }
+.core.workspace-mode .inspector { grid-column: 2; }
+.core.workspace-mode .tab-body { max-height: none; overflow: visible; }
+.guide-workspace { grid-template-columns: 1fr; }
 .rail { position: sticky; top: 124px; display: flex; flex-direction: column; gap: 12px; }
 .stage, .inspector { min-width: 0; }
 .req-row { display: flex; flex-direction: column; gap: 2px; }

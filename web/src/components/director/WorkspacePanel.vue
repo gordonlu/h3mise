@@ -105,6 +105,7 @@ const currentModeSupported = computed(() => {
   const supported = props.provider?.capabilities?.supportedModes;
   return supported ? supported.includes(props.shot.h3Mode ?? 't2va') : null;
 });
+const providerDisplayName = computed(() => props.provider?.name.replace(/\s+\d{8,}$/, '') ?? 'Provider 未配置');
 const workbenchRenderReady = computed(() => props.guide.renderReady && currentModeSupported.value === true);
 </script>
 
@@ -159,7 +160,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
         <strong v-if="recommendedMode">{{ H3_MODE_LABEL[recommendedMode] }}</strong>
         <strong v-else>暂无可执行推荐</strong>
         <span v-if="!provider?.capabilities" class="muted">当前 Provider 能力未确认</span>
-        <span v-else class="muted">基于已绑定素材与 {{ provider.name }} 能力</span>
+        <span v-else class="muted">基于已绑定素材与 {{ providerDisplayName }} 能力</span>
       </div>
       <button class="sm" @click="emit('open', 'references')">添加 / 管理素材 →</button>
     </section>
@@ -168,7 +169,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
       <div class="section-head">
         <div>
           <div class="eyebrow">生成</div>
-          <strong>{{ provider?.name ?? 'Provider 未配置' }}</strong>
+          <strong :title="provider?.name">{{ providerDisplayName }}</strong>
         </div>
         <span v-if="currentModeSupported !== true" :class="['badge', currentModeSupported === false ? 'bad' : 'warn']">
           {{ currentModeSupported === false ? '当前模式不受支持' : '生成能力未确认' }}

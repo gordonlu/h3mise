@@ -24,6 +24,7 @@ const providerSupportsPrompt = computed(() => props.prompt && Boolean(
   props.provider?.capabilities?.supportedModes.includes(props.prompt.h3Mode),
 ));
 const renderReady = computed(() => canRender.value && providerSupportsPrompt.value);
+const providerDisplayName = computed(() => props.provider?.name.replace(/\s+\d{8,}$/, '') ?? 'RunningHub');
 
 async function run(kind: 'basic' | 'ai') {
   if (!props.prompt) return;
@@ -52,7 +53,7 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
 
 <template>
   <div class="col">
-    <div class="row">
+    <div class="row preflight-actions">
       <button class="sm" :disabled="busy !== '' || !prompt" @click="run('basic')">运行生成检查</button>
       <button v-if="aiEnabled" class="sm" :disabled="busy !== '' || !prompt" @click="run('ai')">AI 语义检查</button>
       <span v-if="busy === 'basic'" class="muted">检查中…</span>
@@ -62,9 +63,9 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
     <div v-if="!prompt" class="muted">请先编译或粘贴提示词。</div>
 
     <div v-for="r in reports.slice(0, 3)" :key="r.id" class="panel preflight">
-      <div class="spread">
-        <span class="muted mono">{{ r.id }} · {{ new Date(r.createdAt).toLocaleString() }}</span>
-        <div class="row">
+      <div class="spread report-head">
+        <span class="muted mono report-meta">{{ r.id }} · {{ new Date(r.createdAt).toLocaleString() }}</span>
+        <div class="row report-status">
           <span v-if="r.aiSemanticRun" class="badge info">已运行 AI 语义检查</span>
           <span v-else class="muted">未运行 AI 语义检查</span>
           <span :class="['badge', RISK_COLOR[r.risk]]">风险：{{ r.risk }}</span>
@@ -95,7 +96,7 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
     <div class="panel cost-preview">
       <div class="panel-title">渲染成本预览（本次提交 = 1 次付费生成）</div>
       <div class="panel-body row wrap cost-row">
-        <span class="badge accent no-dot">{{ provider?.name ?? 'RunningHub AI App' }}</span>
+        <span class="badge accent no-dot provider-badge" :title="provider?.name">{{ providerDisplayName }}</span>
         <span class="badge no-dot">{{ prompt ? H3_MODE_LABEL[prompt.h3Mode] : '—' }}</span>
         <span class="badge no-dot">{{ durationSeconds }}s</span>
         <span class="badge no-dot">{{ aspectRatio }}</span>
@@ -114,14 +115,20 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
 </template>
 
 <style scoped>
-.preflight { padding: 10px 12px; }
-.sections { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.sec { display: flex; gap: 10px; align-items: flex-start; }
-.sec ul { margin: 0; padding-left: 0; list-style: none; }
-.sec li { font-size: 12px; color: var(--text-2); }
+.col { min-width: 0; }
+.preflight-actions { flex-wrap: wrap; }
+.preflight { min-width: 0; overflow: hidden; padding: 10px 12px; }
+.report-head { align-items: flex-start; flex-wrap: wrap; }
+.report-meta { min-width: 0; overflow-wrap: anywhere; }
+.report-status { flex-wrap: wrap; }
+.sections { min-width: 0; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.sec { min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: flex-start; }
+.sec ul { min-width: 0; margin: 0; padding-left: 0; list-style: none; }
+.sec li { min-width: 0; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; word-break: break-word; }
 .sec li.error { color: var(--bad); }
 .sec li.warning { color: var(--warn); }
-.render-btn { margin-top: 4px; }
-.cost-preview { border-style: dashed; }
-.cost-row { gap: 6px; }
+.render-btn { width: 100%; margin-top: 4px; white-space: normal; }
+.cost-preview { min-width: 0; overflow: hidden; border-style: dashed; }
+.cost-row { min-width: 0; gap: 6px; }
+.provider-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 </style>

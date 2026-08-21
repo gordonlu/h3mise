@@ -694,9 +694,11 @@ function serveLocalFile(c: Context, abs: string): Response {
     md: 'text/markdown',
   };
   const range = c.req.header('range');
-  c.header('Content-Type', mime[ext] ?? 'application/octet-stream');
-  c.header('Accept-Ranges', 'bytes');
-  c.header('Content-Length', String(st.size));
+  const contentType = mime[ext] ?? 'application/octet-stream';
+  const baseHeaders = {
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+  };
   if (range) {
     const m = /bytes=(\d*)-(\d*)/.exec(range);
     if (m) {
@@ -709,13 +711,23 @@ function serveLocalFile(c: Context, abs: string): Response {
       }
       end = Math.min(end, st.size - 1);
       if (start > end || start >= st.size) {
-        return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${st.size}` } });
+        return new Response(null, {
+          status: 416,
+          headers: { ...baseHeaders, 'Content-Range': `bytes */${st.size}` },
+        });
       }
-      c.status(206);
-      c.header('Content-Range', `bytes ${start}-${end}/${st.size}`);
-      c.header('Content-Length', String(end - start + 1));
-      return new Response(Readable.toWeb(createReadStream(abs, { start, end })), { status: 206 });
+      return new Response(Readable.toWeb(createReadStream(abs, { start, end })), {
+        status: 206,
+        headers: {
+          ...baseHeaders,
+          'Content-Range': `bytes ${start}-${end}/${st.size}`,
+          'Content-Length': String(end - start + 1),
+        },
+      });
     }
   }
-  return new Response(Readable.toWeb(createReadStream(abs)), { status: 200 });
+  return new Response(Readable.toWeb(createReadStream(abs)), {
+    status: 200,
+    headers: { ...baseHeaders, 'Content-Length': String(st.size) },
+  });
 }

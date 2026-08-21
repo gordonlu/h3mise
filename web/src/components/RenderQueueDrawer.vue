@@ -23,6 +23,10 @@ const STATUS_BADGE: Record<string, string> = {
 
 const active = computed(() => render.jobs.filter((j) => ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)));
 const done = computed(() => render.jobs.filter((j) => !['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)).slice(0, 30));
+const queueGroups = computed(() => [
+  { key: 'active', label: '进行中', jobs: active.value },
+  { key: 'done', label: '最近完成', jobs: done.value },
+].filter((group) => group.jobs.length > 0));
 
 /** PRD §41 成本保护: 项目累计渲染消耗（RunningHub usage 回传时累加）。 */
 const totalCost = computed(() => {
@@ -76,8 +80,11 @@ onMounted(() => render.refresh());
   <div class="backdrop" @click.self="$emit('close')">
     <div class="drawer">
       <div class="drawer-head">
-        <h2>Render Queue <span class="muted">{{ active.length }} 活跃</span></h2>
-        <button class="ghost" @click="$emit('close')">✕</button>
+        <div class="head-copy">
+          <h2>渲染队列</h2>
+          <span class="muted">{{ active.length }} 个进行中 · {{ done.length }} 个已结束</span>
+        </div>
+        <button class="ghost close-btn" aria-label="关闭渲染队列" @click="$emit('close')">✕</button>
       </div>
       <div v-if="totalCost !== null" class="cost-bar">
         <span class="badge warn">项目累计消耗 ≈ {{ totalCost.toFixed(totalCost % 1 ? 2 : 0) }} <span v-if="totalCost % 1">CNY</span><span v-else>credits</span></span>
@@ -87,28 +94,32 @@ onMounted(() => render.refresh());
       <div class="drawer-body">
         <div v-if="!render.jobs.length" class="muted">队列为空。</div>
 
-        <template v-for="group in [active, done]" :key="group === active ? 'a' : 'b'">
-          <div v-for="job in group" :key="job.id" class="job panel">
-            <div class="spread">
+        <section v-for="group in queueGroups" :key="group.key" class="queue-section">
+          <div class="section-label">{{ group.label }} <span>{{ group.jobs.length }}</span></div>
+          <article v-for="job in group.jobs" :key="job.id" class="job panel">
+            <div class="job-head">
               <span :class="['badge', STATUS_BADGE[job.status]]">{{ STATUS_LABEL[job.status] }}</span>
-              <span class="mono muted">{{ job.id }}</span>
+              <span class="mono muted job-id" :title="job.id">{{ job.id }}</span>
             </div>
-            <div class="row wrap muted">
-              <span class="badge" @click="router.push(`/shots/${job.shotId}`)" style="cursor: pointer">Shot {{ job.shotId }}</span>
-              <span class="badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
-              <span v-if="job.providerTaskId" class="mono" :title="job.providerTaskId">{{ job.providerTaskId.slice(0, 16) }}…</span>
-              <span v-if="costText(job)">{{ costText(job) }}</span>
+            <div class="job-meta muted">
+              <button class="shot-link" @click="router.push(`/shots/${job.shotId}`)">镜头 {{ job.shotId }}</button>
+              <span class="badge no-dot mode-badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
+              <span v-if="costText(job)" class="cost-text">{{ costText(job) }}</span>
+            </div>
+            <div v-if="job.providerTaskId" class="task-ref">
+              <span>服务任务</span>
+              <code :title="job.providerTaskId">{{ job.providerTaskId }}</code>
             </div>
             <div v-if="job.error" class="error mono">{{ job.error.slice(0, 400) }}</div>
-            <div v-if="['FAILED', 'CANCELLED'].includes(job.status)" class="row">
-              <button v-if="job.status === 'FAILED'" class="sm" @click="retry(job)">Retry</button>
+            <div v-if="['FAILED', 'CANCELLED'].includes(job.status)" class="job-actions">
+              <button v-if="job.status === 'FAILED'" class="sm" @click="retry(job)">重试</button>
               <button v-else class="sm" @click="retry(job)">重新提交</button>
             </div>
-            <div v-if="['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(job.status)" class="row">
-              <button class="sm danger" @click="cancel(job)">Cancel</button>
+            <div v-if="['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(job.status)" class="job-actions">
+              <button class="sm danger" @click="cancel(job)">取消任务</button>
             </div>
-          </div>
-        </template>
+          </article>
+        </section>
       </div>
     </div>
   </div>
@@ -120,14 +131,29 @@ onMounted(() => render.refresh());
   display: flex; justify-content: flex-end; z-index: 50;
 }
 .drawer {
-  width: 420px; max-width: 90vw; height: 100%;
+  width: 440px; max-width: calc(100vw - 48px); height: 100%; min-width: 0;
   background: var(--bg-2); border-left: 1px solid var(--line);
   display: flex; flex-direction: column;
 }
-.drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.head-copy { min-width: 0; }
 .drawer-head h2 { margin: 0; font-size: 16px; }
-.cost-bar { padding: 8px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.close-btn { flex: none; }
+.cost-bar { padding: 8px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.cost-bar > * { max-width: 100%; }
 .drawer-body { flex: 1; overflow: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
-.job { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
-.error { color: var(--bad); font-size: 11px; background: rgba(217, 99, 92, 0.08); padding: 6px; border-radius: 4px; }
+.queue-section { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.section-label { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; font-weight: 650; }
+.section-label span { color: var(--text-3); font-weight: 500; }
+.job { min-width: 0; padding: 12px; display: flex; flex-direction: column; gap: 9px; overflow: hidden; }
+.job-head { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.job-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-meta { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.shot-link { min-width: 0; max-width: 100%; padding: 3px 8px; border-radius: 999px; font-size: 11px; color: var(--info); background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 36%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mode-badge { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.cost-text { margin-left: auto; white-space: nowrap; }
+.task-ref { min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 9px; border-radius: 6px; background: var(--bg-subtle); color: var(--text-3); font-size: 11px; }
+.task-ref code { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.error { min-width: 0; max-width: 100%; color: var(--bad); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; background: rgba(217, 99, 92, 0.08); padding: 8px 9px; border-radius: 6px; }
+.job-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

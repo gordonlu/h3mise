@@ -90,54 +90,71 @@ export function planIsGuideReady(plan: DirectorPlan): boolean {
   ].every((value) => value.trim().length > 0);
 }
 
+const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
+const REALITY_MODES = new Set(['strict_realism', 'plausible_stylized', 'deliberate_fantasy']);
+const GENERATION_MODES = new Set(['', 't2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
+
+/** Normalize untrusted AI/user JSON into the known DirectorPlan structure.
+ * Unknown keys and invalid value types are discarded; common response wrappers
+ * and snake_case keys are accepted. */
+export function normalizeDirectorPlan(
+  raw: unknown,
+  base: DirectorPlan = emptyDirectorPlan(),
+): { ok: boolean; plan?: DirectorPlan; error?: string } {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: '返回内容不是导演计划对象' };
+  }
+
+  const root = raw as Record<string, unknown>;
+  const knownSections = ['intent', 'subject', 'blocking', 'camera', 'performance', 'environment', 'reality', 'continuity', 'generation'];
+  const hasKnownSection = knownSections.some((key) => key in root);
+  const wrapped = root.plan ?? root.directorPlan ?? root.director_plan ?? root.result ?? root.data;
+  const source = !hasKnownSection && wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)
+    ? wrapped
+    : raw;
+  const plan = structuredClone(base);
+
+  const mergeKnown = (src: unknown, dst: Record<string, unknown>) => {
+    if (typeof src !== 'object' || src === null || Array.isArray(src)) return;
+    for (const [rawKey, value] of Object.entries(src as Record<string, unknown>)) {
+      const key = rawKey.replace(/[_-]([a-z])/g, (_, c: string) => c.toUpperCase());
+      if (!(key in dst) || value === null || value === undefined) continue;
+      const expected = dst[key];
+      if (Array.isArray(expected)) {
+        if (Array.isArray(value)) dst[key] = value.filter((item): item is string => typeof item === 'string');
+      } else if (typeof expected === 'object' && expected !== null) {
+        mergeKnown(value, expected as Record<string, unknown>);
+      } else if (typeof expected === 'number') {
+        if (typeof value === 'number' && Number.isFinite(value)) dst[key] = value;
+      } else if (typeof expected === 'string' && typeof value === 'string') {
+        dst[key] = value.trim();
+      }
+    }
+  };
+
+  mergeKnown(source, plan as unknown as Record<string, unknown>);
+  if (!SHOT_FUNCTIONS.has(plan.intent.shotFunction)) plan.intent.shotFunction = base.intent.shotFunction;
+  if (!REALITY_MODES.has(plan.reality.mode)) plan.reality.mode = base.reality.mode;
+  if (!GENERATION_MODES.has(plan.generation.requestedMode)) plan.generation.requestedMode = base.generation.requestedMode;
+  if (plan.generation.durationSeconds < 1 || plan.generation.durationSeconds > 60) {
+    plan.generation.durationSeconds = base.generation.durationSeconds;
+  }
+  return { ok: true, plan };
+}
+
 /** Raw plan text parsing (YAML/JSON from external AI) — PRD §21. */
 export function parseDirectorPlanText(text: string): { ok: boolean; plan?: DirectorPlan; error?: string } {
   const trimmed = text.trim()
     .replace(/^```(?:ya?ml|json)?\s*/i, '')
     .replace(/\s*```$/, '')
     .trim();
-  const parse = (obj: unknown): { ok: boolean; plan?: DirectorPlan; error?: string } => {
-    if (typeof obj !== 'object' || obj === null) return { ok: false, error: 'not an object' };
-    const base = emptyDirectorPlan();
-    // P1: recursive snake_case → camelCase conversion. Previously only
-    // reality/movementQuality/generation/continuity were normalized; other
-    // sections (camera/performance/environment/…) kept snake_case keys, so
-    // applied plans silently lost data the compiler reads as camelCase.
-    const deep = <T>(src: unknown, dst: T): T => {
-      if (typeof src !== 'object' || src === null) return dst;
-      for (const k of Object.keys(src as Record<string, unknown>)) {
-        const v = (src as Record<string, unknown>)[k];
-        if (v === null || v === undefined) continue;
-        const key = k.replace(/[_-]([a-z])/g, (_, c: string) => c.toUpperCase());
-        if (typeof v === 'object' && !Array.isArray(v)) {
-          const target = (dst as Record<string, unknown>)[key];
-          if (target !== undefined && typeof target === 'object' && target !== null) {
-            // Merge into the known default structure (recursive normalize).
-            deep(v, target as never);
-          } else {
-            // Arbitrary nested section: normalize keys recursively.
-            (dst as Record<string, unknown>)[key] = deep(v, {} as never);
-          }
-        } else if (Array.isArray(v)) {
-          (dst as Record<string, unknown>)[key] = v.map((item) =>
-            typeof item === 'object' && item !== null ? deep(item, {} as never) : item,
-          );
-        } else {
-          (dst as Record<string, unknown>)[key] = v;
-        }
-      }
-      return dst;
-    };
-    const plan = deep(obj, base);
-    return { ok: true, plan };
-  };
   try {
-    if (trimmed.startsWith('{')) return parse(JSON.parse(trimmed));
+    if (trimmed.startsWith('{')) return normalizeDirectorPlan(JSON.parse(trimmed));
     const parsed = YAML.parse(trimmed);
     if (parsed === null || typeof parsed !== 'object') {
       return { ok: false, error: 'unrecognized format' };
     }
-    return parse(parsed);
+    return normalizeDirectorPlan(parsed);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

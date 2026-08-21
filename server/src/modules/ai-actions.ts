@@ -4,7 +4,7 @@
 // the UI can fall back to Copy Context Package (external AI flow).
 
 import type { ProjectContext } from '../project-store.js';
-import type { AIService } from './ai.js';
+import type { AIService, DirectorModel } from './ai.js';
 import * as directorMod from './director.js';
 import * as promptMod from './prompt.js';
 import * as shotsMod from './shots.js';
@@ -52,6 +52,48 @@ const DIRECTOR_SYSTEM_PROMPT = `你是 H3Mise 内置电影导演助手，负责�
 输出要求：只返回符合 DirectorPlan schema 的完整 JSON 对象，不要 Markdown、代码围栏或额外说明。字段内容应简洁、具体、可拍摄。`;
 
 type BeatsResult = Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
+
+function requireAiDirectorPlan(raw: unknown, base: DirectorPlan): DirectorPlan {
+  const normalized = directorMod.normalizeDirectorPlan(raw, base);
+  if (!normalized.ok || !normalized.plan) {
+    throw new Error(`AI 返回的导演计划格式无效：${normalized.error ?? '无法识别'}`);
+  }
+  const required = [
+    ['镜头目标', normalized.plan.intent.visualThesis],
+    ['主体动作', normalized.plan.subject.action],
+    ['摄影机', normalized.plan.camera.dominantBehavior],
+    ['结束画面', normalized.plan.intent.endState],
+  ].filter(([, value]) => !value).map(([label]) => label);
+  if (required.length) {
+    throw new Error(`AI 返回内容不完整，缺少：${required.join('、')}。未保存，请重试或手动填写。`);
+  }
+  return normalized.plan;
+}
+
+async function normalizeOrRepairAiDirectorPlan(
+  model: DirectorModel,
+  raw: unknown,
+  base: DirectorPlan,
+): Promise<DirectorPlan> {
+  try {
+    return requireAiDirectorPlan(raw, base);
+  } catch {
+    const repaired = await model.structured<unknown>({
+      system: `你是 DirectorPlan 数据格式修复器。只修复字段结构、命名和数据类型，不重新创作，不增加原候选内容和当前草稿中不存在的故事事实。缺失字段优先沿用当前草稿。只返回符合 schema 的完整 JSON 对象。\n${PLAN_SCHEMA_HINT}`,
+      messages: [{
+        role: 'user',
+        content: `当前草稿：\n${JSON.stringify(base)}\n\n待修复的 AI 返回：\n${JSON.stringify(raw)}`,
+      }],
+      temperature: 0,
+    });
+    try {
+      return requireAiDirectorPlan(repaired, base);
+    } catch (second) {
+      const reason = second instanceof Error ? second.message : String(second);
+      throw new Error(`AI 返回格式自动修复后仍不可用：${reason}`);
+    }
+  }
+}
 
 /** Models under json_object mode sometimes wrap an array in {"beats": [...]}. */
 function normalizeBeats(raw: unknown): BeatsResult {
@@ -152,34 +194,38 @@ export async function runAction(
   const skillText = skills.map((s) => `# ${s.title}\n${s.content}`).join('\n\n---\n\n');
   const shotId = body.shotId ? String(body.shotId) : null;
   const shot = shotId ? shotsMod.getShot(ctx, shotId) : null;
-  const plan = shotId ? directorMod.latestPlan(ctx, shotId)?.plan ?? emptyDirectorPlan() : null;
+  const suppliedPlan = body.plan ? directorMod.normalizeDirectorPlan(body.plan).plan : null;
+  const plan = shotId ? suppliedPlan ?? directorMod.latestPlan(ctx, shotId)?.plan ?? emptyDirectorPlan() : null;
 
   switch (action as ActionName) {
     case 'plan_shot': {
       if (!shotId) throw new Error('shotId required');
-      const dp = await ai.model.structured<DirectorPlan>({
+      const raw = await ai.model.structured<unknown>({
         system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: planShotPrompt(ctx, shotId, body) }],
         temperature: 0.6,
       });
+      const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
       return { kind: 'director_plan', plan: dp };
     }
     case 'improve_camera': {
       if (!shotId) throw new Error('shotId required');
-      const dp = await ai.model.structured<DirectorPlan>({
+      const raw = await ai.model.structured<unknown>({
         system: `You are the H3 Shot Pattern Library. Improve ONLY the camera block of the given plan. Keep every other block unchanged. Return the full plan JSON.\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}` }],
         temperature: 0.5,
       });
+      const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
       return { kind: 'director_plan', plan: dp };
     }
     case 'improve_performance': {
       if (!shotId) throw new Error('shotId required');
-      const dp = await ai.model.structured<DirectorPlan>({
+      const raw = await ai.model.structured<unknown>({
         system: `You are the H3 Performance Director. Improve ONLY the performance block (objective/obstacle/tactic/turn, movement quality, anticipation, follow-through, recovery, gaze, end pose). Keep every other block unchanged. Return the full plan JSON.\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}` }],
         temperature: 0.5,
       });
+      const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
       return { kind: 'director_plan', plan: dp };
     }
     case 'reality_check': {
@@ -297,11 +343,12 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
       for (const b of beats) {
         const beat = storyMod.createBeat(ctx, { title: b.title, category: b.category, summary: b.summary, location: b.location, timeOfDay: b.timeOfDay, weather: b.weather, stateChange: b.stateChange });
         const shot = shotsMod.createShot(ctx, { title: beat.title, storyBeatId: beat.id, purpose: beat.summary, durationSeconds: beat.durationSeconds || ctx.config.default_duration_seconds });
-        const dp = await ai.model.structured<DirectorPlan>({
+        const rawPlan = await ai.model.structured<unknown>({
           system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
           messages: [{ role: 'user', content: planShotPrompt(ctx, shot.id, {}) }],
           temperature: 0.6,
         });
+        const dp = await normalizeOrRepairAiDirectorPlan(ai.model, rawPlan, emptyDirectorPlan());
         directorMod.createPlanVersion(ctx, { shotId: shot.id, plan: dp, source: 'builtin_ai' });
         created.push({ beatId: beat.id, shotId: shot.id });
       }

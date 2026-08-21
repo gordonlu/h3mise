@@ -11,7 +11,7 @@ import type { AppEvent, H3Mode } from '@h3mise/shared';
 import type { ProjectStore } from '../project-store.js';
 import type { EventBus } from '../events.js';
 import type { Ffmpeg } from '../ffmpeg.js';
-import type { ProviderRegistry } from '../providers/registry.js';
+import { enabledBindingSlots, type ProviderRegistry } from '../providers/registry.js';
 import type { RenderQueue } from '../modules/render.js';
 import type { AIService } from '../modules/ai.js';
 import type { SessionManager } from './security.js';
@@ -533,7 +533,10 @@ export function buildRoutes(services: AppServices): App {
   // --- provider ------------------------------------------------------------
 
   app.get('/api/providers', async (c) => c.json(await services.providers.statuses()));
-  app.get('/api/providers/runninghub/profile', (c) => c.json(services.providers.getProfile()));
+  app.get('/api/providers/runninghub/profile', (c) => {
+    const profile = services.providers.getProfile();
+    return c.json(profile ? { ...profile, bindingSlots: enabledBindingSlots(profile) } : null);
+  });
   app.put('/api/providers/runninghub/profile', async (c) => {
     const profile = services.providers.saveProfile(await c.req.json());
     services.bus.emit({ type: 'project.updated' });

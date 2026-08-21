@@ -4,7 +4,7 @@
 // RunningHub account, not to any single project), so switching projects never
 // loses the verified node mapping.
 
-import type { AiAppProfile, H3Mode, ProviderCapabilities, ProviderStatus } from '@h3mise/shared';
+import type { AiAppProfile, H3Mode, ProviderCapabilities, ProviderStatus, ReferenceRole } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -27,6 +27,11 @@ export function defaultAiAppProfile(): AiAppProfile {
       // Unknown until verified (P0-6): a heuristic default must not be
       // trusted as executable capability in front of a paid render.
       supportedModes: [],
+      maxImageRefs: 9,
+      maxVideoRefs: 3,
+      maxAudioRefs: 3,
+      maxTotalRefs: 12,
+      audioSupported: true,
     },
     nodes: [],
     inputs: {
@@ -34,8 +39,8 @@ export function defaultAiAppProfile(): AiAppProfile {
       mode: { nodeId: 'node_1', fieldName: 'mode' },
       firstFrame: { nodeId: 'node_1', fieldName: 'first_frame' },
       lastFrame: { nodeId: 'node_1', fieldName: 'last_frame' },
-      motion: { nodeId: 'node_1', fieldName: 'motion_video' },
-      audio: { nodeId: 'node_1', fieldName: 'audio' },
+      refImages: [],
+      refAudios: [],
       duration: { nodeId: 'node_1', fieldName: 'duration' },
       resolution: { nodeId: 'node_1', fieldName: 'resolution' },
     },
@@ -53,16 +58,77 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
     return n ? { nodeId: n.nodeId, fieldName: n.fieldName } : { nodeId: '', fieldName: fallback?.fieldName ?? '' };
   };
   const has = (re: RegExp) => (n: AiAppProfile['nodes'][number]) => re.test(n.fieldName) || re.test(n.nodeName) || re.test(n.description);
+  /** Collect every matching node into an ordered slot list. Slots share the
+   * fieldName ("image") and differ by description (首帧/尾帧/参考图1..N), so
+   * order is the apiCallDemo layout order, which follows the workflow.
+   * Semantic priority keeps 首帧/尾帧 ahead of generic 参考图 entries. */
+  const hasDesc = (re: RegExp) => (n: AiAppProfile['nodes'][number]) => re.test(n.description) || re.test(n.nodeName) || re.test(n.fieldName);
+  /** Frame slots are identified by their semantic description (首帧/尾帧);
+   * remaining image nodes become reference-image slots (参考图1..9). */
+  const first = nodes.find(hasDesc(/首帧|first.?frame|start.?image|frame0/i));
+  const last = nodes.find(hasDesc(/尾帧|last.?frame|end.?image/i));
+  const frameIds = new Set([first?.nodeId, last?.nodeId].filter(Boolean));
+  const collect = (re: RegExp) =>
+    nodes.filter((n) => !frameIds.has(n.nodeId)).filter(has(re)).map((n) => ({ nodeId: n.nodeId, fieldName: n.fieldName }));
   return {
     prompt: pick(has(/prompt|text|描述|提示词/i), inputs.prompt),
     mode: pick(has(/mode|模式/i), inputs.mode),
-    firstFrame: pick(has(/first.?frame|首帧|start.?image|image1/i), inputs.firstFrame),
-    lastFrame: pick(has(/last.?frame|尾帧|end.?image|image2/i), inputs.lastFrame),
-    motion: pick(has(/motion|动作|video.?ref/i), inputs.motion),
-    audio: pick(has(/audio|音频|sound/i), inputs.audio),
+    firstFrame: first ? { nodeId: first.nodeId, fieldName: first.fieldName } : { nodeId: '', fieldName: 'first_frame' },
+    lastFrame: last ? { nodeId: last.nodeId, fieldName: last.fieldName } : { nodeId: '', fieldName: 'last_frame' },
+    refImages: collect(/image|参考图|reference/i),
+    refAudios: collect(/ref.?audio|audio_?\d|参考音频/i),
     duration: pick(has(/duration|时长/i), inputs.duration),
-    resolution: pick(has(/resolution|分辨率/i), inputs.resolution),
+    resolution: pick(has(/resolution|分辨率|比例/i), inputs.resolution),
   };
+}
+
+/**
+ * Infer the business modes a workflow can actually run from its node layout.
+ * This is the single source of truth for `capabilities.supportedModes`:
+ *  - t2va    needs a prompt input
+ *  - i2va    needs a first-frame image input
+ *  - l2va    needs a last-frame image input
+ *  - fl2va   needs BOTH first and last frame
+ *  - ref2va  needs a motion/audio reference slot or more than two image
+ *            inputs (extra identity/style references beyond first/last frame)
+ */
+export function inferSupportedModes(inputs: AiAppProfile['inputs'], nodes: AiAppProfile['nodes']): H3Mode[] {
+  const modes: H3Mode[] = [];
+  const hasSlot = (slot: { nodeId: string; fieldName: string } | undefined) => Boolean(slot && slot.nodeId !== '');
+  const hasArray = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.length > 0 && slots.every((s) => s.nodeId !== '');
+  if (hasSlot(inputs.prompt)) modes.push('t2va');
+  if (hasSlot(inputs.firstFrame) || hasArray(inputs.refImages)) modes.push('i2va');
+  if (hasSlot(inputs.lastFrame) || hasArray(inputs.refImages)) modes.push('l2va');
+  if (hasSlot(inputs.firstFrame) && hasSlot(inputs.lastFrame)) modes.push('fl2va');
+  if (hasArray(inputs.refImages) || hasArray(inputs.refAudios)) {
+    modes.push('ref2va');
+  }
+  return modes;
+}
+
+/** Binding roles that actually reach the API, derived from the workflow's
+ * enabled input slots. Descriptive roles (identity/costume/style/…) have no
+ * slot in the workflow model — they are expressed through the prompt. */
+export interface BindingSlots {
+  firstFrame: boolean;
+  lastFrame: boolean;
+  images: number;
+  audios: number;
+  total: number;
+}
+/** Slot availability derived from the workflow's enabled input slots.
+ * Frame mode (firstFrame+lastFrame) and reference-image mode (refImages)
+ * are mutually exclusive; audios expose their capacity. (ref_videos was
+ * dropped from the RunningHub API.) */
+export function enabledBindingSlots(profile: AiAppProfile | undefined): BindingSlots {
+  if (!profile) return { firstFrame: false, lastFrame: false, images: 0, audios: 0, total: 0 };
+  const count = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.filter((s) => s.nodeId !== '').length;
+  const firstFrame = Boolean(profile.inputs.firstFrame && profile.inputs.firstFrame.nodeId !== '');
+  const lastFrame = Boolean(profile.inputs.lastFrame && profile.inputs.lastFrame.nodeId !== '');
+  const images = count(profile.inputs.refImages);
+  const audios = count(profile.inputs.refAudios);
+  const total = images + audios;
+  return { firstFrame, lastFrame, images, audios, total };
 }
 
 export class ProviderRegistry {
@@ -75,6 +141,7 @@ export class ProviderRegistry {
     private readonly ffmpeg: Ffmpeg,
     private readonly envApiKey: string | null,
     private readonly mode: 'runninghub' | 'mock',
+    private readonly bus?: { emit: (e: import('@h3mise/shared').AppEvent) => void },
   ) {}
 
   /** User-set key from the settings page (kv) wins over the env var default. */
@@ -138,7 +205,11 @@ export class ProviderRegistry {
     // advertised as executable (unknown = blocked, not assumed).
     if (prov instanceof RunningHubAiAppProvider) {
       const v = this.getProfile()?.verification;
-      if (v?.status !== 'verified') {
+      // P0-6: never advertise modes as executable from a profile that has no
+      // real node data. Once nodes_detected, supportedModes were inferred
+      // from the ACTUAL node layout (inferSupportedModes), so they are trusted;
+      // verified additionally means a real submission succeeded.
+      if (!v || v.status === 'unconfigured' || v.status === 'failed') {
         caps = { supportedModes: [] };
       }
     }
@@ -147,6 +218,9 @@ export class ProviderRegistry {
   }
 
   async statuses(): Promise<ProviderStatus[]> {
+    // Auto-detect in the background when we have a key but no node data yet —
+    // never blocks the response (the probe can take up to 30s).
+    void this.maybeAutoDetect();
     const out: ProviderStatus[] = [];
     for (const [id, prov] of this.providers) {
       const caps = await this.capabilities(id);
@@ -164,6 +238,31 @@ export class ProviderRegistry {
     return out;
   }
 
+  private autoDetectPromise: Promise<void> | null = null;
+
+  /** Probe the RunningHub workflow layout automatically once, as soon as a key
+   * exists and no node data has been captured yet. Failures are silent (the
+   * user can retry from Settings); a successful probe emits project.updated so
+   * the UI refreshes provider caps + guide. */
+  maybeAutoDetect(): Promise<void> {
+    if (this.mode !== 'runninghub') return Promise.resolve();
+    const v = this.getProfile()?.verification;
+    if (v?.status === 'nodes_detected' || v?.status === 'verified') return Promise.resolve();
+    if (!this.getEffectiveApiKey()) return Promise.resolve();
+    if (this.autoDetectPromise) return this.autoDetectPromise;
+    this.autoDetectPromise = this.detectAndVerify()
+      .then(() => {
+        this.bus?.emit({ type: 'project.updated' });
+      })
+      .catch(() => {
+        /* keep current status; retry on next statuses() call */
+      })
+      .finally(() => {
+        this.autoDetectPromise = null;
+      });
+    return this.autoDetectPromise;
+  }
+
   getProfile(): AiAppProfile | null {
     const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub'");
     return row ? jget<AiAppProfile>(row.profile_json, defaultAiAppProfile()) : defaultAiAppProfile();
@@ -176,17 +275,31 @@ export class ProviderRegistry {
     const base = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const appId = typeof base.appId === 'string' && base.appId.trim() ? base.appId.trim() : d.appId;
     const inputsIn = (base.inputs && typeof base.inputs === 'object' ? base.inputs : {}) as Record<string, unknown>;
-    const inputs = {} as AiAppProfile['inputs'];
+    const slotOf = (v: unknown): { nodeId: string; fieldName: string } => {
+      const s = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+      return {
+        nodeId: typeof s.nodeId === 'string' ? s.nodeId.trim() : '',
+        fieldName: typeof s.fieldName === 'string' ? s.fieldName.trim() : '',
+      };
+    };
+    const inputsRaw: Record<string, unknown> = {};
     for (const key of Object.keys(d.inputs) as Array<keyof AiAppProfile['inputs']>) {
       const def = d.inputs[key];
-      const slot = (inputsIn[key] && typeof inputsIn[key] === 'object' ? inputsIn[key] : {}) as Record<string, unknown>;
-      // Empty nodeId = explicitly disabled slot; keep it disabled (user intent).
-      const nodeId = typeof slot.nodeId === 'string' ? slot.nodeId.trim() : def?.nodeId ?? '';
-      inputs[key] = {
-        nodeId,
-        fieldName: typeof slot.fieldName === 'string' && slot.fieldName.trim() ? slot.fieldName.trim() : def?.fieldName ?? '',
-      };
+      const raw = inputsIn[key];
+      if (Array.isArray(def)) {
+        // Array slot (refImages etc.): keep user's list if present, else empty.
+        inputsRaw[key] = (Array.isArray(raw) ? raw : []).map(slotOf);
+      } else {
+        // Empty nodeId = explicitly disabled slot; keep it disabled (user intent).
+        const slot = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        const nodeId = typeof slot.nodeId === 'string' ? slot.nodeId.trim() : def?.nodeId ?? '';
+        inputsRaw[key] = {
+          nodeId,
+          fieldName: typeof slot.fieldName === 'string' && slot.fieldName.trim() ? slot.fieldName.trim() : def?.fieldName ?? '',
+        };
+      }
     }
+    const inputs = inputsRaw as AiAppProfile['inputs'];
     const verification = base.verification && typeof base.verification === 'object'
       ? base.verification
       : d.verification;
@@ -240,6 +353,7 @@ export class ProviderRegistry {
       ...current,
       nodes,
       inputs: mapDiscoveredNodes(nodes),
+      capabilities: { ...current.capabilities, supportedModes: inferSupportedModes(mapDiscoveredNodes(nodes), nodes) },
       verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
     };
     return this.saveProfile(updated);

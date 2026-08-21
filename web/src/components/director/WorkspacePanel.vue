@@ -16,14 +16,6 @@ import type {
 
 type WorkspaceTarget = 'plan' | 'references' | 'prompt' | 'preflight' | 'takes';
 
-const MODE_TITLE: Record<H3Mode, string> = {
-  t2va: '纯文字生成',
-  i2va: '从一张图片开始',
-  fl2va: '控制开头和结尾',
-  l2va: '控制结束画面',
-  ref2va: '多参考生成',
-};
-
 const REQUIREMENT_LABEL: Record<string, string> = {
   character_state: '角色状态',
   first_frame: '首帧',
@@ -135,7 +127,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
       </div>
       <div class="mode-recommendation">
         <span class="muted">建议模式</span>
-        <strong v-if="recommendedMode">{{ MODE_TITLE[recommendedMode] }}（{{ H3_MODE_LABEL[recommendedMode] }}）</strong>
+        <strong v-if="recommendedMode">{{ H3_MODE_LABEL[recommendedMode] }}</strong>
         <strong v-else>暂无可执行推荐</strong>
         <span v-if="!provider?.capabilities" class="muted">当前 Provider 能力未确认</span>
         <span v-else class="muted">基于已绑定素材与 {{ provider.name }} 能力</span>
@@ -154,7 +146,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
         </span>
       </div>
       <div class="generation-spec">
-        <span>{{ MODE_TITLE[shot.h3Mode ?? 't2va'] }} · {{ H3_MODE_LABEL[shot.h3Mode ?? 't2va'] }}</span>
+        <span>{{ H3_MODE_LABEL[shot.h3Mode ?? 't2va'] }}</span>
         <i />
         <span>{{ shot.durationSeconds }}s</span>
         <i />

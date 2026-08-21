@@ -225,7 +225,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
   z-index: 20;
 }
 .brand { display: flex; align-items: center; text-decoration: none; flex-shrink: 0; }
-.brand-logo { height: 26px; width: auto; display: block; }
+.brand-logo { height: 50px; width: auto; display: block; }
 .brand-name { font-size: 18px; font-weight: 600; color: var(--text); font-family: var(--serif); letter-spacing: 0.02em; }
 .nav { display: flex; gap: 4px; }
 .nav-item {
@@ -301,4 +301,5 @@ watch(() => route.path, () => void scheduleGuideRefresh());
 .ghost-link:hover { color: var(--text); background: var(--bg-subtle); text-decoration: none; }
 .theme-toggle { font-size: 15px; padding: 5px 9px; }
 .main { flex: 1; overflow: auto; }
+.main :deep(.page) { max-width: 1080px; margin: 0 auto; padding: 18px 22px; }
 </style>

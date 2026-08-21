@@ -182,20 +182,38 @@ export class RunningHubAiAppProvider implements VideoProvider {
         out.push({ nodeId: slot.nodeId, fieldName: slot.fieldName, fieldValue: value });
       }
     };
+    // Fill an array slot (ref_images.ref_image_0..8) in order; each entry is
+    // one physical input on the workflow node.
+    const pushArray = (slots: Array<{ nodeId: string; fieldName: string }>, values: string[]) => {
+      for (let i = 0; i < Math.min(slots.length, values.length); i++) {
+        const slot = slots[i];
+        if (slot && slot.nodeId !== '') {
+          const v = values[i];
+          if (v !== undefined) out.push({ nodeId: slot.nodeId, fieldName: slot.fieldName, fieldValue: v });
+        }
+      }
+    };
     push(inputs.prompt, request.prompt);
     if (inputs.mode) {
       push(inputs.mode, request.mode.toUpperCase());
     }
-    // Reference slots by role. Role → slot map (PRD §17 roles).
-    
+    // Two mutually exclusive reference modes (workflow contract):
+    //  - ref2va → reference slots (ref_images/ref_audios); first/last frame
+    //    inputs are ignored. (ref_videos was dropped from the RunningHub API.)
+    //  - i2va/l2va/fl2va → first/last frame slots only; reference slots are
+    //    not sent.
     const firstFrameRef = request.references.find((r) => r.roles.includes('first_frame'));
     const lastFrameRef = request.references.find((r) => r.roles.includes('last_frame'));
-    const motionRef = request.references.find((r) => r.roles.includes('motion') || r.roles.includes('body_motion') || r.roles.includes('camera_motion'));
-    const audioRef = request.references.find((r) => r.roles.includes('audio'));
-    if (firstFrameRef && inputs.firstFrame) push(inputs.firstFrame, firstFrameRef.providerRef);
-    if (lastFrameRef && inputs.lastFrame) push(inputs.lastFrame, lastFrameRef.providerRef);
-    if (motionRef && inputs.motion) push(inputs.motion, motionRef.providerRef);
-    if (audioRef && inputs.audio) push(inputs.audio, audioRef.providerRef);
+    if (request.mode === 'ref2va') {
+      const images = request.references.filter((r) => r.asset.kind === 'image').map((r) => r.providerRef);
+      const audios = request.references.filter((r) => r.asset.kind === 'audio').map((r) => r.providerRef);
+      this.validateRefLimits(images.length, audios.length, request.references);
+      pushArray(inputs.refImages, images);
+      pushArray(inputs.refAudios, audios);
+    } else {
+      push(inputs.firstFrame, firstFrameRef?.providerRef);
+      push(inputs.lastFrame, lastFrameRef?.providerRef);
+    }
     push(inputs.duration, request.durationSeconds ? String(Math.round(request.durationSeconds)) : undefined);
     push(inputs.resolution, request.resolution);
     // P0-4: providerParams are ONLY written through explicit per-key bindings
@@ -212,6 +230,29 @@ export class RunningHubAiAppProvider implements VideoProvider {
       push(binding, v === null || v === undefined ? undefined : String(v));
     }
     return out;
+  }
+
+  /** RunningHub reference limits: ≤9 images, ≤3 audios, ≤12 total, each
+   * audio 2–15s with combined length ≤15s, and audio can never be the only
+   * reference (needs ≥1 image). (ref_videos was dropped from the API.) */
+  private validateRefLimits(
+    imageCount: number,
+    audioCount: number,
+    refs: RenderRequestInput['references'],
+  ): void {
+    const cap = this.profile.capabilities;
+    if (imageCount > (cap.maxImageRefs ?? 9)) throw new ProviderError(`参考图片最多 ${cap.maxImageRefs ?? 9} 张（当前 ${imageCount} 张）`, 'submit');
+    if (audioCount > (cap.maxAudioRefs ?? 3)) throw new ProviderError(`参考音频最多 ${cap.maxAudioRefs ?? 3} 个（当前 ${audioCount} 个）`, 'submit');
+    if (imageCount + audioCount > (cap.maxTotalRefs ?? 12)) {
+      throw new ProviderError(`参考文件合计最多 ${cap.maxTotalRefs ?? 12} 个（当前 ${imageCount + audioCount} 个）`, 'submit');
+    }
+    const audSecs = refs.filter((r) => r.asset.kind === 'audio').reduce((sum, r) => sum + (r.asset.durationSeconds ?? 0), 0);
+    if (audSecs > 15) throw new ProviderError('参考音频总时长不能超过 15 秒', 'submit');
+    const tooLong = refs.find((r) => r.asset.kind === 'audio' && r.asset.durationSeconds != null && r.asset.durationSeconds > 15);
+    if (tooLong) throw new ProviderError(`单个参考音频时长不能超过 15 秒（当前 ${tooLong.asset.durationSeconds}s）`, 'submit');
+    if (audioCount > 0 && imageCount === 0) {
+      throw new ProviderError('参考音频不能单独作为唯一参考，请至少同时提供一张参考图片', 'submit');
+    }
   }
 
   async status(handle: RenderJobHandle): Promise<RenderStatus> {

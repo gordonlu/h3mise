@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { H3_MODE_LABEL } from '@h3mise/shared';
 import type { H3Mode, PromptVersion } from '@h3mise/shared';
 
 const props = defineProps<{
@@ -46,7 +47,7 @@ async function copy(text: string) {
   <div class="col">
     <div class="row wrap">
       <select v-model="mode" class="mode-select" title="H3 生成模式">
-        <option v-for="m in availableModes" :key="m" :value="m">{{ m.toUpperCase() }}</option>
+        <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
       </select>
       <button class="primary sm" :disabled="busy !== ''" @click="run('compile', () => onCompile(mode))">
         {{ busy === 'compile' ? '编译中…' : 'Standard Compile' }}
@@ -73,7 +74,7 @@ async function copy(text: string) {
       <div v-for="pv in [...prompts].reverse()" :key="pv.id" class="panel prompt-item">
         <div class="spread">
           <div class="row wrap">
-            <span class="badge accent no-dot">{{ pv.h3Mode.toUpperCase() }}</span>
+            <span class="badge accent no-dot">{{ H3_MODE_LABEL[pv.h3Mode] }}</span>
             <span class="badge no-dot">{{ SOURCE_LABEL[pv.source] ?? pv.source }}</span>
             <span class="muted mono">{{ pv.id }}</span>
             <span class="muted">{{ new Date(pv.createdAt).toLocaleString() }}</span>

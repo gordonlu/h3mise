@@ -191,7 +191,7 @@ function save() {
         <span v-else class="badge ok">已保存</span>
       </div>
       <div class="row">
-        <button v-if="aiEnabled" class="sm" :disabled="aiBusy" @click="props.onAiSuggest('full')">AI 建议全计划</button>
+        <button v-if="aiEnabled" class="sm" :disabled="aiBusy" @click="props.onAiSuggest('full')">{{ aiBusy ? 'AI 处理中…' : 'AI 建议全计划' }}</button>
         <button class="sm" @click="emit('paste')">粘贴外部 AI</button>
         <button class="primary sm" :class="{ pulse: isDirty }" @click="save">保存为新版本</button>
       </div>
@@ -204,7 +204,7 @@ function save() {
         <span class="sec-en">{{ sec.en }}</span>
         <span v-if="!open.has(sec.key) && filledCount(sec)" class="badge accent no-dot">{{ filledCount(sec) }} 项已填</span>
         <span class="grow" />
-        <button v-if="sec.ai && aiEnabled" class="sm ghost" :disabled="aiBusy" @click.stop="props.onAiSuggest(sec.key)">AI 建议</button>
+        <button v-if="sec.ai && aiEnabled" class="sm ghost" :disabled="aiBusy" @click.stop="props.onAiSuggest(sec.key)">{{ aiBusy ? 'AI 处理中…' : 'AI 建议' }}</button>
       </div>
       <div v-if="open.has(sec.key)" class="panel-body grid two" :class="{ 'intent-grid': sec.key === 'intent' }">
         <label v-for="f in sec.fields" :key="f.path.join('.')" class="field">

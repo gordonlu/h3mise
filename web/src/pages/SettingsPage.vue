@@ -55,6 +55,10 @@ async function load() {
   await project.refreshProviders();
 }
 
+onMounted(() => {
+  void load();
+});
+
 async function saveProjectConfig(patchData: Record<string, unknown>) {
   await project.saveConfig(patchData);
   notice.value = '项目配置已保存';

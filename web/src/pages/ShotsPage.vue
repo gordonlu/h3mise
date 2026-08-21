@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { get, post, fileUrl } from '../api/client';
+import { get, post, del, fileUrl } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
+import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL } from '@h3mise/shared';
 import type { Shot, ShotStatus } from '@h3mise/shared';
@@ -73,6 +74,23 @@ async function createShot() {
   }
 }
 
+async function deleteShot(shot: ShotCard) {
+  const ok = await confirmDialog({
+    title: `删除 Shot「${shot.title || shot.id}」？`,
+    message: '将同时删除其导演计划、Prompt 版本、Takes、生成任务和 Timeline 片段，不可恢复。',
+    confirmLabel: '删除',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await del(`/api/shots/${shot.id}`);
+    toasts.push({ kind: 'ok', text: 'Shot 已删除' });
+    await load();
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 async function pasteShots() {
   busy.value = true;
   try {
@@ -83,11 +101,22 @@ async function pasteShots() {
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed)) items = parsed;
     } catch {
-      items = text
+      const lines = text
         .split('\n')
         .map((l) => l.trim())
-        .filter((l) => l && !l.startsWith('#') && !l.startsWith('-'))
-        .map((l) => ({ title: l.replace(/^\d+[.、)\s]*/, '').slice(0, 60) }));
+        .filter((l) => l && !l.startsWith('#') && !l.startsWith('-'));
+      // Guard: 段落式内容（每行以【】开头）更像单条 Prompt 而不是 Shot 列表，
+      // 按行拆分会误建成多个 Shot —— 先让用户确认。
+      if (lines.length > 1 && lines.every((l) => l.startsWith('【'))) {
+        const proceed = await confirmDialog({
+          title: '看起来像单条 Prompt？',
+          message: `检测到 ${lines.length} 段以【】开头的段落，通常是同一条 Prompt 的分段而不是 Shot 列表。确认要按行拆分成 ${lines.length} 个 Shot 吗？\n\n如需整段导入 Prompt，请到 Shot 页 → Prompt → 粘贴 Raw Prompt。`,
+          confirmLabel: '仍要拆分',
+          danger: true,
+        });
+        if (!proceed) return;
+      }
+      items = lines.map((l) => ({ title: l.replace(/^\d+[.、)\s]*/, '').slice(0, 60) }));
     }
     const res = await post<Shot[]>('/api/shots/bulk', { items });
     toasts.push({ kind: 'ok', text: `已创建 ${res.length} 个 Shot` });
@@ -130,7 +159,7 @@ onMounted(load);
           <label class="field">
             H3 Mode
             <select v-model="newShot.h3Mode">
-              <option v-for="m in availableModes" :key="m" :value="m">{{ m.toUpperCase() }}</option>
+              <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
             </select>
           </label>
           <label class="field">
@@ -181,6 +210,7 @@ onMounted(load);
             <span :class="['st', `st-${SHOT_USER_STATUS[s.status]}`]" :title="`内部状态：${SHOT_STATUS_LABEL[s.status]}`">
               <i />{{ SHOT_USER_STATUS_LABEL[SHOT_USER_STATUS[s.status]] }}
             </span>
+            <button class="sm danger shot-delete" title="删除 Shot（含其计划、Prompt、Takes 与任务）" @click.stop.prevent="deleteShot(s)">删除</button>
           </div>
           <div class="row wrap">
             <span class="badge accent no-dot">{{ H3_MODE_LABEL[s.h3Mode ?? 't2va'] }}</span>
@@ -213,7 +243,8 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .status-filter { width: 110px; }
 .create-panel { margin: 16px 0; }
 .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-top: 18px; }
-.card { display: block; text-decoration: none; color: inherit; overflow: hidden; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
+.shot-delete { margin-left: auto; padding: 2px 10px; font-size: 11px; flex: none; }
+.card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
 .card:hover { border-color: var(--accent-line); transform: translateY(-2px); box-shadow: var(--shadow-2); text-decoration: none; }
 .cover { position: relative; height: 142px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .cover img { width: 100%; height: 100%; object-fit: cover; }

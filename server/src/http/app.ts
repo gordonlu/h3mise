@@ -24,7 +24,19 @@ export function buildApp(services: AppServices, webDist: string | null): Hono<{ 
     await next();
   });
 
-  // 2) Static web (built SPA) with history fallback — skips /api/*.
+  // 2) Dev mode: API-only — no stale build served. Tell users where the UI is.
+  if (!webDist) {
+    app.get('/', (c) =>
+      c.json({
+        ok: true,
+        api: 'H3Mise API server (dev)',
+        ui: 'http://localhost:5173',
+        note: 'In dev the UI runs on Vite (5173); this port serves API only. `pnpm start` serves the built UI.',
+      }),
+    );
+  }
+
+  // 3) Production: static web (built SPA) with history fallback — skips /api/*.
   if (webDist && existsSync(webDist)) {
     app.use('*', async (c, next) => {
       const path = c.req.path;

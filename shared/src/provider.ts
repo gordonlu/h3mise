@@ -11,9 +11,13 @@ export interface ProviderCapabilities {
   maxDuration?: number;
   supportedAspectRatios?: string[];
   supportedResolutions?: string[];
+  /** RunningHub reference limits: ≤9 images, ≤3 videos, ≤3 audios,
+   * ≤12 total, each video/audio 2–15s and their combined length ≤15s,
+   * and audio can never be the only reference (needs ≥1 image or video). */
   maxImageRefs?: number;
   maxVideoRefs?: number;
   maxAudioRefs?: number;
+  maxTotalRefs?: number;
   audioSupported?: boolean;
 }
 
@@ -32,14 +36,18 @@ export interface AiAppProfile {
     fieldData: string | null;
     description: string;
   }>;
-  /** Business input → app node slot mapping. */
+  /** Business input → app node slot mapping. Array slots (refImages etc.)
+   * list one entry per physical slot; submit fills them by order.
+   * Two mutually exclusive image modes: firstFrame+lastFrame (2 slots) or
+   * refImages (reference-image mode, ≤9); never both.
+   * ref_videos was dropped from the RunningHub API — no video slots. */
   inputs: {
     prompt: { nodeId: string; fieldName: string };
     mode?: { nodeId: string; fieldName: string };
     firstFrame?: { nodeId: string; fieldName: string };
     lastFrame?: { nodeId: string; fieldName: string };
-    motion?: { nodeId: string; fieldName: string };
-    audio?: { nodeId: string; fieldName: string };
+    refImages: Array<{ nodeId: string; fieldName: string }>;
+    refAudios: Array<{ nodeId: string; fieldName: string }>;
     duration?: { nodeId: string; fieldName: string };
     resolution?: { nodeId: string; fieldName: string };
     extra?: { nodeId: string; fieldName: string };

@@ -19,6 +19,7 @@ interface BeatRow {
   characters_json: string;
   state_change: string;
   notes: string;
+  duration_seconds: number;
   created_at: string;
   updated_at: string;
 }
@@ -37,34 +38,38 @@ function beatFromRow(r: BeatRow): StoryBeat {
     characters: jget<string[]>(r.characters_json, []),
     stateChange: r.state_change,
     notes: r.notes,
+    durationSeconds: r.duration_seconds,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
 export function getStory(p: ProjectContext): StoryDoc {
-  const r = p.db.get<{ id: string; title: string; logline: string; synopsis: string; body: string; created_at: string; updated_at: string }>(
+  const r = p.db.get<{ id: string; title: string; synopsis: string; body: string; planned_duration_seconds: number; created_at: string; updated_at: string }>(
     'SELECT * FROM story LIMIT 1',
   );
   if (!r) throw new Error('story missing');
   return {
     id: r.id,
     title: r.title,
-    logline: r.logline,
     synopsis: r.synopsis,
     body: r.body,
+    plannedDurationSeconds: r.planned_duration_seconds,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-export function updateStory(p: ProjectContext, patch: Partial<Pick<StoryDoc, 'title' | 'logline' | 'synopsis' | 'body'>>): StoryDoc {
+export function updateStory(p: ProjectContext, patch: Partial<Pick<StoryDoc, 'title' | 'synopsis' | 'body' | 'plannedDurationSeconds'>>): StoryDoc {
   const now = new Date().toISOString();
+  const map: Record<string, string> = {
+    plannedDurationSeconds: 'planned_duration_seconds',
+  };
   const cols: string[] = [];
   const vals: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(`${k} = ?`);
+    cols.push(`${map[k] ?? k} = ?`);
     vals.push(v);
   }
   if (cols.length === 0) return getStory(p);
@@ -128,14 +133,14 @@ export function getBeat(p: ProjectContext, id: string): StoryBeat {
 
 export function createBeat(
   p: ProjectContext,
-  input: Partial<Pick<StoryBeat, 'title' | 'category' | 'summary' | 'location' | 'timeOfDay' | 'weather' | 'characters' | 'stateChange' | 'notes' | 'sequenceId'>>,
+  input: Partial<Pick<StoryBeat, 'title' | 'category' | 'summary' | 'location' | 'timeOfDay' | 'weather' | 'characters' | 'stateChange' | 'notes' | 'durationSeconds' | 'sequenceId'>>,
 ): StoryBeat {
   const id = nextId(p.db, 'beat');
   const now = new Date().toISOString();
   const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM story_beats')!.m;
   p.db.run(
-    `INSERT INTO story_beats (id, sequence_id, ord, title, category, summary, location, time_of_day, weather, characters_json, state_change, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO story_beats (id, sequence_id, ord, title, category, summary, location, time_of_day, weather, characters_json, state_change, notes, duration_seconds, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.sequenceId ?? null,
@@ -149,6 +154,7 @@ export function createBeat(
       j(input.characters ?? []),
       input.stateChange ?? '',
       input.notes ?? '',
+      input.durationSeconds ?? 5,
       now,
       now,
     ],
@@ -170,6 +176,7 @@ export function updateBeat(p: ProjectContext, id: string, patch: Partial<Omit<St
     characters: 'characters_json',
     stateChange: 'state_change',
     notes: 'notes',
+    durationSeconds: 'duration_seconds',
   };
   const cols: string[] = [];
   const vals: unknown[] = [];

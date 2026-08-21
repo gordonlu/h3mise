@@ -6,7 +6,7 @@ import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { useRenderStore } from '../stores/render';
 import { confirmDialog } from '../stores/confirm';
-import { get, post, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
+import { get, post, del, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan, MediaAsset, NextAction } from '@h3mise/shared';
 import PlanEditor from '../components/director/PlanEditor.vue';
@@ -158,8 +158,11 @@ async function runAi(action: string, body: Record<string, unknown>): Promise<unk
   const key = `${action}:${JSON.stringify(body).slice(0, 40)}`;
   const res = await post<{ jobId: string; status: string }>(`/api/ai/actions/${action}`, body);
   aiJobs.value[key] = res.jobId;
+  toasts.push({ kind: 'info', text: `AI 任务已提交，后台处理中（通常 10–60 秒，最长 3 分钟），结果会即时提示…` });
+  let waited = 0;
   for (let i = 0; i < 180; i++) {
     await new Promise((r) => setTimeout(r, 1500));
+    waited += 1.5;
     const job = await get<{ status: string; result: unknown; error: string | null }>(`/api/jobs/${res.jobId}`);
     if (job.status === 'done') {
       delete aiJobs.value[key];
@@ -169,11 +172,29 @@ async function runAi(action: string, body: Record<string, unknown>): Promise<unk
       delete aiJobs.value[key];
       throw new Error(job.error ?? 'AI job failed');
     }
+    if (waited >= 30 && waited < 32) toasts.push({ kind: 'info', text: 'AI 仍在处理，请稍候…（超过 3 分钟会提示超时）' });
   }
   throw new Error('AI job timeout');
 }
 
 const aiBusy = computed(() => Object.keys(aiJobs.value).length > 0);
+
+async function deleteThisShot() {
+  const ok = await confirmDialog({
+    title: `删除 Shot「${sShot.value?.title || shotId}」？`,
+    message: '将同时删除其导演计划、Prompt 版本、Takes、生成任务和 Timeline 片段，不可恢复。',
+    confirmLabel: '删除',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await del(`/api/shots/${shotId}`);
+    toasts.push({ kind: 'ok', text: 'Shot 已删除' });
+    router.push('/shots');
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
 
 async function guarded(fn: () => Promise<unknown>, okMsg?: string) {
   try {
@@ -398,10 +419,11 @@ const TABS = [
         <span v-if="sShot.sequenceId" class="badge info no-dot">{{ sDetail?.sequences.find((x) => x.id === sShot?.sequenceId)?.title }}</span>
       </div>
       <div class="row controls">
+        <button class="sm danger ghost" title="删除此 Shot 及其全部子数据" @click="deleteThisShot">删除 Shot</button>
         <label class="ctl">
           <span class="ctl-label">H3 Mode</span>
           <select v-model="sShot.h3Mode" @change="s.updateShot({ h3Mode: sShot?.h3Mode ?? 't2va' })">
-            <option v-for="m in availableModes" :key="m" :value="m">{{ m.toUpperCase() }}</option>
+            <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
           </select>
         </label>
         <label class="ctl">

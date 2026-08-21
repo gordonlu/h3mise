@@ -54,6 +54,7 @@ export interface StoryBeat {
   characters: string[]; // entity ids
   stateChange?: string;
   notes?: string;
+  durationSeconds: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,9 +71,9 @@ export interface Sequence {
 export interface StoryDoc {
   id: string;
   title: string;
-  logline: string;
   synopsis: string;
   body: string; // free-form script / source text
+  plannedDurationSeconds: number;
   createdAt: string;
   updatedAt: string;
 }

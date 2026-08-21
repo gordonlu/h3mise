@@ -29,7 +29,7 @@ async function createProject() {
   try {
     await project.createProject({ ...form.value, format: form.value.format as never });
     toasts.push({ kind: 'ok', text: `项目「${form.value.title}」已创建` });
-    router.push('/shots');
+    router.push(form.value.format === 'story' ? '/story' : '/shots');
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -39,7 +39,7 @@ async function createProject() {
 
 async function openProject(id: string) {
   await project.openProject(id);
-  router.push('/shots');
+  router.push(project.current?.meta.format === 'story' ? '/story' : '/shots');
 }
 
 async function continueProject(id: string, to = '/shots') {
@@ -95,8 +95,8 @@ onMounted(() => project.refreshProjects());
               </select>
             </label>
             <label class="field grow">
-              默认时长 (s)
-              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" title="每个新镜头的默认时长（1–15 秒）" placeholder="5" />
+              默认单镜头时长 (s)
+              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" title="每个新镜头（含 AI 拆解生成的镜头）的默认时长（1–15 秒）" placeholder="5" />
             </label>
           </div>
           <p v-if="error" class="badge bad">{{ error }}</p>

@@ -40,6 +40,7 @@ async function main(): Promise<void> {
     ffmpeg,
     config.runningHubApiKey,
     config.providerMode,
+    bus,
   );
   const queue = new RenderQueue(() => store, registry, ffmpeg, bus);
   const jobs = new JobRunner(bus);
@@ -77,9 +78,11 @@ async function main(): Promise<void> {
   );
 
   const server = serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' });
-  console.log(`\n  H3Mise running at http://127.0.0.1:${config.port}`);
+  console.log(`\n  H3Mise API server running at http://127.0.0.1:${config.port}`);
   if (!config.webDist) {
-    console.log('  (web not built — run `pnpm dev:web` and open the Vite URL, or `pnpm --filter @h3mise/web build`)');
+    console.log('  (API only — UI runs on Vite: http://localhost:5173)');
+  } else {
+    console.log('  (serving built UI — H3MISE_SERVE_WEB=1)');
   }
 
   // Persist which project was open so restart reopens it.

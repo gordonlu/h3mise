@@ -119,7 +119,7 @@ export function buildContextPackage(
     [shotId],
   );
   const project = p.config;
-  const story = p.db.get<{ title: string; logline: string; synopsis: string }>('SELECT title, logline, synopsis FROM story LIMIT 1');
+  const story = p.db.get<{ title: string; synopsis: string }>('SELECT title, synopsis FROM story LIMIT 1');
   return {
     project,
     story_context: story,

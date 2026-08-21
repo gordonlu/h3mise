@@ -10,13 +10,23 @@ import EmptyState from '../components/EmptyState.vue';
 
 const project = useProjectStore();
 const toasts = useToastStore();
-const story = ref<{ id: string; title: string; logline: string; synopsis: string; body: string } | null>(null);
+const story = ref<{ id: string; title: string; synopsis: string; body: string; plannedDurationSeconds: number } | null>(null);
 const beats = ref<StoryBeat[]>([]);
 const shots = ref<Array<{ id: string; title: string; storyBeatId: string | null }>>([]);
 const aiEnabled = ref(false);
 const aiBusy = ref(false);
 
 const CATEGORIES = ['setup', 'inciting_incident', 'rising_action', 'climax', 'falling_action', 'resolution', 'transition', 'other'];
+const CATEGORY_LABEL: Record<string, string> = {
+  setup: '铺垫',
+  inciting_incident: '激励事件',
+  rising_action: '上升行动',
+  climax: '高潮',
+  falling_action: '下降行动',
+  resolution: '收束',
+  transition: '过渡',
+  other: '其他',
+};
 
 /** Beat → linked shots. */
 const beatShots = computed(() => {
@@ -94,6 +104,7 @@ async function aiStoryToBeats() {
   });
   if (!ok) return;
   aiBusy.value = true;
+  toasts.push({ kind: 'info', text: 'AI 拆解已提交，后台处理中（通常 10–60 秒，最长 3 分钟）…' });
   try {
     const res = await post<{ jobId: string }>('/api/ai/actions/story_to_beats', {});
     for (let i = 0; i < 180; i++) {
@@ -101,9 +112,19 @@ async function aiStoryToBeats() {
       const job = await get<{ status: string; result: unknown; error: string | null }>(`/api/jobs/${res.jobId}`);
       if (job.status === 'done') {
         const out = (job.result as { beats: Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>> }).beats;
-        for (const b of out) await post('/api/story/beats', b);
+        let shotsCreated = 0;
+        for (const b of out) {
+          const beat = await post<{ id: string }>('/api/story/beats', b);
+          await post('/api/shots', {
+            title: b.title ?? 'New Beat',
+            storyBeatId: beat.id,
+            purpose: b.summary,
+            durationSeconds: b.durationSeconds ?? 5,
+          });
+          shotsCreated++;
+        }
         await load();
-        toasts.push({ kind: 'ok', text: t('pages.story.aiDone', { n: out.length }) });
+        toasts.push({ kind: 'ok', text: `拆解完成：${out.length} 个节拍，并已自动生成 ${shotsCreated} 个 Shot（可到 Shotboard 继续导演计划与生成）` });
         return;
       }
       if (job.status === 'failed') {
@@ -141,18 +162,18 @@ onMounted(load);
         <div class="panel-title">{{ t('pages.story.subtitle') }}</div>
         <div class="panel-body col facts-body">
           <div class="grid two">
-            <label class="field">
-              {{ t('pages.story.titleField') }}
-              <input :value="story?.title ?? ''" placeholder="故事标题" @change="saveStory({ title: ($event.target as HTMLInputElement).value })" />
-            </label>
-            <label class="field">
-              {{ t('pages.story.logline') }}
-              <input :value="story?.logline ?? ''" placeholder="一句话说清故事" @change="saveStory({ logline: ($event.target as HTMLInputElement).value })" />
-            </label>
-          </div>
+          <label class="field">
+            {{ t('pages.story.titleField') }}
+            <input :value="story?.title ?? ''" :disabled="aiBusy" placeholder="故事标题" @change="saveStory({ title: ($event.target as HTMLInputElement).value })" />
+          </label>
+          <label class="field">
+            规划总时长 (s)
+            <input :value="story?.plannedDurationSeconds ?? ''" :disabled="aiBusy" type="number" min="0" max="900" placeholder="如 90（AI 拆解按此分配节拍时长）" @change="saveStory({ plannedDurationSeconds: Number(($event.target as HTMLInputElement).value) || 0 })" />
+          </label>
+        </div>
           <label class="field">
             {{ t('pages.story.synopsis') }}
-            <textarea :value="story?.synopsis ?? ''" rows="3" placeholder="三五行概括剧情走向" @change="saveStory({ synopsis: ($event.target as HTMLTextAreaElement).value })"></textarea>
+            <textarea :disabled="aiBusy" class="field-synopsis" :value="story?.synopsis ?? ''" rows="6" placeholder="剧情梗概：主角是谁、发生什么、如何收场（供 AI 拆解使用）" @change="saveStory({ synopsis: ($event.target as HTMLTextAreaElement).value })"></textarea>
           </label>
           <div class="script-frame">
             <div class="script-head">
@@ -162,6 +183,7 @@ onMounted(load);
             <textarea
               class="script-body"
               rows="16"
+              :disabled="aiBusy"
               placeholder="在此粘贴剧本 / 小说片段…"
               :value="story?.body ?? ''"
               @change="saveStory({ body: ($event.target as HTMLTextAreaElement).value })"
@@ -172,8 +194,10 @@ onMounted(load);
 
       <div class="panel beats-panel">
         <div class="panel-title spread">
-          <span>{{ t('pages.story.beats') }} <span class="muted">{{ beats.length }}</span></span>
-          <button class="sm" @click="addBeat">{{ t('pages.story.newBeat') }}</button>
+          <span>{{ t('pages.story.beats') }} <span class="muted">{{ beats.length }}</span>
+            <span v-if="story?.plannedDurationSeconds" class="muted plan-hint">{{ beats.reduce((acc, b) => acc + (b.durationSeconds || 0), 0) }} / {{ story.plannedDurationSeconds }}s 已规划</span>
+          </span>
+          <button class="sm" :disabled="aiBusy" @click="addBeat">{{ t('pages.story.newBeat') }}</button>
         </div>
         <div class="panel-body col">
           <EmptyState
@@ -182,28 +206,29 @@ onMounted(load);
             :title="t('pages.story.noBeatsTitle')"
             :desc="t('pages.story.noBeatsDesc')"
           >
-            <button class="sm" @click="addBeat">{{ t('pages.story.newBeat') }}</button>
+            <button class="sm" :disabled="aiBusy" @click="addBeat">{{ t('pages.story.newBeat') }}</button>
           </EmptyState>
           <div v-for="(b, i) in beats" :key="b.id" class="beat panel">
             <div class="spread">
               <div class="row beat-head">
                 <span class="mono muted beat-idx">{{ String(i + 1).padStart(2, '0') }}</span>
-                <input :value="b.title" class="beat-title" placeholder="Beat 标题" @change="updateBeat(b.id, { title: ($event.target as HTMLInputElement).value })" />
-                <select :value="b.category" @change="updateBeat(b.id, { category: ($event.target as HTMLSelectElement).value as never })">
-                  <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
+                <input :value="b.title" :disabled="aiBusy" class="beat-title" placeholder="Beat 标题" @change="updateBeat(b.id, { title: ($event.target as HTMLInputElement).value })" />
+                <input :value="b.durationSeconds" :disabled="aiBusy" type="number" min="1" max="60" class="beat-dur" title="节拍时长（秒）" @change="updateBeat(b.id, { durationSeconds: Number(($event.target as HTMLInputElement).value) || 5 })" />
+                <select :value="b.category" :disabled="aiBusy" @change="updateBeat(b.id, { category: ($event.target as HTMLSelectElement).value as never })">
+                  <option v-for="c in CATEGORIES" :key="c" :value="c">{{ CATEGORY_LABEL[c] ?? c }}</option>
                 </select>
               </div>
               <div class="row">
-                <button class="sm ghost" title="上移" @click="moveBeat(b.id, -1)">↑</button>
-                <button class="sm ghost" title="下移" @click="moveBeat(b.id, 1)">↓</button>
-                <button class="sm danger ghost" @click="removeBeat(b.id)">{{ t('common.delete') }}</button>
+                <button class="sm ghost" :disabled="aiBusy" title="上移" @click="moveBeat(b.id, -1)">↑</button>
+                <button class="sm ghost" :disabled="aiBusy" title="下移" @click="moveBeat(b.id, 1)">↓</button>
+                <button class="sm danger ghost" :disabled="aiBusy" @click="removeBeat(b.id)">{{ t('common.delete') }}</button>
               </div>
             </div>
-            <textarea :value="b.summary" rows="2" :placeholder="t('pages.story.beatSummary')" @change="updateBeat(b.id, { summary: ($event.target as HTMLTextAreaElement).value })"></textarea>
+            <textarea :value="b.summary" :disabled="aiBusy" rows="5" :placeholder="t('pages.story.beatSummary')" @change="updateBeat(b.id, { summary: ($event.target as HTMLTextAreaElement).value })"></textarea>
             <div class="row wrap">
-              <input :value="b.location ?? ''" :placeholder="t('pages.story.location')" class="small" @change="updateBeat(b.id, { location: ($event.target as HTMLInputElement).value })" />
-              <input :value="b.timeOfDay ?? ''" :placeholder="t('pages.story.timeOfDay')" class="small" @change="updateBeat(b.id, { timeOfDay: ($event.target as HTMLInputElement).value })" />
-              <input :value="b.weather ?? ''" :placeholder="t('pages.story.weather')" class="small" @change="updateBeat(b.id, { weather: ($event.target as HTMLInputElement).value })" />
+              <input :value="b.location ?? ''" :disabled="aiBusy" :placeholder="t('pages.story.location')" class="small" @change="updateBeat(b.id, { location: ($event.target as HTMLInputElement).value })" />
+              <input :value="b.timeOfDay ?? ''" :disabled="aiBusy" :placeholder="t('pages.story.timeOfDay')" class="small" @change="updateBeat(b.id, { timeOfDay: ($event.target as HTMLInputElement).value })" />
+              <input :value="b.weather ?? ''" :disabled="aiBusy" :placeholder="t('pages.story.weather')" class="small" @change="updateBeat(b.id, { weather: ($event.target as HTMLInputElement).value })" />
             </div>
             <div v-if="beatShots.get(b.id)?.length" class="row wrap beat-shots">
               <span class="muted">{{ t('pages.story.splitShots') }}：</span>
@@ -268,7 +293,10 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 }
 .script-body:focus { border: none; box-shadow: none; }
 .script-body::placeholder { color: var(--text-3); font-family: var(--serif); }
+.field-synopsis { font-family: var(--serif); font-size: 14.5px; line-height: 1.9; min-height: 140px; }
 .beats-panel { align-self: start; }
+.beat-dur { width: 58px; }
+.plan-hint { font-size: 11px; margin-left: 6px; }
 .beat { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .beat-head { flex-wrap: wrap; }
 .beat-idx { font-size: 11px; }

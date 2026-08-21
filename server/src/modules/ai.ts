@@ -28,7 +28,7 @@ export class OpenAICompatModel implements DirectorModel {
     private readonly model: string,
   ) {}
 
-  private async chat(input: DirectorInput): Promise<string> {
+  private async chatOnce(input: DirectorInput): Promise<string> {
     const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -41,7 +41,7 @@ export class OpenAICompatModel implements DirectorModel {
         temperature: input.temperature ?? 0.7,
         ...(input.json ? { response_format: { type: 'json_object' } } : {}),
       }),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(90_000),
     });
     if (!res.ok) throw new Error(`AI HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -50,19 +50,81 @@ export class OpenAICompatModel implements DirectorModel {
     return content;
   }
 
+  private async chat(input: DirectorInput): Promise<string> {
+    try {
+      return await this.chatOnce(input);
+    } catch (first) {
+      // Transient failures (timeout / 5xx / network) get one retry — normal
+      // requests finish in seconds, so this only masks hiccups.
+      const retryable =
+        first instanceof Error &&
+        (/aborted due to timeout|AI HTTP 5\d\d|fetch failed/i.test(first.message));
+      if (!retryable) throw first;
+      try {
+        return await this.chatOnce(input);
+      } catch (second) {
+        throw new Error(`${second instanceof Error ? second.message : second} (retried once)`);
+      }
+    }
+  }
+
   async complete(input: DirectorInput): Promise<string> {
     return this.chat(input);
   }
 
   async structured<T>(input: DirectorInput): Promise<T> {
     const text = await this.chat({ ...input, json: true });
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) return JSON.parse(match[0]) as T;
-      throw new Error('AI did not return valid JSON');
+    const parsed = this.extractJson<T>(text);
+    if (parsed.ok) return parsed.value;
+    // The model ignored the JSON instruction — retry once with a blunt order.
+    const retry = await this.chat({
+      ...input,
+      json: true,
+      messages: [
+        ...input.messages,
+        { role: 'assistant', content: text.slice(0, 2000) },
+        {
+          role: 'user',
+          content:
+            'Your previous reply contained NO valid JSON. Respond with ONLY a single valid JSON value (array or object). No prose. No markdown. No code fences. No explanations. Begin directly with [ or { and end with ] or }.',
+        },
+      ],
+    });
+    const retried = this.extractJson<T>(retry);
+    if (retried.ok) return retried.value;
+    throw new Error(`AI did not return valid JSON (after retry): ${retry.slice(0, 120)}`);
+  }
+
+  private extractJson<T>(text: string): { ok: true; value: T } | { ok: false } {
+    const candidates = [text];
+    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence?.[1]) candidates.push(fence[1]);
+    for (const cand of candidates) {
+      try {
+        return { ok: true, value: JSON.parse(cand) as T };
+      } catch {
+        /* keep trying */
+      }
     }
+    for (const cand of candidates) {
+      const obj = cand.match(/\{[\s\S]*\}/);
+      if (obj) {
+        try {
+          return { ok: true, value: JSON.parse(obj[0]) as T };
+        } catch {
+          /* keep trying */
+        }
+      }
+      const arr = cand.match(/\[[\s\S]*\]/);
+      if (arr) {
+        try {
+          return { ok: true, value: JSON.parse(arr[0]) as T };
+        } catch {
+          /* keep trying */
+        }
+      }
+    }
+    return { ok: false };
   }
 }
 

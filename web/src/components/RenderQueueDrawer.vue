@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useRenderStore } from '../stores/render';
 import { post } from '../api/client';
 import { confirmDialog } from '../stores/confirm';
+import { H3_MODE_LABEL } from '@h3mise/shared';
 import type { RenderJob } from '@h3mise/shared';
 
 const render = useRenderStore();
@@ -94,7 +95,7 @@ onMounted(() => render.refresh());
             </div>
             <div class="row wrap muted">
               <span class="badge" @click="router.push(`/shots/${job.shotId}`)" style="cursor: pointer">Shot {{ job.shotId }}</span>
-              <span class="badge">{{ job.requestSnapshot?.mode?.toUpperCase() }}</span>
+              <span class="badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
               <span v-if="job.providerTaskId" class="mono" :title="job.providerTaskId">{{ job.providerTaskId.slice(0, 16) }}…</span>
               <span v-if="costText(job)">{{ costText(job) }}</span>
             </div>

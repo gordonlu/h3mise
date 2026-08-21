@@ -282,6 +282,26 @@ UPDATE takes SET status = 'candidate'
 CREATE UNIQUE INDEX uq_take_selected ON takes(shot_id) WHERE status = 'selected';
 `,
   },
+  {
+    version: 6,
+    name: 'merge-logline-into-synopsis',
+    sql: `
+-- Merge logline into synopsis (logline field removed), then drop the column.
+UPDATE story SET synopsis = logline || '\n\n' || synopsis
+  WHERE logline != '' AND synopsis != '';
+UPDATE story SET synopsis = logline WHERE logline != '' AND synopsis = '';
+ALTER TABLE story DROP COLUMN logline;
+`,
+  },
+  {
+    version: 7,
+    name: 'story-duration-plan',
+    sql: `
+-- Story total-duration plan + per-beat duration for AI breakdown.
+ALTER TABLE story ADD COLUMN planned_duration_seconds INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE story_beats ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 5;
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

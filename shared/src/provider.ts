@@ -50,6 +50,7 @@ export interface AiAppProfile {
     refAudios: Array<{ nodeId: string; fieldName: string }>;
     duration?: { nodeId: string; fieldName: string };
     resolution?: { nodeId: string; fieldName: string };
+    steps?: { nodeId: string; fieldName: string };
     extra?: { nodeId: string; fieldName: string };
   };
   /** Verified via live invoke example — null until verified. */

@@ -216,6 +216,8 @@ export class RunningHubAiAppProvider implements VideoProvider {
     }
     push(inputs.duration, request.durationSeconds ? String(Math.round(request.durationSeconds)) : undefined);
     push(inputs.resolution, request.resolution);
+    // Sampling steps: default 10 for t2va / frame modes, 20 for ref2va.
+    push(inputs.steps, request.mode === 'ref2va' ? '20' : '10');
     // P0-4: providerParams are ONLY written through explicit per-key bindings
     // from the profile. An unknown param is refused — never guessed into the
     // prompt node or any other slot.

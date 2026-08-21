@@ -60,7 +60,7 @@ const preflightReady = computed(() => Boolean(latestMatchingReport.value && !lat
 const planRows = computed(() => {
   const plan = props.plan?.plan;
   return [
-    { label: '目标', value: plan?.intent.dramaticGoal || props.shot.purpose },
+    { label: '目标', value: plan?.intent.visualThesis || plan?.intent.dramaticGoal || props.shot.purpose },
     { label: '主体动作', value: plan?.subject.action || plan?.performance.primaryAction },
     { label: '摄影机', value: plan?.camera.dominantBehavior || plan?.camera.lensIntent },
     { label: '结束状态', value: plan?.intent.endState || plan?.continuity.plannedEndState },
@@ -125,7 +125,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
           <div class="eyebrow">镜头设计</div>
           <strong>这个镜头怎么拍</strong>
         </div>
-        <span :class="['badge', plan ? 'ok' : 'warn']">{{ plan ? '已准备' : '待完善' }}</span>
+        <span :class="['badge', guide.designReady ? 'ok' : 'warn']">{{ guide.designReady ? '已准备' : '待完善' }}</span>
       </div>
       <dl class="summary-list">
         <div v-for="row in planRows" :key="row.label">
@@ -133,7 +133,7 @@ const workbenchRenderReady = computed(() => props.guide.renderReady && currentMo
           <dd :class="{ muted: !row.value }">{{ row.value || '尚未填写' }}</dd>
         </div>
       </dl>
-      <button class="sm" @click="emit('open', 'plan')">{{ plan ? '编辑镜头设计' : '开始镜头设计' }} →</button>
+      <button class="sm" @click="emit('open', 'plan')">{{ guide.designReady ? '编辑镜头设计' : '开始镜头设计' }} →</button>
     </section>
 
     <section class="workspace-section">

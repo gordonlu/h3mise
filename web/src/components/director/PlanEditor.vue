@@ -19,6 +19,7 @@ watch(
 );
 
 const isDirty = computed(() => JSON.stringify(draft.value) !== savedSnapshot.value);
+const hasSavedVersion = computed(() => draft.value.version > 0);
 watch(isDirty, (d) => emit('dirtyChange', d), { immediate: true });
 
 interface FieldDef {
@@ -37,6 +38,52 @@ interface SectionDef {
   ai?: boolean;
   fields: FieldDef[];
 }
+
+interface EssentialFieldDef extends FieldDef {
+  question: string;
+  help: string;
+}
+
+const essentialFields: EssentialFieldDef[] = [
+  {
+    path: ['intent', 'visualThesis'],
+    cn: '镜头目标',
+    en: 'Visual Thesis',
+    type: 'textarea',
+    question: '这个镜头最重要的画面是什么？',
+    help: '一句话描述观众应该看到和感受到什么。',
+    placeholder: '例如：空荡的放映室里，MISE 在应急灯下显得孤独而渺小',
+  },
+  {
+    path: ['subject', 'action'],
+    cn: '主体动作',
+    en: 'Subject Action',
+    type: 'textarea',
+    question: '主体在镜头里做什么？',
+    help: '只写看得见的动作，不需要写镜头语言。',
+    placeholder: '例如：MISE 低着头静止片刻，然后缓慢抬头',
+  },
+  {
+    path: ['camera', 'dominantBehavior'],
+    cn: '摄影机',
+    en: 'Camera',
+    type: 'textarea',
+    question: '摄影机怎么拍？',
+    help: '写景别和主要运镜；不确定时写“固定镜头”即可。',
+    placeholder: '例如：中景，固定机位，缓慢推近 MISE',
+  },
+  {
+    path: ['intent', 'endState'],
+    cn: '结束画面',
+    en: 'End State',
+    type: 'textarea',
+    question: '镜头最后停在哪里？',
+    help: '描述最后一帧的主体姿态和画面状态。',
+    placeholder: '例如：停在 MISE 抬头望向墙上时钟的中近景',
+  },
+];
+
+const essentialPathKeys = new Set(essentialFields.map((field) => field.path.join('.')));
 
 const sections: SectionDef[] = [
   {
@@ -139,9 +186,21 @@ const sections: SectionDef[] = [
   },
 ];
 
-// Accordion state persisted across shots/sessions; only Intent open by default.
+const advancedSections = sections
+  .map((section) => ({ ...section, fields: section.fields.filter((field) => !essentialPathKeys.has(field.path.join('.'))) }))
+  .filter((section) => section.fields.length > 0);
+
+const requiredFilledCount = computed(() => essentialFields.filter((field) => {
+  const value = fieldValue(field.path);
+  return String(value ?? '').trim() !== '';
+}).length);
+const isRequiredComplete = computed(() => requiredFilledCount.value === essentialFields.length);
+const advancedVisible = ref(false);
+
+// Professional sections remember their state, but stay behind one explicit
+// advanced-settings disclosure for the default guided experience.
 const STORAGE_KEY = 'h3mise-plan-sections';
-const open = ref<Set<string>>(new Set(['intent']));
+const open = ref<Set<string>>(new Set());
 try {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as string[];
   if (Array.isArray(saved) && saved.length) open.value = new Set(saved);
@@ -178,6 +237,7 @@ function setField(path: readonly string[], value: string | number | string[]) {
 }
 
 function save() {
+  if (!isRequiredComplete.value) return;
   emit('save', structuredClone(toRaw(draft.value)));
 }
 </script>
@@ -185,52 +245,112 @@ function save() {
 <template>
   <div class="plan-editor col">
     <div class="spread editor-bar">
-      <div class="row">
-        <span class="muted">DirectorPlan <span class="mono">v{{ draft.version }}</span></span>
-        <span v-if="isDirty" class="badge warn" title="有未保存的修改">● 未保存</span>
-        <span v-else class="badge ok">已保存</span>
+      <div>
+        <div class="row">
+          <strong>镜头设计</strong>
+          <span class="required-progress" :class="{ complete: isRequiredComplete }">{{ requiredFilledCount }} / {{ essentialFields.length }} 必填</span>
+        </div>
+        <div class="save-state row">
+          <span class="muted mono">DirectorPlan v{{ draft.version }}</span>
+          <span v-if="isDirty" class="badge warn" title="有未保存的修改">● 未保存修改</span>
+          <span v-else-if="hasSavedVersion" class="badge ok">已保存</span>
+          <span v-else class="badge warn">尚未创建</span>
+        </div>
       </div>
       <div class="row">
-        <button v-if="aiEnabled" class="sm" :disabled="aiBusy" @click="props.onAiSuggest('full')">{{ aiBusy ? 'AI 处理中…' : 'AI 建议全计划' }}</button>
-        <button class="sm" @click="emit('paste')">粘贴外部 AI</button>
-        <button class="primary sm" :class="{ pulse: isDirty }" @click="save">保存为新版本</button>
+        <button v-if="aiEnabled" class="sm" :disabled="aiBusy" @click="props.onAiSuggest('full')">{{ aiBusy ? 'AI 填写中…' : 'AI 帮我填写' }}</button>
+        <button class="primary sm" :class="{ pulse: isDirty && isRequiredComplete }" :disabled="!isDirty || !isRequiredComplete" @click="save">保存镜头设计</button>
       </div>
     </div>
 
-    <div v-for="sec in sections" :key="sec.key" class="panel section" :class="{ open: open.has(sec.key) }">
-      <div class="sec-head" @click="toggleSection(sec.key)">
-        <span class="chev">{{ open.has(sec.key) ? '▾' : '▸' }}</span>
-        <span class="sec-cn">{{ sec.cn }}</span>
-        <span class="sec-en">{{ sec.en }}</span>
-        <span v-if="!open.has(sec.key) && filledCount(sec)" class="badge accent no-dot">{{ filledCount(sec) }} 项已填</span>
-        <span class="grow" />
-        <button v-if="sec.ai && aiEnabled" class="sm ghost" :disabled="aiBusy" @click.stop="props.onAiSuggest(sec.key)">{{ aiBusy ? 'AI 处理中…' : 'AI 建议' }}</button>
+    <section class="panel essential-card">
+      <div class="essential-intro">
+        <strong>完成这 4 项就可以继续</strong>
+        <span>不懂专业术语也没关系，用自然语言描述即可。</span>
       </div>
-      <div v-if="open.has(sec.key)" class="panel-body grid two" :class="{ 'intent-grid': sec.key === 'intent' }">
-        <label v-for="f in sec.fields" :key="f.path.join('.')" class="field">
-          <span class="f-label">{{ f.cn }} <span class="f-en">{{ f.en }}</span></span>
-          <select v-if="f.type === 'select'" :value="fieldValue(f.path)" @change="setField(f.path, ($event.target as HTMLSelectElement).value)">
-            <option v-for="o in f.options" :key="o" :value="o">{{ o || '—' }}</option>
-          </select>
-          <textarea v-else-if="f.type === 'textarea'" :value="fieldValue(f.path)" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
-          <input v-else-if="f.type === 'number'" type="number" :value="fieldValue(f.path)" :placeholder="f.placeholder" @input="setField(f.path, Number(($event.target as HTMLInputElement).value))" />
-          <template v-else-if="f.type === 'list'">
-            <textarea :value="(fieldValue(f.path) as string[]).join('\n')" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value.split('\n').filter(Boolean))" />
-          </template>
-          <input v-else :value="fieldValue(f.path)" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLInputElement).value)" />
+      <div class="essential-fields">
+        <label v-for="(f, index) in essentialFields" :key="f.path.join('.')" class="essential-field">
+          <span class="essential-number" :class="{ done: String(fieldValue(f.path) ?? '').trim() }">{{ String(fieldValue(f.path) ?? '').trim() ? '✓' : index + 1 }}</span>
+          <span class="essential-copy">
+            <span class="essential-question">{{ f.question }} <span class="required-mark">必填</span></span>
+            <span class="essential-help">{{ f.help }}</span>
+          </span>
+          <textarea :value="fieldValue(f.path)" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
         </label>
       </div>
-    </div>
+      <div v-if="!isRequiredComplete" class="required-hint">还需填写 {{ essentialFields.length - requiredFilledCount }} 项，完成后即可保存并继续准备 Prompt。</div>
+      <div v-else class="required-hint complete">镜头设计已完整，可以保存并继续准备 Prompt。</div>
+    </section>
+
+    <section class="advanced-wrap">
+      <div class="advanced-head">
+        <button class="advanced-toggle" :aria-expanded="advancedVisible" @click="advancedVisible = !advancedVisible">
+          <span>{{ advancedVisible ? '▾' : '▸' }}</span>
+          <span><strong>高级设置</strong><small>可选 · 走位、表演、环境、连续性与生成参数</small></span>
+        </button>
+        <button class="sm ghost paste-btn" @click.stop="emit('paste')">粘贴外部 AI</button>
+      </div>
+
+      <div v-if="advancedVisible" class="advanced-sections">
+        <div v-for="sec in advancedSections" :key="sec.key" class="panel section" :class="{ open: open.has(sec.key) }">
+          <div class="sec-head" @click="toggleSection(sec.key)">
+            <span class="chev">{{ open.has(sec.key) ? '▾' : '▸' }}</span>
+            <span class="sec-cn">{{ sec.cn }}</span>
+            <span class="sec-en">{{ sec.en }}</span>
+            <span v-if="!open.has(sec.key) && filledCount(sec)" class="badge accent no-dot">{{ filledCount(sec) }} 项已填</span>
+            <span class="grow" />
+            <button v-if="sec.ai && aiEnabled" class="sm ghost" :disabled="aiBusy" @click.stop="props.onAiSuggest(sec.key)">{{ aiBusy ? 'AI 处理中…' : 'AI 建议' }}</button>
+          </div>
+          <div v-if="open.has(sec.key)" class="panel-body grid two">
+            <label v-for="f in sec.fields" :key="f.path.join('.')" class="field">
+              <span class="f-label">{{ f.cn }} <span class="f-en">{{ f.en }}</span></span>
+              <select v-if="f.type === 'select'" :value="fieldValue(f.path)" @change="setField(f.path, ($event.target as HTMLSelectElement).value)">
+                <option v-for="o in f.options" :key="o" :value="o">{{ o || '—' }}</option>
+              </select>
+              <textarea v-else-if="f.type === 'textarea'" :value="fieldValue(f.path)" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
+              <input v-else-if="f.type === 'number'" type="number" :value="fieldValue(f.path)" :placeholder="f.placeholder" @input="setField(f.path, Number(($event.target as HTMLInputElement).value))" />
+              <template v-else-if="f.type === 'list'">
+                <textarea :value="(fieldValue(f.path) as string[]).join('\n')" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value.split('\n').filter(Boolean))" />
+              </template>
+              <input v-else :value="fieldValue(f.path)" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLInputElement).value)" />
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .two { grid-template-columns: 1fr 1fr; }
-.intent-grid { align-items: stretch; }
-.intent-grid .field { display: grid; grid-template-rows: 34px 68px; gap: 6px; margin-bottom: 0; }
-.intent-grid .field > :is(input, select, textarea) { height: 68px; min-height: 68px; resize: none; }
-.intent-grid .field:last-child { grid-column: 1 / -1; }
-.editor-bar { position: sticky; top: 0; z-index: 5; background: var(--bg-2); padding: 4px 0 8px; }
+.editor-bar { position: sticky; top: 0; z-index: 5; gap: 12px; background: var(--bg-2); padding: 4px 0 10px; }
+.save-state { margin-top: 4px; }
+.required-progress { padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 700; }
+.required-progress.complete { background: var(--ok-soft); color: var(--ok); }
+.essential-card { overflow: hidden; }
+.essential-intro { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.essential-intro strong { font-size: 15px; }
+.essential-intro span { color: var(--text-2); font-size: 12px; }
+.essential-fields { display: grid; gap: 0; }
+.essential-field { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 10px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+.essential-field:last-child { border-bottom: 0; }
+.essential-number { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--line-2); border-radius: 50%; color: var(--text-2); font-size: 12px; font-weight: 700; }
+.essential-number.done { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
+.essential-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.essential-question { color: var(--text); font-size: 13px; font-weight: 650; }
+.essential-help { color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.required-mark { margin-left: 4px; color: var(--accent); font-size: 10px; font-weight: 600; }
+.essential-field textarea { grid-column: 2; height: 50px; min-height: 50px; resize: vertical; }
+.required-hint { padding: 8px 14px; background: var(--warn-soft); color: var(--warn); font-size: 11.5px; }
+.required-hint.complete { background: var(--ok-soft); color: var(--ok); }
+.advanced-wrap { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--bg-2); }
+.advanced-head { display: flex; align-items: center; padding-right: 10px; }
+.advanced-toggle { display: flex; flex: 1; align-items: center; gap: 9px; min-width: 0; min-height: 48px; padding: 9px 12px; border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.advanced-toggle:hover { background: var(--accent-soft); }
+.advanced-toggle > span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; }
+.advanced-toggle small { color: var(--text-3); font-size: 10.5px; font-weight: 400; }
+.paste-btn { flex: 0 0 auto; }
+.advanced-sections { display: grid; gap: 8px; padding: 8px; border-top: 1px solid var(--line); }
 .section { overflow: hidden; }
 .sec-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; user-select: none; }
 .sec-head:hover { background: var(--accent-soft); }

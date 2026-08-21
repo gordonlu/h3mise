@@ -79,6 +79,17 @@ export function planHasContent(plan: DirectorPlan): boolean {
   );
 }
 
+/** The four facts the Guided View requires before it considers shot design
+ * complete. Advanced DirectorPlan fields remain optional. */
+export function planIsGuideReady(plan: DirectorPlan): boolean {
+  return [
+    plan.intent.visualThesis,
+    plan.subject.action,
+    plan.camera.dominantBehavior,
+    plan.intent.endState,
+  ].every((value) => value.trim().length > 0);
+}
+
 /** Raw plan text parsing (YAML/JSON from external AI) — PRD §21. */
 export function parseDirectorPlanText(text: string): { ok: boolean; plan?: DirectorPlan; error?: string } {
   const trimmed = text.trim();

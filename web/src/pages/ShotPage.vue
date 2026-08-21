@@ -39,6 +39,10 @@ const {
   loading: sLoading,
   error: sError,
 } = s;
+// Keep the unsaved first-plan object stable across parent re-renders. Passing
+// a freshly-created fallback from the template resets the editor on every
+// dirty-state emission and makes typed text appear to vanish.
+const editorPlan = computed(() => sPlan.value?.plan ?? emptyPlan());
 
 const tab = ref<'workspace' | 'plan' | 'references' | 'prompt' | 'preflight' | 'external'>('workspace');
 const media = ref<MediaAsset[]>([]);
@@ -654,7 +658,7 @@ const TABS = [
 
         <div v-show="tab === 'plan'" class="tab-body">
           <PlanEditor
-            :plan="sPlan?.plan ?? { ...emptyPlan(), version: 0 }"
+            :plan="editorPlan"
             :ai-enabled="aiEnabled"
             :ai-busy="aiBusy"
             :on-ai-suggest="aiSuggest"

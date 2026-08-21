@@ -4,8 +4,10 @@ import type { ProjectContext } from '../project-store.js';
 import { shotAssetRequirements } from './assets.js';
 import { latestPreflight } from './preflight.js';
 import { listShots } from './shots.js';
+import { latestPlan, planIsGuideReady } from './director.js';
 
 export function shotGuideSnapshot(p: ProjectContext, shot: Shot): GuideShotSnapshot {
+  const directorPlan = latestPlan(p, shot.id);
   const prompt = p.db.get<{ id: string }>('SELECT id FROM prompt_versions WHERE shot_id = ? ORDER BY created_at DESC LIMIT 1', [shot.id]);
   const preflight = latestPreflight(p, shot.id);
   const active = p.db.get<{ id: string }>(
@@ -22,7 +24,7 @@ export function shotGuideSnapshot(p: ProjectContext, shot: Shot): GuideShotSnaps
     id: shot.id,
     order: shot.order,
     title: shot.title || shot.id,
-    hasDirectorPlan: Boolean(p.db.get<{ id: string }>('SELECT id FROM director_plan_versions WHERE shot_id = ? LIMIT 1', [shot.id])),
+    hasDirectorPlan: Boolean(directorPlan && planIsGuideReady(directorPlan.plan)),
     missingReferences,
     hasPrompt: Boolean(prompt),
     preflightBlocked: preflight && preflight.promptVersionId === prompt?.id ? preflight.blocked : null,

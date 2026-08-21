@@ -295,6 +295,7 @@ interface RefRow {
   ignore_json: string;
   label: string;
   shot_id: string | null;
+  source_entity_id: string | null;
   created_at: string;
 }
 
@@ -308,27 +309,28 @@ function refFromRow(r: RefRow): ReferenceBinding {
     ignore: jget<string[]>(r.ignore_json, []),
     label: r.label,
     shotId: r.shot_id,
+    sourceEntityId: r.source_entity_id ?? null,
     createdAt: r.created_at,
   };
 }
 
 export function listBindings(p: ProjectContext, shotId?: string | null): ReferenceBinding[] {
   const rows = shotId === undefined
-    ? p.db.all<RefRow>('SELECT * FROM reference_bindings ORDER BY created_at')
-    : p.db.all<RefRow>('SELECT * FROM reference_bindings WHERE shot_id IS ? ORDER BY created_at', [shotId]);
+    ? p.db.all<RefRow>('SELECT * FROM reference_bindings ORDER BY created_at, id')
+    : p.db.all<RefRow>('SELECT * FROM reference_bindings WHERE shot_id IS ? ORDER BY created_at, id', [shotId]);
   return rows.map(refFromRow);
 }
 
 export function createBinding(
   p: ProjectContext,
-  input: { assetId: string; roles: ReferenceRole[]; preserve?: string[]; ignore?: string[]; label?: string; shotId?: string | null },
+  input: { assetId: string; roles: ReferenceRole[]; preserve?: string[]; ignore?: string[]; label?: string; shotId?: string | null; sourceEntityId?: string | null },
 ): ReferenceBinding {
   const asset = getMedia(p, input.assetId);
   const id = nextId(p.db, 'ref');
   const now = new Date().toISOString();
   p.db.run(
-    'INSERT INTO reference_bindings (id, asset_id, type, roles_json, preserve_json, ignore_json, label, shot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, input.assetId, asset.kind, j(input.roles), j(input.preserve ?? []), j(input.ignore ?? []), input.label ?? asset.label, input.shotId ?? null, now],
+    'INSERT INTO reference_bindings (id, asset_id, type, roles_json, preserve_json, ignore_json, label, shot_id, source_entity_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, input.assetId, asset.kind, j(input.roles), j(input.preserve ?? []), j(input.ignore ?? []), input.label ?? asset.label, input.shotId ?? null, input.sourceEntityId ?? null, now],
   );
   return listBindings(p, input.shotId ?? null).find((b) => b.id === id)!;
 }
@@ -360,6 +362,70 @@ export function updateBinding(p: ProjectContext, id: string, patch: Partial<Pick
 
 export function deleteBinding(p: ProjectContext, id: string): void {
   p.db.run('DELETE FROM reference_bindings WHERE id = ?', [id]);
+}
+
+/**
+ * Ref2VA consumes the visual identity selected on the shot. Keep the primary
+ * character and scene entity images in the shot's generic reference list so
+ * prompt compilation, preflight and provider submission all see one source
+ * of truth. Existing user bindings are preserved and assets are deduplicated.
+ */
+export function ensureShotEntityImageBindings(
+  p: ProjectContext,
+  shot: Shot,
+  mode: Shot['h3Mode'] = shot.h3Mode,
+): { bindings: ReferenceBinding[]; added: ReferenceBinding[] } {
+  if (mode !== 'ref2va') return { bindings: listBindings(p, shot.id), added: [] };
+
+  const added: ReferenceBinding[] = [];
+  const selectedEntityIds = new Set([shot.primaryCharacterId, shot.sceneId].filter((id): id is string => Boolean(id)));
+  for (const binding of listBindings(p, shot.id)) {
+    if (binding.sourceEntityId && !selectedEntityIds.has(binding.sourceEntityId)) deleteBinding(p, binding.id);
+  }
+  let current = listBindings(p, shot.id);
+  const genericAssetIds = new Set(
+    current
+      .filter((binding) => !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'))
+      .map((binding) => binding.assetId),
+  );
+  const selected = [
+    { id: shot.primaryCharacterId, role: 'identity' as const },
+    { id: shot.sceneId, role: 'environment' as const },
+  ];
+
+  for (const item of selected) {
+    if (!item.id) continue;
+    const entity = getEntity(p, item.id);
+    const managed = current.find((binding) => binding.sourceEntityId === entity.id);
+    if (managed && managed.assetId !== entity.imageAssetId) {
+      deleteBinding(p, managed.id);
+      current = current.filter((binding) => binding.id !== managed.id);
+      genericAssetIds.delete(managed.assetId);
+    }
+    if (!entity.imageAssetId || genericAssetIds.has(entity.imageAssetId)) {
+      const existing = entity.imageAssetId
+        ? current.find((binding) => binding.assetId === entity.imageAssetId && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'))
+        : null;
+      if (existing && !existing.sourceEntityId) {
+        p.db.run('UPDATE reference_bindings SET source_entity_id = ? WHERE id = ?', [entity.id, existing.id]);
+        current = listBindings(p, shot.id);
+      }
+      continue;
+    }
+    const asset = getMedia(p, entity.imageAssetId);
+    if (asset.kind !== 'image') continue;
+    const binding = createBinding(p, {
+      assetId: asset.id,
+      roles: [item.role],
+      label: asset.label || `${entity.name} · 主图`,
+      shotId: shot.id,
+      sourceEntityId: entity.id,
+    });
+    added.push(binding);
+    genericAssetIds.add(asset.id);
+  }
+
+  return { bindings: listBindings(p, shot.id), added };
 }
 
 // --- Shot-driven asset requirements (PRD §11) ------------------------------

@@ -7,7 +7,7 @@ import { nextId } from '../db/ids.js';
 import { compileDeterministic, type CompileContext } from './prompt-templates.js';
 import { latestPlan } from './director.js';
 import { getShot } from './shots.js';
-import { listBindings } from './assets.js';
+import { ensureShotEntityImageBindings, listBindings } from './assets.js';
 
 interface PvRow {
   id: string;
@@ -62,7 +62,7 @@ export function createPrompt(
 export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, durationSeconds?: number): PromptVersion {
   const shot = getShot(p, shotId);
   const plan = latestPlan(p, shotId);
-  const refs = listBindings(p, shotId);
+  const refs = ensureShotEntityImageBindings(p, shot, mode).bindings;
   const ctx: CompileContext = {
     shot,
     plan: plan?.plan ?? {

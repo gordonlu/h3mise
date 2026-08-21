@@ -8,7 +8,7 @@ import { useRenderStore } from '../stores/render';
 import { confirmDialog } from '../stores/confirm';
 import { get, post, del, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
-import type { DirectorPlan, MediaAsset, NextAction } from '@h3mise/shared';
+import type { DirectorPlan, MediaAsset, NextAction, ReferenceBinding } from '@h3mise/shared';
 import PlanEditor from '../components/director/PlanEditor.vue';
 import PromptPanel from '../components/director/PromptPanel.vue';
 import PreflightPanel from '../components/director/PreflightPanel.vue';
@@ -341,9 +341,22 @@ async function aiPreflight(promptId: string) {
 
 async function doRender(promptId: string) {
   await guarded(async () => {
+    const mode = sShot.value?.h3Mode ?? 't2va';
+    const submittedBindings = (sDetail.value?.bindings ?? []).filter((binding: ReferenceBinding) => {
+      const first = binding.roles.includes('first_frame');
+      const last = binding.roles.includes('last_frame');
+      if (mode === 'ref2va') return !first && !last;
+      if (mode === 'i2va') return first;
+      if (mode === 'l2va') return last;
+      if (mode === 'fl2va') return first || last;
+      return false;
+    });
+    const referenceSummary = submittedBindings.length
+      ? `\n实际提交的参考素材：${submittedBindings.map((binding) => binding.label || binding.id).join('、')}`
+      : '\n当前模式不提交参考素材。';
     const confirmed = await confirmDialog({
       title: '确认生成 1 个新 Take？',
-      message: `${activeProvider.value?.name ?? '当前 Provider'} · ${H3_MODE_LABEL[sShot.value?.h3Mode ?? 't2va']} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'}。提交后将创建一次生成任务。`,
+      message: `${activeProvider.value?.name ?? '当前生成服务'} · ${H3_MODE_LABEL[mode]} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'}。${referenceSummary}\n提交后将创建一次生成任务。`,
       confirmLabel: '确认生成',
     });
     if (!confirmed) return;

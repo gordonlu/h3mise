@@ -81,5 +81,7 @@ export interface ReferenceBinding {
   label: string;
   /** Optional target shot; null = global/pool binding. */
   shotId: string | null;
+  /** Entity whose main image is automatically kept in this shot binding. */
+  sourceEntityId?: string | null;
   createdAt: string;
 }

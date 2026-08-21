@@ -14,7 +14,7 @@ import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import { getShot, advanceShotStatus, advanceTo } from './shots.js';
 import { getPrompt } from './prompt.js';
-import { getMedia, listBindings } from './assets.js';
+import { ensureShotEntityImageBindings, getMedia } from './assets.js';
 import { pathReadable } from '../ffmpeg.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 
@@ -73,8 +73,9 @@ export async function intentFromInput(
   const shot = getShot(p, input.shotId);
   const prompt = getPrompt(p, input.promptVersionId);
   const mode = input.mode ?? prompt.h3Mode ?? 't2va';
+  ensureShotEntityImageBindings(p, shot, mode);
   const referenceRows = p.db
-    .all<{ id: string; asset_id: string; type: string; roles_json: string | null }>('SELECT * FROM reference_bindings WHERE shot_id = ?', [input.shotId])
+    .all<{ id: string; asset_id: string; type: string; roles_json: string | null }>('SELECT * FROM reference_bindings WHERE shot_id = ? ORDER BY created_at, id', [input.shotId])
     .filter((row) => {
       const roles = jget<string[]>(row.roles_json ?? '[]', []);
       const first = roles.includes('first_frame');
@@ -182,8 +183,8 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     requiredRoles.add('last_frame');
   }
   const relevantIds = new Set(bindings.map((binding) => binding.bindingId));
-  const bindingRows = p.db.all<{ id: string; roles_json: string | null; asset_id: string }>(
-    `SELECT id, roles_json, asset_id FROM reference_bindings WHERE shot_id = ?`,
+  const bindingRows = p.db.all<{ id: string; roles_json: string | null; asset_id: string; label: string; created_at: string }>(
+    `SELECT id, roles_json, asset_id, label, created_at FROM reference_bindings WHERE shot_id = ? ORDER BY created_at, id`,
     [shot.id],
   ).filter((binding) => relevantIds.has(binding.id));
   const haveRoles = new Set<string>();
@@ -205,6 +206,14 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     if (!haveRoles.has(role)) {
       sections[3]!.checks.push({ key: `ref.${role}`, severity: 'error', message: `缺少必需的参考素材角色：${role}` });
     }
+  }
+  if (bindings.length > 0) {
+    const names = bindingRows.map((binding) => binding.label || binding.id);
+    sections[3]!.checks.push({
+      key: 'ref.summary',
+      severity: 'info',
+      message: `将提交 ${bindings.length} 项参考素材：${names.join('、')}`,
+    });
   }
   if (caps) {
     if (intent.mode === 'ref2va') {
@@ -254,6 +263,16 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   if (prompt.directorPlanVersionId) {
     const dpv = p.db.get<{ id: string }>('SELECT id FROM director_plan_versions WHERE id = ?', [prompt.directorPlanVersionId]);
     if (!dpv) sections[4]!.checks.push({ key: 'integrity.dpv', severity: 'error', message: '关联的导演计划版本不存在' });
+  }
+  if (prompt.source === 'deterministic_compiler') {
+    const newerBinding = bindingRows.some((binding) => binding.created_at > prompt.createdAt);
+    if (newerBinding) {
+      sections[4]!.checks.push({
+        key: 'integrity.prompt_references',
+        severity: 'error',
+        message: '参考素材在提示词生成后发生了变化，请重新从镜头设计生成提示词后再提交',
+      });
+    }
   }
   sections[4]!.checks.push({ key: 'integrity.shot', severity: 'info', message: `镜头 ${shot.id} / ${SHOT_STATUS_LABEL[shot.status]}` });
 

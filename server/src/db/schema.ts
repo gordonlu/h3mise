@@ -312,6 +312,16 @@ ALTER TABLE entities ADD COLUMN image_asset_id TEXT REFERENCES media_assets(id) 
 ALTER TABLE character_states ADD COLUMN image_asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL;
 `,
   },
+  {
+    version: 9,
+    name: 'reference-binding-entity-source',
+    sql: `
+-- Track bindings maintained from a shot's selected entity images so changing
+-- the character, scene or entity image cannot leave stale references behind.
+ALTER TABLE reference_bindings ADD COLUMN source_entity_id TEXT REFERENCES entities(id) ON DELETE CASCADE;
+CREATE INDEX idx_refs_source_entity ON reference_bindings(source_entity_id);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

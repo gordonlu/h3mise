@@ -211,6 +211,7 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/shots/:id', (c) => {
     const ctx = p(c);
     const shot = shotsMod.getShot(ctx, c.req.param('id'));
+    assetsMod.ensureShotEntityImageBindings(ctx, shot);
     return c.json({
       shot,
       plans: directorMod.listPlanVersions(ctx, shot.id),
@@ -235,9 +236,24 @@ export function buildRoutes(services: AppServices): App {
     });
   });
 
-  app.post('/api/shots', async (c) => c.json(shotsMod.createShot(p(c), await c.req.json()), 201));
-  app.post('/api/shots/bulk', async (c) => c.json(shotsMod.bulkCreateShots(p(c), (await c.req.json()).items ?? []), 201));
-  app.patch('/api/shots/:id', async (c) => c.json(shotsMod.updateShot(p(c), c.req.param('id'), await c.req.json())));
+  app.post('/api/shots', async (c) => {
+    const ctx = p(c);
+    const shot = shotsMod.createShot(ctx, await c.req.json());
+    assetsMod.ensureShotEntityImageBindings(ctx, shot);
+    return c.json(shot, 201);
+  });
+  app.post('/api/shots/bulk', async (c) => {
+    const ctx = p(c);
+    const shots = shotsMod.bulkCreateShots(ctx, (await c.req.json()).items ?? []);
+    for (const shot of shots) assetsMod.ensureShotEntityImageBindings(ctx, shot);
+    return c.json(shots, 201);
+  });
+  app.patch('/api/shots/:id', async (c) => {
+    const ctx = p(c);
+    const shot = shotsMod.updateShot(ctx, c.req.param('id'), await c.req.json());
+    assetsMod.ensureShotEntityImageBindings(ctx, shot);
+    return c.json(shot);
+  });
   app.delete('/api/shots/:id', (c) => {
     shotsMod.deleteShot(p(c), c.req.param('id'));
     return c.json({ ok: true });

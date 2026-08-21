@@ -85,6 +85,12 @@ export function useShot(shotId: string) {
     return report;
   }
 
+  async function attachSemanticReview(reportId: string, text: string): Promise<PreflightReport> {
+    const report = await patch<PreflightReport>(`/api/preflight/${reportId}/semantic`, { text });
+    await load();
+    return report;
+  }
+
   async function render(promptVersionId: string, providerId = 'runninghub', durationSeconds?: number): Promise<RenderJob> {
     const job = await post<RenderJob>('/api/render', { shotId, promptVersionId, providerId, durationSeconds });
     await load();
@@ -153,6 +159,7 @@ export function useShot(shotId: string) {
     compilePrompt,
     importRawPrompt,
     runPreflight,
+    attachSemanticReview,
     render,
     selectTake,
     rejectTake,

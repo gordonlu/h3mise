@@ -241,7 +241,7 @@ export async function runAction(
       if (!shotId) throw new Error('shotId required');
       const latest = continuityMod.predecessorContinuity(ctx, shotId, 'visual', 'actual');
       const text = await ai.model.complete({
-        system: `You are a script-continuity reviewer. Compare the shot's planned start state against the committed actual continuity of the previous shot. Flag mismatches in character visual state, costume, hair, injury, held items, location, time/weather, screen direction, facing. Output "MISMATCH: ... | FIX: ..." lines and a verdict.`,
+        system: `你是专业的影视连续性审查员。将当前镜头的计划起始状态与上一镜头已经确认的实际连续性进行比较，检查角色外观、服装、发型、伤势、持有物、地点、时间与天气、银幕方向和朝向。不得虚构缺失信息。逐项使用“不一致：… | 修复：…”输出，最后输出“结论：通过”或“结论：需要修正”。如果当前镜头没有上一镜头，直接输出“无上一镜头，本项不适用。\n结论：通过”。只使用中文。`,
         messages: [
           { role: 'user', content: `Committed actual continuity:\n${JSON.stringify(latest?.state)}\n\nNew shot plan start state:\n${plan?.continuity.plannedStartState}\n\nShot:\n${JSON.stringify(shot)}` },
         ],

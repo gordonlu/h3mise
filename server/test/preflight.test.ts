@@ -5,7 +5,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeStore, makeProject, makeShotWithPrompt, cleanupTempRoot } from './helpers.js';
-import { renderIntentHash, intentFromInput, runBasicPreflightIntent } from '../src/modules/preflight.js';
+import { attachSemanticReview, renderIntentHash, intentFromInput, runBasicPreflightIntent } from '../src/modules/preflight.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { Ffmpeg } from '../src/ffmpeg.js';
 import type { Db } from '../src/db/sqlite.js';
@@ -86,4 +86,21 @@ test('gate passes for a valid mock render (full caps, in-range duration)', async
   const intent = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', durationSeconds: 3 });
   const report = await runBasicPreflightIntent(p, registry, intent);
   assert.equal(report.blocked, false);
+});
+
+test('AI continuity result is attached to the existing preflight report', async () => {
+  const { root, store } = await makeStore('preflight-semantic');
+  roots.push(root);
+  const p = await makeProject(store, 'semantic');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  const registry = makeRegistry(store.registry);
+  const intent = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock' });
+  const basic = await runBasicPreflightIntent(p, registry, intent);
+
+  const combined = attachSemanticReview(p, basic.id, '无上一镜头，本项不适用。\n结论：通过');
+
+  assert.equal(combined.id, basic.id);
+  assert.equal(combined.aiSemanticRun, true);
+  assert.equal(combined.semantic?.[0]?.label, 'AI 连续性');
+  assert.equal(combined.semantic?.[0]?.status, 'ok');
 });

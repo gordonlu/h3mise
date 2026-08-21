@@ -307,6 +307,10 @@ export function buildRoutes(services: AppServices): App {
     });
     return c.json(report, 201);
   });
+  app.patch('/api/preflight/:id/semantic', async (c) => {
+    const body = await c.req.json();
+    return c.json(preflightMod.attachSemanticReview(p(c), c.req.param('id'), String(body.text ?? '')));
+  });
 
   // --- render --------------------------------------------------------------
 

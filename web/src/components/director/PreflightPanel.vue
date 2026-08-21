@@ -19,6 +19,10 @@ const busy = ref('');
 const latestMatchingReport = computed(() => props.prompt
   ? props.reports.find((report) => report.promptVersionId === props.prompt?.id) ?? null
   : null);
+const visibleReports = computed(() => latestMatchingReport.value ? [latestMatchingReport.value] : props.reports.slice(0, 1));
+const matchingReportCount = computed(() => props.prompt
+  ? props.reports.filter((report) => report.promptVersionId === props.prompt?.id).length
+  : 0);
 const canRender = computed(() => Boolean(latestMatchingReport.value && !latestMatchingReport.value.blocked));
 const providerSupportsPrompt = computed(() => props.prompt && Boolean(
   props.provider?.capabilities?.supportedModes.includes(props.prompt.h3Mode),
@@ -49,26 +53,27 @@ async function render() {
 
 const STATUS_COLOR: Record<string, string> = { ok: 'ok', warn: 'warn', fail: 'bad', skip: 'muted' };
 const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'bad' };
+const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '高' };
 </script>
 
 <template>
   <div class="col">
     <div class="row preflight-actions">
-      <button class="sm" :disabled="busy !== '' || !prompt" @click="run('basic')">运行生成检查</button>
-      <button v-if="aiEnabled" class="sm" :disabled="busy !== '' || !prompt" @click="run('ai')">AI 语义检查</button>
+      <button class="primary sm check-action" :disabled="busy !== '' || !prompt" @click="run('basic')">运行生成检查</button>
+      <button v-if="aiEnabled" class="sm ai-check-action" :disabled="busy !== '' || !prompt" @click="run('ai')">AI 连续性检查</button>
       <span v-if="busy === 'basic'" class="muted">检查中…</span>
-      <span v-if="busy === 'ai'" class="muted">AI 语义检查中…（后台任务）</span>
+      <span v-if="busy === 'ai'" class="muted">AI 连续性检查中…（后台任务）</span>
     </div>
 
     <div v-if="!prompt" class="muted">请先编译或粘贴提示词。</div>
 
-    <div v-for="r in reports.slice(0, 3)" :key="r.id" class="panel preflight">
+    <div v-for="r in visibleReports" :key="r.id" class="panel preflight">
       <div class="spread report-head">
         <span class="muted mono report-meta">{{ r.id }} · {{ new Date(r.createdAt).toLocaleString() }}</span>
         <div class="row report-status">
-          <span v-if="r.aiSemanticRun" class="badge info">已运行 AI 语义检查</span>
-          <span v-else class="muted">未运行 AI 语义检查</span>
-          <span :class="['badge', RISK_COLOR[r.risk]]">风险：{{ r.risk }}</span>
+          <span v-if="r.aiSemanticRun" class="badge info">已运行 AI 连续性检查</span>
+          <span v-else class="muted">未运行 AI 连续性检查</span>
+          <span :class="['badge', RISK_COLOR[r.risk]]">风险：{{ RISK_LABEL[r.risk] }}</span>
           <span :class="['badge', r.blocked ? 'bad' : 'ok']">{{ r.blocked ? '未通过' : '可生成' }}</span>
         </div>
       </div>
@@ -91,6 +96,7 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
         </div>
       </div>
     </div>
+    <div v-if="matchingReportCount > 1" class="muted">已保留 {{ matchingReportCount - 1 }} 条历史检查记录；当前只显示最新结果。</div>
 
     <!-- PRD §41 cost protection: show exactly what one Generate will spend. -->
     <div class="panel cost-preview">
@@ -117,6 +123,9 @@ const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'b
 <style scoped>
 .col { min-width: 0; }
 .preflight-actions { flex-wrap: wrap; }
+.check-action, .ai-check-action { font-weight: 650; }
+.ai-check-action { color: var(--info); background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 48%, transparent); box-shadow: none; }
+.ai-check-action:hover { color: var(--info); background: color-mix(in srgb, var(--info-soft) 72%, var(--bg-2)); border-color: var(--info); }
 .preflight { min-width: 0; overflow: hidden; padding: 10px 12px; }
 .report-head { align-items: flex-start; flex-wrap: wrap; }
 .report-meta { min-width: 0; overflow-wrap: anywhere; }

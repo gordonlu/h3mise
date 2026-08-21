@@ -325,15 +325,16 @@ async function aiDiagnose(takeId: string) {
   });
 }
 
-async function aiPreflight(_promptId: string) {
+async function aiPreflight(promptId: string) {
   const prompt = latestPrompt();
   if (!prompt) return null;
   let report: Awaited<ReturnType<typeof s.runPreflight>> | null = null;
   await guarded(async () => {
+    report = sDetail.value?.preflights.find((item) => item.promptVersionId === promptId) ?? null;
+    if (!report) report = await s.runPreflight(prompt.id);
     const result = await runAi('continuity_check', { shotId });
-    aiResults.value.continuity = result;
-    report = await s.runPreflight(prompt.id);
-    toasts.push({ kind: 'ok', text: 'Basic Preflight + AI 语义检查完成' });
+    report = await s.attachSemanticReview(report.id, aiText(result));
+    toasts.push({ kind: 'ok', text: 'AI 连续性检查已加入当前生成检查记录' });
   });
   return report;
 }
@@ -746,14 +747,10 @@ const TABS = [
             :duration-seconds="sShot.durationSeconds"
             :aspect-ratio="sShot.aspectRatio"
             :ai-enabled="aiEnabled"
-            :on-basic="(pid: string) => guarded(() => s.runPreflight(pid), 'Basic Preflight 完成') as never"
+            :on-basic="(pid: string) => guarded(() => s.runPreflight(pid), '生成检查完成') as never"
             :on-ai-check="aiPreflight"
             :on-render="doRender"
           />
-          <div v-if="aiResults.continuity" class="panel ai-note">
-            <div class="panel-title">AI Continuity Check</div>
-            <pre class="ai-text">{{ aiText(aiResults.continuity) }}</pre>
-          </div>
         </div>
 
         <div v-show="tab === 'external'" class="tab-body">

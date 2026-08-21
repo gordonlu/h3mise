@@ -8,7 +8,7 @@
 // submission via renderIntentHash.
 
 import { createHash } from 'node:crypto';
-import type { H3Mode, PreflightCheck, PreflightReport, PreflightSection } from '@h3mise/shared';
+import { SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightReport, type PreflightSection } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
@@ -102,63 +102,63 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   const shot = getShot(p, intent.shotId);
   const prompt = getPrompt(p, intent.promptVersionId);
   const sections: { key: string; label: string; checks: PreflightCheck[] }[] = [
-    { key: 'prompt', label: 'Prompt', checks: [] },
-    { key: 'duration', label: 'Duration', checks: [] },
-    { key: 'provider', label: 'Provider', checks: [] },
-    { key: 'references', label: 'References', checks: [] },
-    { key: 'integrity', label: 'Integrity', checks: [] },
-    { key: 'credential', label: 'Credential', checks: [] },
-    { key: 'duplicate', label: 'Duplicate', checks: [] },
+    { key: 'prompt', label: '提示词', checks: [] },
+    { key: 'duration', label: '时长', checks: [] },
+    { key: 'provider', label: '生成服务', checks: [] },
+    { key: 'references', label: '参考素材', checks: [] },
+    { key: 'integrity', label: '数据一致性', checks: [] },
+    { key: 'credential', label: '访问凭证', checks: [] },
+    { key: 'duplicate', label: '重复任务', checks: [] },
   ];
 
   // Prompt
   if (prompt.text.trim() === '') {
-    sections[0]!.checks.push({ key: 'prompt.empty', severity: 'error', message: 'Prompt is empty' });
+    sections[0]!.checks.push({ key: 'prompt.empty', severity: 'error', message: '提示词为空' });
   } else {
-    sections[0]!.checks.push({ key: 'prompt.ok', severity: 'info', message: `Prompt OK (${prompt.h3Mode}, ${prompt.text.length} chars)` });
+    sections[0]!.checks.push({ key: 'prompt.ok', severity: 'info', message: `提示词有效（${prompt.h3Mode}，${prompt.text.length} 字符）` });
   }
 
   // Duration (checked on the INTENT, not the shot defaults — P0-2)
   const caps = await registry.capabilities(intent.providerId);
   if (!(intent.durationSeconds > 0)) {
-    sections[1]!.checks.push({ key: 'duration.invalid', severity: 'error', message: `Duration ${intent.durationSeconds}s is not positive` });
+    sections[1]!.checks.push({ key: 'duration.invalid', severity: 'error', message: `时长 ${intent.durationSeconds} 秒必须大于 0` });
   } else if (caps && caps.maxDuration && intent.durationSeconds > caps.maxDuration) {
-    sections[1]!.checks.push({ key: 'duration.max', severity: 'error', message: `Duration ${intent.durationSeconds}s exceeds provider max ${caps.maxDuration}s` });
+    sections[1]!.checks.push({ key: 'duration.max', severity: 'error', message: `时长 ${intent.durationSeconds} 秒超过生成服务上限 ${caps.maxDuration} 秒` });
   } else if (caps && caps.minDuration && intent.durationSeconds < caps.minDuration) {
-    sections[1]!.checks.push({ key: 'duration.min', severity: 'error', message: `Duration ${intent.durationSeconds}s below provider min ${caps.minDuration}s` });
+    sections[1]!.checks.push({ key: 'duration.min', severity: 'error', message: `时长 ${intent.durationSeconds} 秒低于生成服务下限 ${caps.minDuration} 秒` });
   } else {
-    sections[1]!.checks.push({ key: 'duration.ok', severity: 'info', message: `Duration ${intent.durationSeconds}s valid` });
+    sections[1]!.checks.push({ key: 'duration.ok', severity: 'info', message: `时长 ${intent.durationSeconds} 秒有效` });
   }
 
   // Provider + mode + aspect (unknown capability = blocked, P0-6)
   const provider = registry.get(intent.providerId);
   if (!provider) {
-    sections[2]!.checks.push({ key: 'provider.missing', severity: 'error', message: `Provider "${intent.providerId}" not found` });
+    sections[2]!.checks.push({ key: 'provider.missing', severity: 'error', message: `找不到生成服务“${intent.providerId}”` });
   } else {
     if (!caps || !caps.supportedModes.length) {
       sections[2]!.checks.push({
         key: 'provider.unverified',
         severity: 'error',
-        message: 'Provider capabilities not verified — detect & verify the AI App in Settings before a paid render',
+        message: '生成服务能力尚未验证，请先在设置中检测并验证 AI App',
       });
     } else if (!caps.supportedModes.includes(intent.mode)) {
       sections[2]!.checks.push({
         key: 'provider.mode',
         severity: 'error',
-        message: `Provider does not support mode ${intent.mode.toUpperCase()}`,
+        message: `生成服务不支持 ${intent.mode.toUpperCase()} 模式`,
       });
     } else {
-      sections[2]!.checks.push({ key: 'provider.mode.ok', severity: 'info', message: `Provider supports ${intent.mode.toUpperCase()}` });
+      sections[2]!.checks.push({ key: 'provider.mode.ok', severity: 'info', message: `生成服务支持 ${intent.mode.toUpperCase()} 模式` });
     }
     if (caps?.supportedAspectRatios?.length && !caps.supportedAspectRatios.includes(intent.aspectRatio)) {
       sections[2]!.checks.push({
         key: 'provider.aspect',
         severity: 'error',
-        message: `Provider does not support aspect ratio ${intent.aspectRatio} (${caps.supportedAspectRatios.join(', ')})`,
+        message: `生成服务不支持 ${intent.aspectRatio} 画幅；支持：${caps.supportedAspectRatios.join('、')}`,
       });
     }
     if (provider.configured === false) {
-      sections[2]!.checks.push({ key: 'provider.not_configured', severity: 'error', message: 'Provider credential not configured (RUNNINGHUB_API_KEY)' });
+      sections[2]!.checks.push({ key: 'provider.not_configured', severity: 'error', message: '尚未配置 RunningHub API Key' });
     }
   }
 
@@ -196,14 +196,14 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
         sections[3]!.checks.push({
           key: `ref.kind.${b.id}`,
           severity: 'error',
-          message: `Reference ${b.id} role "${role}" needs a ${roleKindOk[role]} asset but is bound to ${kind}`,
+          message: `参考素材 ${b.id} 的角色“${role}”需要 ${roleKindOk[role]} 类型，当前绑定为 ${kind}`,
         });
       }
     }
   }
   for (const role of requiredRoles) {
     if (!haveRoles.has(role)) {
-      sections[3]!.checks.push({ key: `ref.${role}`, severity: 'error', message: `Missing required reference role: ${role}` });
+      sections[3]!.checks.push({ key: `ref.${role}`, severity: 'error', message: `缺少必需的参考素材角色：${role}` });
     }
   }
   if (caps) {
@@ -212,19 +212,19 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       const nVideo = bindings.filter((r) => r.kind === 'video').length;
       const nAudio = bindings.filter((r) => r.kind === 'audio').length;
       if (nImage === 0) {
-        sections[3]!.checks.push({ key: 'ref.image.required', severity: 'error', message: 'Ref2VA requires at least one RefImage' });
+        sections[3]!.checks.push({ key: 'ref.image.required', severity: 'error', message: 'Ref2VA 至少需要一张参考图' });
       }
       if (nVideo > 0) {
-        sections[3]!.checks.push({ key: 'ref.video.unsupported', severity: 'error', message: 'Current Ref2VA workflow does not support video references' });
+        sections[3]!.checks.push({ key: 'ref.video.unsupported', severity: 'error', message: '当前 Ref2VA 工作流不支持视频参考素材' });
       }
       if (caps.maxImageRefs != null && nImage > caps.maxImageRefs) {
-        sections[3]!.checks.push({ key: 'ref.count.image', severity: 'error', message: `${nImage} image refs exceed provider max ${caps.maxImageRefs}` });
+        sections[3]!.checks.push({ key: 'ref.count.image', severity: 'error', message: `${nImage} 张参考图超过生成服务上限 ${caps.maxImageRefs} 张` });
       }
       if (caps.maxVideoRefs != null && nVideo > caps.maxVideoRefs) {
-        sections[3]!.checks.push({ key: 'ref.count.video', severity: 'error', message: `${nVideo} video refs exceed provider max ${caps.maxVideoRefs}` });
+        sections[3]!.checks.push({ key: 'ref.count.video', severity: 'error', message: `${nVideo} 个视频参考超过生成服务上限 ${caps.maxVideoRefs} 个` });
       }
       if (caps.maxAudioRefs != null && nAudio > caps.maxAudioRefs) {
-        sections[3]!.checks.push({ key: 'ref.count.audio', severity: 'error', message: `${nAudio} audio refs exceed provider max ${caps.maxAudioRefs}` });
+        sections[3]!.checks.push({ key: 'ref.count.audio', severity: 'error', message: `${nAudio} 个参考音频超过生成服务上限 ${caps.maxAudioRefs} 个` });
       }
     }
   }
@@ -233,14 +233,14 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       const asset = getMedia(p, b.asset_id);
       const abs = p.resolveProjectPath(asset.fileName);
       if (!(await pathReadable(abs))) {
-        sections[3]!.checks.push({ key: `ref.file.${b.id}`, severity: 'error', message: `Reference file missing on disk: ${asset.fileName}` });
+        sections[3]!.checks.push({ key: `ref.file.${b.id}`, severity: 'error', message: `本地参考素材文件不存在：${asset.fileName}` });
       }
     } catch (e) {
-      sections[3]!.checks.push({ key: `ref.asset.${b.id}`, severity: 'error', message: `Invalid reference: ${e instanceof Error ? e.message : e}` });
+      sections[3]!.checks.push({ key: `ref.asset.${b.id}`, severity: 'error', message: `参考素材无效：${e instanceof Error ? e.message : e}` });
     }
   }
   if (sections[3]!.checks.length === 0) {
-    sections[3]!.checks.push({ key: 'ref.ok', severity: 'info', message: bindings.length ? `${bindings.length} reference(s) present` : 'No references (mode-appropriate)' });
+    sections[3]!.checks.push({ key: 'ref.ok', severity: 'info', message: bindings.length ? `已准备 ${bindings.length} 项参考素材` : '当前模式无需参考素材' });
   }
 
   // Integrity: prompt must belong to this shot; DP version must exist
@@ -248,20 +248,20 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     sections[4]!.checks.push({
       key: 'integrity.prompt_shot',
       severity: 'error',
-      message: `Prompt ${intent.promptVersionId} belongs to shot ${prompt.shotId}, not ${intent.shotId}`,
+      message: `提示词 ${intent.promptVersionId} 属于镜头 ${prompt.shotId}，不属于当前镜头 ${intent.shotId}`,
     });
   }
   if (prompt.directorPlanVersionId) {
     const dpv = p.db.get<{ id: string }>('SELECT id FROM director_plan_versions WHERE id = ?', [prompt.directorPlanVersionId]);
-    if (!dpv) sections[4]!.checks.push({ key: 'integrity.dpv', severity: 'error', message: 'DirectorPlan version reference is broken' });
+    if (!dpv) sections[4]!.checks.push({ key: 'integrity.dpv', severity: 'error', message: '关联的导演计划版本不存在' });
   }
-  sections[4]!.checks.push({ key: 'integrity.shot', severity: 'info', message: `Shot ${shot.id} / ${shot.status}` });
+  sections[4]!.checks.push({ key: 'integrity.shot', severity: 'info', message: `镜头 ${shot.id} / ${SHOT_STATUS_LABEL[shot.status]}` });
 
   // Credential
   if (provider?.configured === false) {
-    sections[5]!.checks.push({ key: 'credential.key', severity: 'error', message: 'RUNNINGHUB_API_KEY missing — set it in the environment before rendering' });
+    sections[5]!.checks.push({ key: 'credential.key', severity: 'error', message: '缺少 RunningHub API Key，请先在设置中配置' });
   } else {
-    sections[5]!.checks.push({ key: 'credential.ok', severity: 'info', message: 'Credential available' });
+    sections[5]!.checks.push({ key: 'credential.ok', severity: 'info', message: '访问凭证可用' });
   }
 
   // Duplicate: an active render is a hard error (PRD: no duplicate paid submit)
@@ -270,9 +270,9 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     [shot.id],
   );
   if (active) {
-    sections[6]!.checks.push({ key: 'duplicate.active', severity: 'error', message: `Shot already has an active render job (${active.id})` });
+    sections[6]!.checks.push({ key: 'duplicate.active', severity: 'error', message: `当前镜头已有进行中的生成任务（${active.id}）` });
   } else {
-    sections[6]!.checks.push({ key: 'duplicate.ok', severity: 'info', message: 'No duplicate render in flight' });
+    sections[6]!.checks.push({ key: 'duplicate.ok', severity: 'info', message: '没有重复的生成任务' });
   }
 
   const report = finalizePreflight(p, sections, intent.shotId, intent.promptVersionId, null, false);
@@ -337,6 +337,30 @@ export function listPreflightReports(p: ProjectContext, shotId: string): Preflig
       aiSemanticRun: Boolean(r.ai_semantic_run),
       createdAt: r.created_at,
     }));
+}
+
+export function attachSemanticReview(p: ProjectContext, reportId: string, text: string): PreflightReport {
+  const row = p.db.get<{ shot_id: string }>('SELECT shot_id FROM preflight_reports WHERE id = ?', [reportId]);
+  if (!row) throw new Error('生成检查记录不存在');
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const hasMismatch = lines.some((line) =>
+    (/^MISMATCH:/i.test(line) && !/^MISMATCH:\s*(None|N\/A)/i.test(line))
+    || (/^不一致[：:]/.test(line) && !/^不一致[：:]\s*(无|没有)/.test(line)),
+  );
+  const semantic: PreflightSection[] = [{
+    key: 'ai.continuity',
+    label: 'AI 连续性',
+    status: hasMismatch ? 'warn' : 'ok',
+    checks: [{
+      key: 'ai.continuity.result',
+      severity: hasMismatch ? 'warning' : 'info',
+      message: text.trim() || 'AI 未返回连续性检查内容',
+    }],
+  }];
+  p.db.run('UPDATE preflight_reports SET semantic_json = ?, ai_semantic_run = 1 WHERE id = ?', [j(semantic), reportId]);
+  const updated = listPreflightReports(p, row.shot_id).find((report) => report.id === reportId);
+  if (!updated) throw new Error('生成检查记录更新失败');
+  return updated;
 }
 
 export function latestPreflight(p: ProjectContext, shotId: string): PreflightReport | null {

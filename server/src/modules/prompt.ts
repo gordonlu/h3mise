@@ -94,9 +94,15 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
   });
 }
 
-/** Raw prompt path: user pastes an H3 prompt directly (PRD §18/§52 C). */
-export function importRawPrompt(p: ProjectContext, shotId: string, text: string, mode: H3Mode): PromptVersion {
-  return createPrompt(p, { shotId, source: 'manual', h3Mode: mode, text });
+/** Store a user-authored or AI-optimized prompt as an immutable version. */
+export function importRawPrompt(
+  p: ProjectContext,
+  shotId: string,
+  text: string,
+  mode: H3Mode,
+  source: Extract<PromptSource, 'manual' | 'ai_compiler'> = 'manual',
+): PromptVersion {
+  return createPrompt(p, { shotId, source, h3Mode: mode, text });
 }
 
 /** Copy Context Package for external AI (PRD §21/§39). */

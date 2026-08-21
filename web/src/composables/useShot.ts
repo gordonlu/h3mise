@@ -73,8 +73,8 @@ export function useShot(shotId: string) {
     return pv;
   }
 
-  async function importRawPrompt(text: string, mode: string) {
-    const pv = await post<PromptVersion>(`/api/shots/${shotId}/prompts/raw`, { text, mode });
+  async function importRawPrompt(text: string, mode: string, source: 'manual' | 'ai_compiler' = 'manual') {
+    const pv = await post<PromptVersion>(`/api/shots/${shotId}/prompts/raw`, { text, mode, source });
     await load();
     return pv;
   }

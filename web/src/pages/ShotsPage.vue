@@ -110,7 +110,7 @@ async function pasteShots() {
       if (lines.length > 1 && lines.every((l) => l.startsWith('【'))) {
         const proceed = await confirmDialog({
           title: '看起来像单条提示词？',
-          message: `检测到 ${lines.length} 段以【】开头的段落，通常是同一条提示词的分段，而不是镜头列表。确认要按行拆分成 ${lines.length} 个镜头吗？\n\n如需整段导入提示词，请进入镜头制作页 → 提示词 → 粘贴现成提示词。`,
+          message: `检测到 ${lines.length} 段以【】开头的段落，通常是同一条提示词的分段，而不是镜头列表。确认要按行拆分成 ${lines.length} 个镜头吗？\n\n如需整段输入提示词，请进入镜头制作页 → 提示词 → 手动输入提示词。`,
           confirmLabel: '仍要拆分',
           danger: true,
         });

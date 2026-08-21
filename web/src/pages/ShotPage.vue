@@ -311,8 +311,8 @@ async function aiCompile() {
     const result = await runAi('compile_prompt', { shotId });
     const text = (result as { text?: string })?.text;
     if (text) {
-      await s.importRawPrompt(text, sShot.value?.h3Mode ?? 't2va');
-      toasts.push({ kind: 'ok', text: 'AI 编译的提示词已保存为新版本' });
+      await s.importRawPrompt(text, sShot.value?.h3Mode ?? 't2va', 'ai_compiler');
+      toasts.push({ kind: 'ok', text: 'AI 优化后的提示词已保存为新版本' });
     }
   });
 }
@@ -733,7 +733,7 @@ const TABS = [
             :current-mode="sShot.h3Mode"
             :ai-enabled="aiEnabled"
             :on-compile="(m: string) => guarded(() => s.compilePrompt(m), '提示词已编译为新版本')"
-            :on-raw="(t: string, m: string) => guarded(() => s.importRawPrompt(t, m), '提示词已导入')"
+            :on-raw="(t: string, m: string) => guarded(() => s.importRawPrompt(t, m), '提示词已保存为新版本')"
             :on-ai-compile="aiCompile"
           />
         </div>

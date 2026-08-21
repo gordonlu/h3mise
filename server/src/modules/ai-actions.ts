@@ -251,11 +251,12 @@ export async function runAction(
     }
     case 'compile_prompt': {
       if (!shotId) throw new Error('shotId required');
-      const deterministic = promptMod.listPrompts(ctx, shotId).at(-1);
+      const current = promptMod.listPrompts(ctx, shotId).at(-1);
+      if (!current) throw new Error('请先从镜头设计生成或手动输入一版提示词');
       const text = await ai.model.complete({
-        system: `You are the H3 prompt writer. Rewrite the deterministic draft into a natural, compact H3 prompt. Keep EVERY fact. Do not add events. Preserve reference labels. Keep the same sections. Output only the prompt text.`,
+        system: `你是专业的 H3 视频提示词编辑。优化当前提示词的清晰度、可执行性和语言紧凑度；保留全部事实、参考素材标签和原有段落结构，不增加事件，不改变镜头意图。只输出优化后的提示词正文，不要解释。`,
         messages: [
-          { role: 'user', content: `Deterministic draft:\n${deterministic?.text ?? '(none)'}\n\nMode: ${deterministic?.h3Mode ?? shot?.h3Mode}` },
+          { role: 'user', content: `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}` },
         ],
         temperature: 0.4,
       });

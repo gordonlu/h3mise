@@ -1,7 +1,12 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyDirectorPlan } from '@h3mise/shared';
-import { normalizeDirectorPlan, parseDirectorPlanText, planIsGuideReady } from '../src/modules/director.js';
+import { createPlanVersion, normalizeDirectorPlan, parseDirectorPlanText, planIsGuideReady } from '../src/modules/director.js';
+import { createShot } from '../src/modules/shots.js';
+import { cleanupTempRoot, makeProject, makeStore } from './helpers.js';
+
+const roots: string[] = [];
+after(() => { for (const root of roots) cleanupTempRoot(root); });
 
 test('guided shot design requires only the four essential director answers', () => {
   const plan = emptyDirectorPlan();
@@ -63,4 +68,29 @@ test('AI DirectorPlan normalization accepts wrappers and snake_case but drops in
   assert.deepEqual(normalized.plan?.reality.constraints, ['保持重力']);
   assert.equal(normalized.plan?.generation.durationSeconds, 5);
   assert.equal('unknown' in (normalized.plan?.intent ?? {}), false);
+});
+
+test('saved DirectorPlan inherits shot-owned function, mode, duration, and aspect ratio', async () => {
+  const { root, store } = await makeStore('director-shot-settings');
+  roots.push(root);
+  const project = await makeProject(store, 'director shot settings');
+  const shot = createShot(project, {
+    title: 'Reference shot',
+    shotFunction: 'reaction',
+    h3Mode: 'ref2va',
+    durationSeconds: 8,
+    aspectRatio: '9:16',
+  });
+  const plan = emptyDirectorPlan();
+  plan.intent.shotFunction = 'wide';
+  plan.generation.requestedMode = 't2va';
+  plan.generation.durationSeconds = 3;
+  plan.generation.aspectRatio = '16:9';
+
+  const saved = createPlanVersion(project, { shotId: shot.id, plan, source: 'manual' });
+
+  assert.equal(saved.plan.intent.shotFunction, 'reaction');
+  assert.equal(saved.plan.generation.requestedMode, 'ref2va');
+  assert.equal(saved.plan.generation.durationSeconds, 8);
+  assert.equal(saved.plan.generation.aspectRatio, '9:16');
 });

@@ -731,7 +731,6 @@ const TABS = [
           <PromptPanel
             :prompts="sDetail?.prompts ?? []"
             :current-mode="sShot.h3Mode"
-            :available-modes="availableModes"
             :ai-enabled="aiEnabled"
             :on-compile="(m: string) => guarded(() => s.compilePrompt(m), '提示词已编译为新版本')"
             :on-raw="(t: string, m: string) => guarded(() => s.importRawPrompt(t, m), '提示词已导入')"

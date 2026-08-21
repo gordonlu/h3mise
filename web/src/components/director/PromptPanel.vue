@@ -1,20 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { H3_MODE_LABEL } from '@h3mise/shared';
 import type { H3Mode, PromptVersion } from '@h3mise/shared';
 
 const props = defineProps<{
   prompts: PromptVersion[];
   currentMode: string | null;
-  /** PRD §15: only modes the current provider profile actually supports. */
-  availableModes: readonly H3Mode[];
   aiEnabled: boolean;
   onCompile: (mode: string) => Promise<unknown>;
   onRaw: (text: string, mode: string) => Promise<unknown>;
   onAiCompile: () => Promise<unknown>;
 }>();
 
-const mode = ref(props.currentMode ?? 't2va');
+const mode = computed<H3Mode>(() => (props.currentMode as H3Mode | null) ?? 't2va');
 const rawText = ref('');
 const showRaw = ref(false);
 const busy = ref('');
@@ -46,9 +44,7 @@ async function copy(text: string) {
 <template>
   <div class="col">
     <div class="row wrap">
-      <select v-model="mode" class="mode-select" title="H3 生成模式">
-        <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
-      </select>
+      <span class="badge accent no-dot" title="生成模式由当前镜头决定">{{ H3_MODE_LABEL[mode] }}</span>
       <button class="primary sm" :disabled="busy !== ''" @click="run('compile', () => onCompile(mode))">
         {{ busy === 'compile' ? '编译中…' : '标准编译' }}
       </button>
@@ -89,7 +85,6 @@ async function copy(text: string) {
 </template>
 
 <style scoped>
-.mode-select { width: 220px; }
 .wrap { flex-wrap: wrap; }
 .prompt-item { padding: 10px 12px; }
 .prompt-text {

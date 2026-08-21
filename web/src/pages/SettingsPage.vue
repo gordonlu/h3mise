@@ -124,13 +124,14 @@ async function saveApiKey() {
           <p class="muted">每个项目独立保存这些配置；切换项目请在顶栏下拉或 Projects 页操作。</p>
           <label class="field">标题<input :value="project.current.config.title" placeholder="项目名称" @change="saveProjectConfig({ title: ($event.target as HTMLInputElement).value })" /></label>
           <label class="field">
-            画幅
+            项目画幅
             <select :value="project.current.config.default_aspect_ratio" @change="saveProjectConfig({ default_aspect_ratio: ($event.target as HTMLSelectElement).value })">
               <option>16:9</option><option>9:16</option><option>4:3</option><option>1:1</option>
             </select>
+            <span class="muted">应用于项目内全部镜头；已有成片不会自动重新生成。</span>
           </label>
           <label class="field">
-            默认时长
+            新镜头默认时长
             <input type="number" :value="project.current.config.default_duration_seconds" title="默认时长（秒，1–15）" placeholder="5" @change="saveProjectConfig({ default_duration_seconds: Number(($event.target as HTMLInputElement).value) })" />
           </label>
           <label class="field">

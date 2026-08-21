@@ -51,7 +51,24 @@ export function createPlanVersion(
   const version = (latest?.version ?? 0) + 1;
   const id = nextId(p.db, 'dpv');
   const now = new Date().toISOString();
-  const plan = { ...input.plan, version };
+  const normalized = normalizeDirectorPlan(input.plan);
+  if (!normalized.ok || !normalized.plan) throw new Error(normalized.error ?? 'invalid director plan');
+  const shot = p.db.get<{ shot_function: DirectorPlan['intent']['shotFunction']; duration_seconds: number; aspect_ratio: string; h3_mode: DirectorPlan['generation']['requestedMode'] }>(
+    'SELECT shot_function, duration_seconds, aspect_ratio, h3_mode FROM shots WHERE id = ?',
+    [input.shotId],
+  );
+  if (!shot) throw new Error('shot not found');
+  const plan = {
+    ...normalized.plan,
+    version,
+    intent: { ...normalized.plan.intent, shotFunction: shot.shot_function },
+    generation: {
+      ...normalized.plan.generation,
+      requestedMode: shot.h3_mode ?? '',
+      durationSeconds: shot.duration_seconds,
+      aspectRatio: shot.aspect_ratio,
+    },
+  };
   p.db.run('INSERT INTO director_plan_versions (id, shot_id, version, plan_json, source, created_at) VALUES (?, ?, ?, ?, ?, ?)', [
     id,
     input.shotId,
@@ -61,8 +78,8 @@ export function createPlanVersion(
     now,
   ]);
   // Keep the shot's directed status when a real plan exists.
-  const shot = p.db.get<{ status: string }>('SELECT status FROM shots WHERE id = ?', [input.shotId]);
-  if (shot && shot.status === 'DRAFT' && planHasContent(plan)) {
+  const shotStatus = p.db.get<{ status: string }>('SELECT status FROM shots WHERE id = ?', [input.shotId]);
+  if (shotStatus && shotStatus.status === 'DRAFT' && planHasContent(plan)) {
     p.db.run("UPDATE shots SET status = 'PLANNED', updated_at = ? WHERE id = ?", [now, input.shotId]);
   }
   return getPlanVersion(p, id);

@@ -88,7 +88,6 @@ const sections: SectionDef[] = [
   {
     key: 'intent', cn: '意图', en: 'Intent',
     fields: [
-      { path: ['intent', 'shotFunction'], cn: '镜头功能', en: 'Shot Function', type: 'select', options: ['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other'] },
       { path: ['intent', 'visualThesis'], cn: '视觉主题', en: 'Visual Thesis', type: 'textarea', placeholder: '这个镜头在画面上要表达什么' },
       { path: ['intent', 'dramaticGoal'], cn: '戏剧目标', en: 'Dramatic Goal', type: 'textarea' },
       { path: ['intent', 'peak'], cn: '峰值时刻', en: 'Peak', type: 'textarea', placeholder: '情绪/动作的最高点发生在何时' },
@@ -175,11 +174,8 @@ const sections: SectionDef[] = [
     ],
   },
   {
-    key: 'generation', cn: '生成参数', en: 'Generation',
+    key: 'generation', cn: '声音', en: 'Audio',
     fields: [
-      { path: ['generation', 'requestedMode'], cn: '请求模式', en: 'Requested Mode', type: 'select', options: ['', 't2va', 'i2va', 'fl2va', 'l2va', 'ref2va'] },
-      { path: ['generation', 'durationSeconds'], cn: '时长 (s)', en: 'Duration', type: 'number' },
-      { path: ['generation', 'aspectRatio'], cn: '画幅', en: 'Aspect Ratio', type: 'text' },
       { path: ['generation', 'audioIntent'], cn: '声音设计', en: 'Audio Intent', type: 'textarea' },
     ],
   },

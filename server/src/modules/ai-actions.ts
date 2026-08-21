@@ -37,7 +37,7 @@ const PLAN_SCHEMA_HINT = `DirectorPlan JSON schema:
   "environment": {"location": string, "weather": string, "medium": string, "wind": string, "lighting": string, "foreground": string, "midground": string, "background": string},
   "reality": {"mode": "strict_realism"|"plausible_stylized"|"deliberate_fantasy", "constraints": string[]},
   "continuity": {"plannedStartState": string, "plannedEndState": string},
-  "generation": {"requestedMode": string, "durationSeconds": number, "aspectRatio": string, "audioIntent": string}
+  "generation": {"audioIntent": string}
 }`;
 
 const DIRECTOR_SYSTEM_PROMPT = `你是 H3Mise 内置电影导演助手，负责把故事事实转化为可执行的单镜头导演方案。

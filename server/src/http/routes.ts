@@ -143,6 +143,10 @@ export function buildRoutes(services: AppServices): App {
   app.patch('/api/current-project/config', async (c) => {
     const ctx = p(c);
     const body = await c.req.json().catch(() => ({}));
+    if (typeof body.default_aspect_ratio === 'string' && body.default_aspect_ratio !== ctx.config.default_aspect_ratio) {
+      const now = new Date().toISOString();
+      ctx.db.run('UPDATE shots SET aspect_ratio = ?, updated_at = ?', [body.default_aspect_ratio, now]);
+    }
     ctx.config = { ...ctx.config, ...body };
     await services.store.saveConfig();
     return c.json({ config: ctx.config });

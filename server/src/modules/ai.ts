@@ -37,7 +37,9 @@ export class OpenAICompatModel implements DirectorModel {
       },
       body: JSON.stringify({
         model: this.model,
-        messages: input.messages,
+        messages: input.system
+          ? [{ role: 'system' as const, content: input.system }, ...input.messages]
+          : input.messages,
         temperature: input.temperature ?? 0.7,
         ...(input.json ? { response_format: { type: 'json_object' } } : {}),
       }),

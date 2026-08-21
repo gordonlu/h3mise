@@ -3,7 +3,7 @@ import { ref, watch, computed, toRaw } from 'vue';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan } from '@h3mise/shared';
 
-const props = defineProps<{ plan: DirectorPlan; aiEnabled: boolean; onAiSuggest: (section: string) => void; aiBusy?: boolean }>();
+const props = defineProps<{ plan: DirectorPlan; aiEnabled: boolean; onAiSuggest: (plan: DirectorPlan) => void; aiBusy?: boolean }>();
 const emit = defineEmits<{ save: [plan: DirectorPlan]; paste: []; dirtyChange: [dirty: boolean] }>();
 
 const draft = ref<DirectorPlan>(emptyDirectorPlan());
@@ -35,7 +35,6 @@ interface SectionDef {
   key: string;
   cn: string;
   en: string;
-  ai?: boolean;
   fields: FieldDef[];
 }
 
@@ -87,7 +86,7 @@ const essentialPathKeys = new Set(essentialFields.map((field) => field.path.join
 
 const sections: SectionDef[] = [
   {
-    key: 'intent', cn: '意图', en: 'Intent', ai: true,
+    key: 'intent', cn: '意图', en: 'Intent',
     fields: [
       { path: ['intent', 'shotFunction'], cn: '镜头功能', en: 'Shot Function', type: 'select', options: ['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other'] },
       { path: ['intent', 'visualThesis'], cn: '视觉主题', en: 'Visual Thesis', type: 'textarea', placeholder: '这个镜头在画面上要表达什么' },
@@ -116,7 +115,7 @@ const sections: SectionDef[] = [
     ],
   },
   {
-    key: 'camera', cn: '摄影机', en: 'Camera', ai: true,
+    key: 'camera', cn: '摄影机', en: 'Camera',
     fields: [
       { path: ['camera', 'shotSizeStart'], cn: '起幅景别', en: 'Shot Size Start', type: 'text', placeholder: '如 wide / medium / close-up' },
       { path: ['camera', 'shotSizePeak'], cn: '峰值景别', en: 'Shot Size Peak', type: 'text' },
@@ -130,7 +129,7 @@ const sections: SectionDef[] = [
     ],
   },
   {
-    key: 'performance', cn: '表演', en: 'Performance', ai: true,
+    key: 'performance', cn: '表演', en: 'Performance',
     fields: [
       { path: ['performance', 'objective'], cn: '目标', en: 'Objective', type: 'text' },
       { path: ['performance', 'obstacle'], cn: '障碍', en: 'Obstacle', type: 'text' },
@@ -162,7 +161,7 @@ const sections: SectionDef[] = [
     ],
   },
   {
-    key: 'reality', cn: '现实规则', en: 'Reality', ai: true,
+    key: 'reality', cn: '现实规则', en: 'Reality',
     fields: [
       { path: ['reality', 'mode'], cn: '模式', en: 'Mode', type: 'select', options: ['strict_realism', 'plausible_stylized', 'deliberate_fantasy'] },
       { path: ['reality', 'constraints'], cn: '约束（每行一条）', en: 'Constraints', type: 'list', placeholder: '如：角色不会飞；车辆遵守惯性' },
@@ -240,6 +239,10 @@ function save() {
   if (!isRequiredComplete.value) return;
   emit('save', structuredClone(toRaw(draft.value)));
 }
+
+function requestAiSuggestion() {
+  props.onAiSuggest(structuredClone(toRaw(draft.value)));
+}
 </script>
 
 <template>
@@ -261,9 +264,9 @@ function save() {
         <button
           class="sm ai-fill"
           :disabled="!aiEnabled || aiBusy"
-          :title="aiEnabled ? '让内部 AI 自动填写四项镜头设计' : '请先在设置中配置内部 AI'"
-          @click="props.onAiSuggest('full')"
-        >{{ aiBusy ? 'AI 填写中…' : aiEnabled ? 'AI 自动填写 4 项' : '内部 AI 未配置' }}</button>
+          :title="aiEnabled ? '基于当前草稿，一次完善必填项和高级设置' : '请先在设置中配置内部 AI'"
+          @click="requestAiSuggestion"
+        >{{ aiBusy ? 'AI 完善中…' : aiEnabled ? 'AI 完善镜头设计' : '内部 AI 未配置' }}</button>
         <button class="primary sm" :class="{ pulse: isDirty && isRequiredComplete }" :disabled="!isDirty || !isRequiredComplete" @click="save">保存镜头设计</button>
       </div>
     </div>
@@ -304,7 +307,6 @@ function save() {
             <span class="sec-en">{{ sec.en }}</span>
             <span v-if="!open.has(sec.key) && filledCount(sec)" class="badge accent no-dot">{{ filledCount(sec) }} 项已填</span>
             <span class="grow" />
-            <button v-if="sec.ai && aiEnabled" class="sm ghost" :disabled="aiBusy" @click.stop="props.onAiSuggest(sec.key)">{{ aiBusy ? 'AI 处理中…' : 'AI 建议' }}</button>
           </div>
           <div v-if="open.has(sec.key)" class="panel-body grid two">
             <label v-for="f in sec.fields" :key="f.path.join('.')" class="field">

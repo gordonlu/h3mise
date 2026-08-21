@@ -292,16 +292,10 @@ async function guarded(fn: () => Promise<unknown>, okMsg?: string) {
   }
 }
 
-async function aiSuggest(section: string) {
-  const body: Record<string, unknown> = { shotId };
-  const action = section === 'full' ? 'plan_shot' : section === 'camera' ? 'improve_camera' : section === 'performance' ? 'improve_performance' : 'plan_shot';
+async function aiSuggest(currentPlan: DirectorPlan) {
+  const body: Record<string, unknown> = { shotId, plan: currentPlan };
   await guarded(async () => {
-    if (section === 'reality') {
-      aiResults.value.reality = await runAi('reality_check', body);
-      toasts.push({ kind: 'info', text: 'Reality check 完成，结果见计划分区下方' });
-      return;
-    }
-    const result = await runAi(action, body);
+    const result = await runAi('plan_shot', body);
     const plan = (result as { plan?: DirectorPlan })?.plan;
     if (plan) {
       await s.savePlan(plan, 'builtin_ai');

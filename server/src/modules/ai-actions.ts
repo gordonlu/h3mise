@@ -40,6 +40,17 @@ const PLAN_SCHEMA_HINT = `DirectorPlan JSON schema:
   "generation": {"requestedMode": string, "durationSeconds": number, "aspectRatio": string, "audioIntent": string}
 }`;
 
+const DIRECTOR_SYSTEM_PROMPT = `你是 H3Mise 内置电影导演助手，负责把故事事实转化为可执行的单镜头导演方案。
+
+工作标准：
+1. 一个镜头只表达一个连续事件，不在单次生成中安排切镜、跳时或场景切换。
+2. 优先保证叙事意图清晰、主体动作可见、摄影机行为可执行、结束画面明确。
+3. 严格遵守故事、角色、参考素材与已提交连续性；不得补写上下文中不存在的事实。
+4. 摄影机、表演、环境和现实约束必须互相兼容，并适合当前时长、画幅与生成模式。
+5. 信息不足时采用保守方案或留空，不使用空泛形容词，不解释创作过程。
+
+输出要求：只返回符合 DirectorPlan schema 的完整 JSON 对象，不要 Markdown、代码围栏或额外说明。字段内容应简洁、具体、可拍摄。`;
+
 type BeatsResult = Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
 
 /** Models under json_object mode sometimes wrap an array in {"beats": [...]}. */
@@ -147,7 +158,7 @@ export async function runAction(
     case 'plan_shot': {
       if (!shotId) throw new Error('shotId required');
       const dp = await ai.model.structured<DirectorPlan>({
-        system: `You are the H3 Micro Cinematic Director.\n${skillText}\n${PLAN_SCHEMA_HINT}\nReturn ONLY the JSON plan. Do not invent story facts.`,
+        system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: planShotPrompt(ctx, shotId, body) }],
         temperature: 0.6,
       });
@@ -287,7 +298,7 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
         const beat = storyMod.createBeat(ctx, { title: b.title, category: b.category, summary: b.summary, location: b.location, timeOfDay: b.timeOfDay, weather: b.weather, stateChange: b.stateChange });
         const shot = shotsMod.createShot(ctx, { title: beat.title, storyBeatId: beat.id, purpose: beat.summary, durationSeconds: beat.durationSeconds || ctx.config.default_duration_seconds });
         const dp = await ai.model.structured<DirectorPlan>({
-          system: `You are the H3 Micro Cinematic Director.\n${skillText}\n${PLAN_SCHEMA_HINT}\nReturn ONLY the JSON plan.`,
+          system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
           messages: [{ role: 'user', content: planShotPrompt(ctx, shot.id, {}) }],
           temperature: 0.6,
         });
@@ -303,8 +314,9 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
 
 function planShotPrompt(ctx: ProjectContext, shotId: string, body: Record<string, unknown>): string {
   const shot = shotsMod.getShot(ctx, shotId);
-  const plan = directorMod.latestPlan(ctx, shotId)?.plan ?? null;
-  const prompts = promptMod.listPrompts(ctx, shotId);
+  const plan = body.plan && typeof body.plan === 'object'
+    ? body.plan
+    : directorMod.latestPlan(ctx, shotId)?.plan ?? null;
   const refs = assetsMod.listBindings(ctx, shotId);
   const latest = continuityMod.predecessorContinuity(ctx, shotId, 'visual', 'actual');
   const entities = assetsMod.listEntities(ctx);
@@ -315,7 +327,6 @@ function planShotPrompt(ctx: ProjectContext, shotId: string, body: Record<string
 StoryBeat: ${JSON.stringify(beat)}
 Story: ${story.title} — ${story.synopsis.slice(0, 300)}
 DirectorPlan (current, may be empty): ${JSON.stringify(plan)}
-Prompt history: ${prompts.map((pv) => pv.text).join('\n---\n').slice(0, 4000)}
 References: ${JSON.stringify(refs)}
 Committed actual continuity: ${JSON.stringify(latest?.state)}
 Entities: ${JSON.stringify(entities)}

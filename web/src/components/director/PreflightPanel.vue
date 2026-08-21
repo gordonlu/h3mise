@@ -20,7 +20,7 @@ const busy = ref('');
 const latestMatchingReport = computed(() => props.prompt
   ? props.reports.find((report) => report.promptVersionId === props.prompt?.id) ?? null
   : null);
-const visibleReports = computed(() => latestMatchingReport.value ? [latestMatchingReport.value] : props.reports.slice(0, 1));
+const visibleReports = computed(() => latestMatchingReport.value ? [latestMatchingReport.value] : []);
 const matchingReportCount = computed(() => props.prompt
   ? props.reports.filter((report) => report.promptVersionId === props.prompt?.id).length
   : 0);
@@ -79,6 +79,10 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
     </div>
 
     <div v-if="!prompt" class="muted">请先编译或粘贴提示词。</div>
+    <div v-else-if="!latestMatchingReport" class="panel pending-check">
+      <strong>当前提示词还没有生成检查记录</strong>
+      <p>旧提示词的检查结果不会沿用。点击“运行生成检查”确认当前提示词、参考素材和生成参数。</p>
+    </div>
 
     <div v-for="r in visibleReports" :key="r.id" class="panel preflight">
       <div class="spread report-head">
@@ -137,7 +141,7 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
     </div>
 
     <button class="primary render-btn" :disabled="busy !== '' || !prompt || !renderReady" @click="render">
-      {{ busy === 'render' ? '提交中…' : renderReady ? '生成视频 · 创建 1 个新 Take' : canRender && !providerSupportsPrompt ? '当前 Provider 不支持此模式' : '生成检查通过后可生成' }}
+      {{ busy === 'render' ? '提交中…' : renderReady ? '生成视频 · 创建 1 个新 Take' : !latestMatchingReport ? '请先运行当前提示词的生成检查' : canRender && !providerSupportsPrompt ? '当前 Provider 不支持此模式' : '生成检查通过后可生成' }}
     </button>
     <p class="muted">点击后会显示最终参数确认；提交前还会强制重跑生成检查，未通过时不会产生生成任务。</p>
   </div>
@@ -163,6 +167,8 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
 .cost-preview { min-width: 0; overflow: hidden; border-style: dashed; }
 .cost-row { min-width: 0; gap: 6px; }
 .provider-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pending-check { padding: 12px; }
+.pending-check p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
 .repair-prompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 12px; border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); }
 .repair-prompt div { min-width: 0; }
 .repair-prompt p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }

@@ -497,16 +497,46 @@ onBeforeRouteLeave(async () => {
 });
 
 let off: (() => void) | null = null;
+let shotRefresh: Promise<void> | null = null;
+
+const ACTIVE_RENDER_STATUSES = new Set(['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING']);
+
+/**
+ * A preflight report is an immutable audit record. If its only error says an
+ * older render was active, repair the UI gate after that job reaches a
+ * terminal state by creating a fresh report. Other failures stay blocked.
+ */
+function refreshShotAndRepairExpiredDuplicateGate(): Promise<void> {
+  if (shotRefresh) return shotRefresh;
+  shotRefresh = (async () => {
+    await s.load();
+    const detail = sDetail.value;
+    const prompt = detail?.prompts.at(-1);
+    const matchingReport = prompt
+      ? detail?.preflights.find((item) => item.promptVersionId === prompt.id)
+      : null;
+    const report = matchingReport ?? detail?.preflights[0] ?? null;
+    const hasActiveJob = detail?.jobs.some((job) => ACTIVE_RENDER_STATUSES.has(job.status)) ?? false;
+    const errors = report?.basic.flatMap((section) => section.checks).filter((check) => check.severity === 'error') ?? [];
+    if (prompt && report?.blocked && !hasActiveJob && errors.length > 0 && errors.every((check) => check.key === 'duplicate.active')) {
+      await s.runPreflight(prompt.id);
+    }
+  })().finally(() => {
+    shotRefresh = null;
+  });
+  return shotRefresh;
+}
 
 onMounted(async () => {
-  await s.load();
+  await refreshShotAndRepairExpiredDuplicateGate();
   applyGuideQuery();
   await loadMedia();
   await project.refreshProviders();
   await refreshAiStatus();
   window.addEventListener('beforeunload', beforeUnload);
   off = subscribeEvents((e) => {
-    if (e.type === 'take.created' || e.type === 'shot.updated' || e.type === 'render.job.succeeded') void s.load();
+    const renderEvent = e.type.startsWith('render.job.') && 'shotId' in e && e.shotId === shotId;
+    if (e.type === 'take.created' || e.type === 'shot.updated' || renderEvent) void refreshShotAndRepairExpiredDuplicateGate();
     if (e.type === 'take.created') void loadMedia();
   });
 });

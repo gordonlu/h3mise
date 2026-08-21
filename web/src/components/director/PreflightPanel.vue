@@ -12,6 +12,7 @@ const props = defineProps<{
   aiEnabled: boolean;
   onBasic: (promptId: string) => Promise<PreflightReport>;
   onAiCheck: (promptId: string) => Promise<PreflightReport | null>;
+  onRefreshPrompt: () => Promise<void>;
   onRender: (promptId: string) => Promise<void>;
 }>();
 
@@ -28,6 +29,9 @@ const providerSupportsPrompt = computed(() => props.prompt && Boolean(
   props.provider?.capabilities?.supportedModes.includes(props.prompt.h3Mode),
 ));
 const renderReady = computed(() => canRender.value && providerSupportsPrompt.value);
+const needsPromptRefresh = computed(() => Boolean(latestMatchingReport.value?.basic.some((section) =>
+  section.checks.some((check) => check.key === 'integrity.prompt_references'),
+)));
 const providerDisplayName = computed(() => props.provider?.name.replace(/\s+\d{8,}$/, '') ?? 'RunningHub');
 
 async function run(kind: 'basic' | 'ai') {
@@ -46,6 +50,15 @@ async function render() {
   busy.value = 'render';
   try {
     await props.onRender(props.prompt.id);
+  } finally {
+    busy.value = '';
+  }
+}
+
+async function refreshPrompt() {
+  busy.value = 'refresh-prompt';
+  try {
+    await props.onRefreshPrompt();
   } finally {
     busy.value = '';
   }
@@ -98,6 +111,16 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
     </div>
     <div v-if="matchingReportCount > 1" class="muted">已保留 {{ matchingReportCount - 1 }} 条历史检查记录；当前只显示最新结果。</div>
 
+    <div v-if="needsPromptRefresh" class="panel repair-prompt">
+      <div>
+        <strong>参考素材已更新</strong>
+        <p>当前提示词尚未包含新的参考图。重新生成后会自动复查，不会提交生成任务。</p>
+      </div>
+      <button class="primary sm" :disabled="busy !== ''" @click="refreshPrompt">
+        {{ busy === 'refresh-prompt' ? '处理中…' : '重新生成提示词并复查' }}
+      </button>
+    </div>
+
     <!-- PRD §41 cost protection: show exactly what one Generate will spend. -->
     <div class="panel cost-preview">
       <div class="panel-title">渲染成本预览（本次提交 = 1 次付费生成）</div>
@@ -140,4 +163,8 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
 .cost-preview { min-width: 0; overflow: hidden; border-style: dashed; }
 .cost-row { min-width: 0; gap: 6px; }
 .provider-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.repair-prompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 12px; border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); }
+.repair-prompt div { min-width: 0; }
+.repair-prompt p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
+.repair-prompt button { flex: none; }
 </style>

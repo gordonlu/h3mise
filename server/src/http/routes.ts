@@ -350,7 +350,14 @@ export function buildRoutes(services: AppServices): App {
     });
     const preflight = await preflightMod.runBasicPreflightIntent(ctx, services.providers, intent);
     if (preflight.blocked) {
-      return c.json({ error: 'preflight blocked', preflight }, 422);
+      const reasons = preflight.basic
+        .flatMap((section) => section.checks)
+        .filter((check) => check.severity === 'error')
+        .map((check) => check.message);
+      return c.json({
+        error: reasons.length ? `生成检查未通过：${reasons.join('；')}` : '生成检查未通过，请查看检查结果',
+        preflight,
+      }, 422);
     }
     const profile = services.providers.getProfile();
     const intentHash = preflightMod.renderIntentHash(intent, { appId: profile?.appId ?? '', checkedAt: profile?.verification.checkedAt ?? null });

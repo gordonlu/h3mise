@@ -365,6 +365,14 @@ async function doRender(promptId: string) {
   });
 }
 
+async function refreshPromptReferences() {
+  await guarded(async () => {
+    const prompt = await s.compilePrompt(sShot.value?.h3Mode ?? 't2va');
+    await s.runPreflight(prompt.id);
+    toasts.push({ kind: 'ok', text: '提示词已纳入最新参考素材，生成检查已通过' });
+  });
+}
+
 function openWorkspaceTarget(target: 'plan' | 'references' | 'prompt' | 'preflight' | 'takes') {
   if (target === 'takes') {
     takesSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -762,6 +770,7 @@ const TABS = [
             :ai-enabled="aiEnabled"
             :on-basic="(pid: string) => guarded(() => s.runPreflight(pid), '生成检查完成') as never"
             :on-ai-check="aiPreflight"
+            :on-refresh-prompt="refreshPromptReferences"
             :on-render="doRender"
           />
         </div>

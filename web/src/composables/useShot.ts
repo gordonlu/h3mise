@@ -92,9 +92,17 @@ export function useShot(shotId: string) {
   }
 
   async function render(promptVersionId: string, providerId = 'runninghub', durationSeconds?: number): Promise<RenderJob> {
-    const job = await post<RenderJob>('/api/render', { shotId, promptVersionId, providerId, durationSeconds });
-    await load();
-    return job;
+    try {
+      const job = await post<RenderJob>('/api/render', { shotId, promptVersionId, providerId, durationSeconds });
+      await load();
+      return job;
+    } catch (error) {
+      // A paid submission always reruns preflight. Refresh the detail payload
+      // so a newly-created blocking report is visible instead of only showing
+      // a transient API error toast.
+      await load().catch(() => undefined);
+      throw error;
+    }
   }
 
   async function selectTake(takeId: string) {

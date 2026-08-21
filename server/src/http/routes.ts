@@ -485,8 +485,14 @@ export function buildRoutes(services: AppServices): App {
   });
 
   app.patch('/api/assets/media/:id', async (c) => c.json(assetsMod.updateMediaLabel(p(c), c.req.param('id'), await c.req.json())));
-  app.delete('/api/assets/media/:id', (c) => {
-    assetsMod.deleteMedia(p(c), c.req.param('id'));
+  app.get('/api/assets/media/:id/usage', (c) => c.json(assetsMod.mediaUsage(p(c), c.req.param('id'))));
+  app.delete('/api/assets/media/:id', async (c) => {
+    const ctx = p(c);
+    const asset = assetsMod.deleteMedia(ctx, c.req.param('id'));
+    await mediaMod.removeStoredMediaFiles(ctx, asset).catch((error) => {
+      console.warn('[media] database row deleted but file cleanup failed', error);
+    });
+    services.bus.emit({ type: 'project.updated' });
     return c.json({ ok: true });
   });
 

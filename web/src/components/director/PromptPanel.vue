@@ -89,7 +89,7 @@ async function copy(text: string) {
 </template>
 
 <style scoped>
-.mode-select { width: 110px; }
+.mode-select { width: 220px; }
 .wrap { flex-wrap: wrap; }
 .prompt-item { padding: 10px 12px; }
 .prompt-text {

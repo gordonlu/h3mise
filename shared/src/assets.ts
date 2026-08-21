@@ -12,6 +12,8 @@ export interface Entity {
   notes?: string;
   /** Open-ended trait map (costume defaults, physical traits, …). */
   traits: Record<string, string>;
+  /** Default visual reference for this entity. */
+  imageAssetId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,6 +28,10 @@ export interface CharacterState {
   injury: string;
   heldItems: string[];
   extra: Record<string, string>;
+  /** Optional state-specific image. Null inherits the entity image. */
+  imageAssetId: string | null;
+  /** Resolved state image: override first, otherwise the entity default. */
+  effectiveImageAssetId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,4 +83,3 @@ export interface ReferenceBinding {
   shotId: string | null;
   createdAt: string;
 }
-

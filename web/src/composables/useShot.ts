@@ -28,8 +28,8 @@ export interface ShotDetail {
   requirements: Array<{ level: string; kind: string; label: string; detail: string }>;
   continuity: unknown[];
   allBindings: ReferenceBinding[];
-  entities: Array<{ id: string; name: string; kind: string }>;
-  characterStates: Array<{ id: string; characterId: string; name: string; costume: string }>;
+  entities: Array<{ id: string; name: string; kind: string; imageAssetId: string | null }>;
+  characterStates: Array<{ id: string; characterId: string; name: string; costume: string; imageAssetId: string | null; effectiveImageAssetId: string | null }>;
   sequences: Array<{ id: string; title: string }>;
   beats: Array<{ id: string; title: string }>;
   continuityLatest: {

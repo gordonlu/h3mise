@@ -1,7 +1,7 @@
 // Media module — PRD §47 media APIs. Import via upload or local path, frame
 // extraction, and Range-serving of media by asset id (in http/media route).
 
-import { copyFile, mkdir, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { MediaAsset, MediaKind } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
@@ -129,6 +129,19 @@ export async function importPath(
   await mkdir(join(p.root, 'assets'), { recursive: true });
   await copyFile(abs, p.resolveProjectPath(relPath));
   return probeAndInsert(p, ffmpeg, { relPath, mimeType: mime, sizeBytes: st.size, source: 'import', label: input.label, kind });
+}
+
+/** Remove the project-owned files behind a media row. Database references are
+ * handled separately through foreign keys so callers can present usage first. */
+export async function removeStoredMediaFiles(p: ProjectContext, asset: MediaAsset): Promise<void> {
+  const paths = [asset.fileName, asset.posterPath].filter((path): path is string => Boolean(path));
+  await Promise.all(paths.map(async (path) => {
+    try {
+      await unlink(p.resolveProjectPath(path));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }));
 }
 
 function mimeFromExt(path: string): string {

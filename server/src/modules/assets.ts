@@ -16,6 +16,7 @@ interface EntityRow {
   description: string;
   notes: string;
   traits_json: string;
+  image_asset_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -28,6 +29,7 @@ function entityFromRow(r: EntityRow): Entity {
     description: r.description,
     notes: r.notes,
     traits: jget<Record<string, string>>(r.traits_json, {}),
+    imageAssetId: r.image_asset_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -46,23 +48,25 @@ export function getEntity(p: ProjectContext, id: string): Entity {
   return entityFromRow(r);
 }
 
-export function createEntity(p: ProjectContext, input: { kind: EntityKind; name: string; description?: string; notes?: string; traits?: Record<string, string> }): Entity {
+export function createEntity(p: ProjectContext, input: { kind: EntityKind; name: string; description?: string; notes?: string; traits?: Record<string, string>; imageAssetId?: string | null }): Entity {
+  assertImageAsset(p, input.imageAssetId);
   const id = nextId(p.db, 'ent');
   const now = new Date().toISOString();
   p.db.run(
-    'INSERT INTO entities (id, kind, name, description, notes, traits_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, input.kind, input.name, input.description ?? '', input.notes ?? '', j(input.traits ?? {}), now, now],
+    'INSERT INTO entities (id, kind, name, description, notes, traits_json, image_asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, input.kind, input.name, input.description ?? '', input.notes ?? '', j(input.traits ?? {}), input.imageAssetId ?? null, now, now],
   );
   return getEntity(p, id);
 }
 
-export function updateEntity(p: ProjectContext, id: string, patch: Partial<Pick<Entity, 'name' | 'description' | 'notes' | 'traits' | 'kind'>>): Entity {
+export function updateEntity(p: ProjectContext, id: string, patch: Partial<Pick<Entity, 'name' | 'description' | 'notes' | 'traits' | 'kind' | 'imageAssetId'>>): Entity {
+  assertImageAsset(p, patch.imageAssetId);
   const now = new Date().toISOString();
   const cols: string[] = [];
   const vals: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(k === 'traits' ? 'traits_json = ?' : `${k} = ?`);
+    cols.push(k === 'traits' ? 'traits_json = ?' : k === 'imageAssetId' ? 'image_asset_id = ?' : `${k} = ?`);
     vals.push(k === 'traits' ? j(v) : v);
   }
   if (cols.length === 0) return getEntity(p, id);
@@ -86,6 +90,8 @@ interface StateRow {
   injury: string;
   held_items_json: string;
   extra_json: string;
+  image_asset_id: string | null;
+  entity_image_asset_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -100,6 +106,8 @@ function stateFromRow(r: StateRow): CharacterState {
     injury: r.injury,
     heldItems: jget<string[]>(r.held_items_json, []),
     extra: jget<Record<string, string>>(r.extra_json, {}),
+    imageAssetId: r.image_asset_id ?? null,
+    effectiveImageAssetId: r.image_asset_id ?? r.entity_image_asset_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -107,19 +115,20 @@ function stateFromRow(r: StateRow): CharacterState {
 
 export function listCharacterStates(p: ProjectContext, characterId?: string): CharacterState[] {
   const rows = characterId
-    ? p.db.all<StateRow>('SELECT * FROM character_states WHERE character_id = ? ORDER BY name', [characterId])
-    : p.db.all<StateRow>('SELECT * FROM character_states ORDER BY name');
+    ? p.db.all<StateRow>('SELECT cs.*, e.image_asset_id AS entity_image_asset_id FROM character_states cs JOIN entities e ON e.id = cs.character_id WHERE cs.character_id = ? ORDER BY cs.name', [characterId])
+    : p.db.all<StateRow>('SELECT cs.*, e.image_asset_id AS entity_image_asset_id FROM character_states cs JOIN entities e ON e.id = cs.character_id ORDER BY cs.name');
   return rows.map(stateFromRow);
 }
 
 export function createCharacterState(
   p: ProjectContext,
-  input: { characterId: string; name: string; costume?: string; hair?: string; injury?: string; heldItems?: string[]; extra?: Record<string, string> },
+  input: { characterId: string; name: string; costume?: string; hair?: string; injury?: string; heldItems?: string[]; extra?: Record<string, string>; imageAssetId?: string | null },
 ): CharacterState {
+  assertImageAsset(p, input.imageAssetId);
   const id = nextId(p.db, 'cstate');
   const now = new Date().toISOString();
   p.db.run(
-    'INSERT INTO character_states (id, character_id, name, costume, hair, injury, held_items_json, extra_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO character_states (id, character_id, name, costume, hair, injury, held_items_json, extra_json, image_asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       id,
       input.characterId,
@@ -129,6 +138,7 @@ export function createCharacterState(
       input.injury ?? '',
       j(input.heldItems ?? []),
       j(input.extra ?? {}),
+      input.imageAssetId ?? null,
       now,
       now,
     ],
@@ -136,18 +146,19 @@ export function createCharacterState(
   return listCharacterStates(p, input.characterId).find((s) => s.id === id)!;
 }
 
-export function updateCharacterState(p: ProjectContext, id: string, patch: Partial<Pick<CharacterState, 'name' | 'costume' | 'hair' | 'injury' | 'heldItems' | 'extra'>>): CharacterState {
+export function updateCharacterState(p: ProjectContext, id: string, patch: Partial<Pick<CharacterState, 'name' | 'costume' | 'hair' | 'injury' | 'heldItems' | 'extra' | 'imageAssetId'>>): CharacterState {
+  assertImageAsset(p, patch.imageAssetId);
   const now = new Date().toISOString();
   const cols: string[] = [];
   const vals: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(k === 'heldItems' ? 'held_items_json = ?' : k === 'extra' ? 'extra_json = ?' : `${k} = ?`);
+    cols.push(k === 'heldItems' ? 'held_items_json = ?' : k === 'extra' ? 'extra_json = ?' : k === 'imageAssetId' ? 'image_asset_id = ?' : `${k} = ?`);
     vals.push(k === 'heldItems' || k === 'extra' ? j(v) : v);
   }
   vals.push(now, id);
   p.db.run(`UPDATE character_states SET ${cols.join(', ')}, updated_at = ? WHERE id = ?`, vals);
-  const r = p.db.get<StateRow>('SELECT * FROM character_states WHERE id = ?', [id])!;
+  const r = p.db.get<StateRow>('SELECT cs.*, e.image_asset_id AS entity_image_asset_id FROM character_states cs JOIN entities e ON e.id = cs.character_id WHERE cs.id = ?', [id])!;
   return stateFromRow(r);
 }
 
@@ -204,6 +215,11 @@ export function getMedia(p: ProjectContext, id: string): MediaAsset {
   return mediaFromRow(r);
 }
 
+function assertImageAsset(p: ProjectContext, id: string | null | undefined): void {
+  if (!id) return;
+  if (getMedia(p, id).kind !== 'image') throw new Error('entity and character state images must reference an image asset');
+}
+
 export function insertMedia(
   p: ProjectContext,
   input: { id?: string; kind: MediaKind; fileName: string; mimeType: string; sizeBytes: number; width?: number; height?: number; durationSeconds?: number; posterPath?: string | null; source?: MediaAsset['source']; label?: string; tags?: string[] },
@@ -254,8 +270,18 @@ export function updateMediaLabel(p: ProjectContext, id: string, patch: { label?:
   return getMedia(p, id);
 }
 
-export function deleteMedia(p: ProjectContext, id: string): void {
+export function deleteMedia(p: ProjectContext, id: string): MediaAsset {
+  const asset = getMedia(p, id);
   p.db.run('DELETE FROM media_assets WHERE id = ?', [id]);
+  return asset;
+}
+
+export function mediaUsage(p: ProjectContext, id: string): { bindings: number; entities: number; states: number } {
+  return {
+    bindings: p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM reference_bindings WHERE asset_id = ?', [id])?.n ?? 0,
+    entities: p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM entities WHERE image_asset_id = ?', [id])?.n ?? 0,
+    states: p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM character_states WHERE image_asset_id = ?', [id])?.n ?? 0,
+  };
 }
 
 // --- ReferenceBindings -----------------------------------------------------
@@ -378,15 +404,15 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
   if (mode === 'i2va' || mode === 'fl2va') {
     out.push(
       hasFirst
-        ? { level: 'ok', kind: 'first_frame', label: 'First Frame', detail: 'bound' }
-        : { level: 'required', kind: 'first_frame', label: 'First Frame missing', detail: 'I2VA/FL2VA needs a first frame' },
+        ? { level: 'ok', kind: 'first_frame', label: 'First Frame', detail: '首帧已绑定' }
+        : { level: 'required', kind: 'first_frame', label: 'First Frame missing', detail: 'I2VA 必须指定首帧专用图；不会使用实体主图或 RefImage' },
     );
   }
   if (mode === 'l2va' || mode === 'fl2va') {
     out.push(
       hasLast
-        ? { level: 'ok', kind: 'last_frame', label: 'Last Frame', detail: 'bound' }
-        : { level: 'required', kind: 'last_frame', label: 'Last Frame missing', detail: 'L2VA/FL2VA needs a last frame' },
+        ? { level: 'ok', kind: 'last_frame', label: 'Last Frame', detail: '尾帧已绑定' }
+        : { level: 'required', kind: 'last_frame', label: 'Last Frame missing', detail: 'L2VA 必须指定尾帧专用图；不会使用实体主图或 RefImage' },
     );
   }
   if (mode === 'ref2va') {

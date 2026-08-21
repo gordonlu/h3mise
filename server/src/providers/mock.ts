@@ -18,7 +18,7 @@ const CAPS: ProviderCapabilities = {
   supportedAspectRatios: ['16:9', '9:16', '4:3', '1:1'],
   supportedResolutions: ['720p', '1080p'],
   maxImageRefs: 3,
-  maxVideoRefs: 1,
+  maxVideoRefs: 0,
   maxAudioRefs: 1,
   audioSupported: true,
 };

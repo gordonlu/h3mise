@@ -70,12 +70,67 @@ const activeProvider = computed(() => {
 });
 const providerId = computed(() => activeProvider.value?.id ?? 'runninghub');
 
+const missingFrameRole = computed<'first_frame' | 'last_frame' | null>(() => {
+  const mode = sShot.value?.h3Mode ?? 't2va';
+  const roles = new Set(sDetail.value?.bindings.flatMap((binding) => binding.roles) ?? []);
+  if ((mode === 'i2va' || mode === 'fl2va') && !roles.has('first_frame')) return 'first_frame';
+  if ((mode === 'l2va' || mode === 'fl2va') && !roles.has('last_frame')) return 'last_frame';
+  return null;
+});
+const assetUploadRoute = computed(() => ({
+  path: '/assets',
+  query: {
+    tab: 'media',
+    returnTo: `/shots/${shotId}?guide=references`,
+    shotId,
+    mode: sShot.value?.h3Mode ?? 't2va',
+    ...(missingFrameRole.value ? { role: missingFrameRole.value } : {}),
+  },
+}));
+const assetUploadPath = computed(() => router.resolve(assetUploadRoute.value).fullPath);
+const primaryEntity = computed(() => sDetail.value?.entities.find((entity) => entity.id === sShot.value?.primaryCharacterId) ?? null);
+const primaryState = computed(() => {
+  const characterId = primaryEntity.value?.id;
+  if (!characterId) return null;
+  const state = sDetail.value?.continuityLatest?.visualPlanned?.state ?? sDetail.value?.continuityLatest?.visualActual?.state;
+  const stateId = state?.characterStates[characterId];
+  return sDetail.value?.characterStates.find((item) => item.id === stateId) ?? null;
+});
+const primaryVisualImage = computed(() => {
+  const assetId = primaryState.value?.effectiveImageAssetId ?? primaryEntity.value?.imageAssetId;
+  return media.value.find((asset) => asset.id === assetId && asset.kind === 'image') ?? null;
+});
+const primaryVisualLabel = computed(() => primaryState.value?.imageAssetId ? `${primaryState.value.name}状态图` : `${primaryEntity.value?.name ?? '实体'}主图`);
+const hasRefImageBinding = computed(() => sDetail.value?.bindings.some((binding) => binding.type === 'image' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame')) ?? false);
+const canUsePrimaryAsRefImage = computed(() => sShot.value?.h3Mode === 'ref2va' && Boolean(primaryVisualImage.value) && !hasRefImageBinding.value);
+
+async function usePrimaryVisualAsRefImage() {
+  const asset = primaryVisualImage.value;
+  if (!asset || !canUsePrimaryAsRefImage.value) return;
+  await guarded(() => s.addBinding({ assetId: asset.id, roles: [], label: primaryVisualLabel.value }), '已绑定角色图为 RefImage');
+}
+
+async function correctToRef2va() {
+  const asset = primaryVisualImage.value;
+  const needsBinding = !hasRefImageBinding.value && Boolean(asset);
+  await guarded(async () => {
+    await s.updateShot({ h3Mode: 'ref2va' });
+    if (needsBinding && asset) await s.addBinding({ assetId: asset.id, roles: [], label: primaryVisualLabel.value });
+  }, needsBinding ? '已切换 Ref2VA，并绑定角色图为 RefImage' : '已切换为 Ref2VA 参考图模式');
+}
+
 /** PRD §15: UI only opens modes the current provider profile actually supports.
  * Unknown capability = nothing offered (P1), never a theoretical fallback. */
 const availableModes = computed(() => {
   const caps = activeProvider.value?.capabilities;
   return caps?.supportedModes ?? [];
 });
+const canCorrectReferenceMode = computed(() =>
+  sShot.value?.h3Mode === 'i2va'
+  && missingFrameRole.value === 'first_frame'
+  && availableModes.value.includes('ref2va')
+  && (Boolean(primaryVisualImage.value) || hasRefImageBinding.value),
+);
 
 const userStatus = computed(() => (sShot.value ? SHOT_USER_STATUS[sShot.value.status] : 'draft'));
 const referenceModeHint = computed(() => ({
@@ -427,7 +482,7 @@ const TABS = [
       </div>
       <div class="row controls">
         <button class="sm danger ghost" title="删除此 Shot 及其全部子数据" @click="deleteThisShot">删除 Shot</button>
-        <label class="ctl">
+        <label class="ctl mode-ctl">
           <span class="ctl-label">H3 Mode</span>
           <select v-model="sShot.h3Mode" @change="s.updateShot({ h3Mode: sShot?.h3Mode ?? 't2va' })">
             <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
@@ -486,7 +541,15 @@ const TABS = [
               </span>
               <div class="muted req-detail">{{ r.detail }}</div>
             </div>
-            <router-link to="/assets?tab=media" class="rail-link">＋ 上传图片 / 参考音频</router-link>
+            <button v-if="canCorrectReferenceMode" class="sm primary" @click="correctToRef2va">
+              这是参考图：切换 Ref2VA{{ hasRefImageBinding ? '' : '并绑定' }}
+            </button>
+            <button v-if="canUsePrimaryAsRefImage" class="sm" @click="usePrimaryVisualAsRefImage">
+              使用「{{ primaryVisualLabel }}」作为 RefImage
+            </button>
+            <router-link :to="assetUploadRoute" class="rail-link">
+              {{ missingFrameRole ? `＋ 上传并绑定${missingFrameRole === 'first_frame' ? '首帧' : '尾帧'}` : '＋ 上传图片 / 参考音频' }}
+            </router-link>
           </div>
         </div>
 
@@ -606,6 +669,7 @@ const TABS = [
             :bindings="sDetail?.bindings ?? []"
             :media="media"
             :current-mode="sShot.h3Mode ?? 't2va'"
+            :upload-path="assetUploadPath"
             :on-add="(input) => guarded(() => s.addBinding(input), '已绑定参考')"
             :on-update="s.updateBinding"
             :on-remove="(id: string) => guarded(() => s.removeBinding(id), '已移除绑定')"
@@ -719,6 +783,7 @@ const TABS = [
 .ctl { display: flex; align-items: center; gap: 6px; }
 .ctl-label { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
 .ctl select, .ctl input { max-width: 150px; }
+.mode-ctl select { width: 210px; max-width: 210px; }
 .dur { width: 60px; }
 .core { display: grid; grid-template-columns: 264px 1fr 460px; gap: 14px; align-items: start; }
 .core.workspace-mode { grid-template-columns: 264px minmax(0, 1fr); }

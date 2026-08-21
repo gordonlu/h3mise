@@ -8,11 +8,11 @@ export type H3Mode = 't2va' | 'i2va' | 'fl2va' | 'l2va' | 'ref2va';
 export const H3_MODES: H3Mode[] = ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'];
 
 export const H3_MODE_LABEL: Record<H3Mode, string> = {
-  t2va: '文生图',
-  i2va: '图生视频',
-  fl2va: '首尾帧',
-  l2va: '尾帧',
-  ref2va: '多参考',
+  t2va: '文生视频（T2VA）',
+  i2va: '首帧生视频（I2VA）',
+  fl2va: '首尾帧生视频（FL2VA）',
+  l2va: '尾帧生视频（L2VA）',
+  ref2va: '参考图生视频（Ref2VA）',
 };
 
 export type RealityMode = 'strict_realism' | 'plausible_stylized' | 'deliberate_fantasy';

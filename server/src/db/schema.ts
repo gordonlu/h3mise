@@ -302,6 +302,16 @@ ALTER TABLE story ADD COLUMN planned_duration_seconds INTEGER NOT NULL DEFAULT 0
 ALTER TABLE story_beats ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 5;
 `,
   },
+  {
+    version: 8,
+    name: 'entity-state-images',
+    sql: `
+-- Entities own a default image; CharacterState may override it. Deleting a
+-- media asset safely falls back to no image / the entity image.
+ALTER TABLE entities ADD COLUMN image_asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL;
+ALTER TABLE character_states ADD COLUMN image_asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL;
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

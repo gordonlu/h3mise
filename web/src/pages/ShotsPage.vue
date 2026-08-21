@@ -156,7 +156,7 @@ onMounted(load);
             标题
             <input v-model="newShot.title" placeholder="Shot 标题" @keyup.enter="createShot" />
           </label>
-          <label class="field">
+          <label class="field mode-field">
             H3 Mode
             <select v-model="newShot.h3Mode">
               <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
@@ -242,6 +242,7 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .search { width: 180px; }
 .status-filter { width: 110px; }
 .create-panel { margin: 16px 0; }
+.mode-field select { width: 220px; }
 .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-top: 18px; }
 .shot-delete { margin-left: auto; padding: 2px 10px; font-size: 11px; flex: none; }
 .card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }

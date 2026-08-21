@@ -7,6 +7,7 @@ const props = defineProps<{
   bindings: ReferenceBinding[];
   media: MediaAsset[];
   currentMode: H3Mode;
+  uploadPath: string;
   onAdd: (input: { assetId: string; roles: ReferenceRole[]; label?: string }) => Promise<void>;
   onUpdate: (id: string, patch: Partial<ReferenceBinding>) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
@@ -103,6 +104,7 @@ function selectAsset(group: RefGroup, assetId: string) {
   <div class="col">
     <div class="row">
       <button class="primary sm" @click="pickerOpen = !pickerOpen">＋ 绑定 Reference</button>
+      <router-link :to="uploadPath" class="sm upload-link">上传新素材</router-link>
       <span v-if="!bindings.length" class="muted">{{ modeHint }}</span>
     </div>
 
@@ -128,7 +130,7 @@ function selectAsset(group: RefGroup, assetId: string) {
                 <div class="opt-label" :title="m.label || m.id">{{ m.label || m.id }}</div>
                 <div class="muted">{{ m.kind }}</div>
               </div>
-              <div v-if="!g.items.length" class="muted">暂无{{ g.cn }}，<router-link to="/assets?tab=media">先去上传</router-link>。</div>
+              <div v-if="!g.items.length" class="muted">暂无{{ g.cn }}，<router-link :to="uploadPath">上传并自动关联</router-link>。</div>
             </div>
           </div>
           <div class="note">
@@ -178,6 +180,7 @@ function selectAsset(group: RefGroup, assetId: string) {
 
 <style scoped>
 .wrap { flex-wrap: wrap; }
+.upload-link { display: inline-flex; align-items: center; text-decoration: none; }
 .picker { border-color: var(--accent); }
 .asset-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; max-height: 240px; overflow: auto; }
 .asset-opt { border: 1.5px solid var(--line); border-radius: var(--radius-sm); padding: 6px; cursor: pointer; text-align: center; transition: border-color 0.12s, background 0.12s; }

@@ -256,7 +256,7 @@ function requestAiSuggestion() {
           <span v-else class="badge warn">尚未创建</span>
         </div>
       </div>
-      <div class="row">
+      <div class="row editor-actions">
         <button
           class="sm ai-fill"
           :disabled="!aiEnabled || aiBusy"
@@ -327,8 +327,11 @@ function requestAiSuggestion() {
 <style scoped>
 .plan-editor { position: relative; isolation: isolate; }
 .two { grid-template-columns: minmax(0, 1fr); }
-.editor-bar { position: sticky; top: 0; z-index: 20; gap: 12px; background: var(--bg-2); padding: 8px 0 10px; box-shadow: 0 -16px 0 16px var(--bg-2), 0 1px 0 var(--line); }
-.save-state { margin-top: 4px; }
+.editor-bar { position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; background: var(--bg-2); padding: 8px 0 10px; box-shadow: 0 -16px 0 16px var(--bg-2), 0 1px 0 var(--line); }
+.editor-bar > :first-child { min-width: 0; }
+.save-state { margin-top: 4px; flex-wrap: wrap; }
+.editor-actions { flex: none; flex-wrap: nowrap; }
+.editor-actions button { flex: none; min-height: 29px; white-space: nowrap; }
 .required-progress { padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 700; }
 .required-progress.complete { background: var(--ok-soft); color: var(--ok); }
 .essential-card { overflow: hidden; }

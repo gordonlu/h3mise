@@ -258,7 +258,12 @@ function save() {
         </div>
       </div>
       <div class="row">
-        <button v-if="aiEnabled" class="sm" :disabled="aiBusy" @click="props.onAiSuggest('full')">{{ aiBusy ? 'AI 填写中…' : 'AI 帮我填写' }}</button>
+        <button
+          class="sm ai-fill"
+          :disabled="!aiEnabled || aiBusy"
+          :title="aiEnabled ? '让内部 AI 自动填写四项镜头设计' : '请先在设置中配置内部 AI'"
+          @click="props.onAiSuggest('full')"
+        >{{ aiBusy ? 'AI 填写中…' : aiEnabled ? 'AI 自动填写 4 项' : '内部 AI 未配置' }}</button>
         <button class="primary sm" :class="{ pulse: isDirty && isRequiredComplete }" :disabled="!isDirty || !isRequiredComplete" @click="save">保存镜头设计</button>
       </div>
     </div>
@@ -322,8 +327,9 @@ function save() {
 </template>
 
 <style scoped>
-.two { grid-template-columns: 1fr 1fr; }
-.editor-bar { position: sticky; top: 0; z-index: 5; gap: 12px; background: var(--bg-2); padding: 4px 0 10px; }
+.plan-editor { position: relative; isolation: isolate; }
+.two { grid-template-columns: minmax(0, 1fr); }
+.editor-bar { position: sticky; top: 0; z-index: 20; gap: 12px; background: var(--bg-2); padding: 8px 0 10px; box-shadow: 0 -16px 0 16px var(--bg-2), 0 1px 0 var(--line); }
 .save-state { margin-top: 4px; }
 .required-progress { padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 700; }
 .required-progress.complete { background: var(--ok-soft); color: var(--ok); }
@@ -352,6 +358,10 @@ function save() {
 .paste-btn { flex: 0 0 auto; }
 .advanced-sections { display: grid; gap: 8px; padding: 8px; border-top: 1px solid var(--line); }
 .section { overflow: hidden; }
+.section .panel-body { grid-template-columns: minmax(0, 1fr); }
+.section .field > :is(input, select, textarea) { width: 100%; min-width: 0; }
+.section .field > :is(input, select) { min-height: 38px; }
+.section .field > textarea { min-height: 72px; resize: vertical; }
 .sec-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; user-select: none; }
 .sec-head:hover { background: var(--accent-soft); }
 .chev { color: var(--text-3); font-size: 11px; width: 12px; }

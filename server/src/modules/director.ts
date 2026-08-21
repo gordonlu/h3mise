@@ -92,7 +92,10 @@ export function planIsGuideReady(plan: DirectorPlan): boolean {
 
 /** Raw plan text parsing (YAML/JSON from external AI) — PRD §21. */
 export function parseDirectorPlanText(text: string): { ok: boolean; plan?: DirectorPlan; error?: string } {
-  const trimmed = text.trim();
+  const trimmed = text.trim()
+    .replace(/^```(?:ya?ml|json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
   const parse = (obj: unknown): { ok: boolean; plan?: DirectorPlan; error?: string } => {
     if (typeof obj !== 'object' || obj === null) return { ok: false, error: 'not an object' };
     const base = emptyDirectorPlan();

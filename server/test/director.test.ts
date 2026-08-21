@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import { planIsGuideReady } from '../src/modules/director.js';
+import { parseDirectorPlanText } from '../src/modules/director.js';
 
 test('guided shot design requires only the four essential director answers', () => {
   const plan = emptyDirectorPlan();
@@ -26,4 +27,21 @@ test('advanced director settings are optional for the guided flow', () => {
   plan.environment.lighting = '';
 
   assert.equal(planIsGuideReady(plan), true);
+});
+
+test('external DirectorPlan parser accepts minimal YAML inside a markdown fence', () => {
+  const parsed = parseDirectorPlanText(`\`\`\`yaml
+intent:
+  visual_thesis: quiet projection room
+  end_state: MISE looks at the clock
+subject:
+  action: MISE raises its head
+camera:
+  dominant_behavior: slow push in
+\`\`\``);
+
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.plan?.intent.visualThesis, 'quiet projection room');
+  assert.equal(parsed.plan?.camera.dominantBehavior, 'slow push in');
+  assert.equal(parsed.plan ? planIsGuideReady(parsed.plan) : false, true);
 });

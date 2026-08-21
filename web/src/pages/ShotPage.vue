@@ -59,8 +59,8 @@ const takesSection = ref<HTMLElement | null>(null);
 const aiEnabled = ref(false);
 async function refreshAiStatus() {
   try {
-    const s = await get<{ aiConfigured?: boolean }>('/api/ai/status');
-    aiEnabled.value = Boolean(s.aiConfigured);
+    const status = await get<{ configured?: boolean }>('/api/ai/status');
+    aiEnabled.value = Boolean(status.configured);
   } catch {
     aiEnabled.value = false;
   }
@@ -184,14 +184,35 @@ function applyGuideQuery() {
 }
 
 const EXTERNAL_TASKS = [
-  { id: 'Plan Shot', key: 'plan_shot' },
-  { id: 'Improve Camera', key: 'improve_camera' },
-  { id: 'Improve Performance', key: 'improve_performance' },
-  { id: 'Reality Check', key: 'reality_check' },
-  { id: 'Continuity Check', key: 'continuity_check' },
-  { id: 'Compile H3 Prompt', key: 'compile_prompt' },
-  { id: 'Diagnose Failed Take', key: 'diagnose_take' },
+  { id: 'Plan Shot', label: '生成完整镜头设计' },
+  { id: 'Improve Camera', label: '优化摄影机设计' },
+  { id: 'Improve Performance', label: '优化表演设计' },
 ];
+
+const DIRECTOR_PLAN_EXAMPLE = `intent:
+  visualThesis: "空荡的放映室里，MISE 在应急灯下显得孤独而渺小"
+  endState: "停在 MISE 抬头望向墙上时钟的中近景"
+subject:
+  action: "MISE 低着头静止片刻，然后缓慢抬头"
+camera:
+  dominantBehavior: "中景固定机位，缓慢推近 MISE"`;
+
+const EXTERNAL_TASK_INSTRUCTION: Record<string, string> = {
+  'Plan Shot': '为当前 Shot 生成清晰、可执行的镜头设计。',
+  'Improve Camera': '保留现有镜头意图和主体动作，重点优化摄影机设计。',
+  'Improve Performance': '保留现有镜头意图和摄影机设计，重点优化主体动作与表演。',
+};
+
+const parsedMissingFields = computed(() => {
+  const plan = parseResult.value?.plan;
+  if (!plan) return [];
+  return [
+    ['镜头目标', plan.intent.visualThesis],
+    ['主体动作', plan.subject.action],
+    ['摄影机', plan.camera.dominantBehavior],
+    ['结束画面', plan.intent.endState],
+  ].filter(([, value]) => !String(value ?? '').trim()).map(([label]) => label);
+});
 
 function latestPrompt() {
   return sDetail.value?.prompts.at(-1) ?? null;
@@ -344,12 +365,44 @@ function openWorkspaceTarget(target: 'plan' | 'references' | 'prompt' | 'preflig
   tab.value = target;
 }
 
-async function copyContextPackage() {
+async function contextPackage(): Promise<Record<string, unknown>> {
+  return s.contextPackage(externalTask.value);
+}
+
+async function copyExternalAiPrompt() {
   await guarded(async () => {
-    const pkg = await s.contextPackage(externalTask.value);
-    await navigator.clipboard.writeText(JSON.stringify(pkg, null, 2));
-    toasts.push({ kind: 'ok', text: 'Context Package 已复制到剪贴板（未调用任何 API）' });
+    const pkg = await contextPackage();
+    const prompt = `你是 H3Mise 的镜头导演助手。
+
+任务：${EXTERNAL_TASK_INSTRUCTION[externalTask.value] ?? EXTERNAL_TASK_INSTRUCTION['Plan Shot']}
+
+请根据下面的 Context Package 返回一个 DirectorPlan。
+
+输出要求：
+1. 只返回 YAML 或 JSON，不要解释，不要使用 Markdown 代码围栏。
+2. 必须包含这 4 个字段：intent.visualThesis、subject.action、camera.dominantBehavior、intent.endState。
+3. 可以补充其他 DirectorPlan 字段，但不确定的内容请省略，不要编造事实。
+4. 最简有效格式如下：
+
+${DIRECTOR_PLAN_EXAMPLE}
+
+Context Package：
+${JSON.stringify(pkg, null, 2)}`;
+    await navigator.clipboard.writeText(prompt);
+    toasts.push({ kind: 'ok', text: '完整 Prompt 已复制，可直接粘贴给任意外部 AI' });
   });
+}
+
+async function copyContextPackageOnly() {
+  await guarded(async () => {
+    await navigator.clipboard.writeText(JSON.stringify(await contextPackage(), null, 2));
+    toasts.push({ kind: 'ok', text: '仅 Context Package 已复制' });
+  });
+}
+
+function insertDirectorPlanExample() {
+  pasteText.value = DIRECTOR_PLAN_EXAMPLE;
+  parseResult.value = null;
 }
 
 async function parsePaste() {
@@ -357,7 +410,7 @@ async function parsePaste() {
 }
 
 async function applyParsed() {
-  if (parseResult.value?.plan) {
+  if (parseResult.value?.plan && parsedMissingFields.value.length === 0) {
     await s.savePlan(parseResult.value.plan, 'external_ai');
     toasts.push({ kind: 'ok', text: '外部 AI 的 DirectorPlan 已应用为新版本' });
     parseResult.value = null;
@@ -711,29 +764,61 @@ const TABS = [
         </div>
 
         <div v-show="tab === 'external'" class="tab-body">
-          <div class="col">
-            <label class="field">
-              任务模板
-              <select v-model="externalTask">
-                <option v-for="t in EXTERNAL_TASKS" :key="t.id" :value="t.id">{{ t.id }}</option>
-              </select>
-            </label>
-            <p class="muted">Copy Context Package = 只复制上下文，不调用任何 API。把内容丢给 ChatGPT / Claude 等外部 AI。</p>
-            <div>
-              <button class="primary sm" @click="copyContextPackage">Copy Context Package</button>
-            </div>
+          <div class="external-flow">
+            <header class="external-intro">
+              <strong>用任意外部 AI 完成镜头设计</strong>
+              <span>适用于 ChatGPT、Claude 等。H3Mise 只负责复制和解析，不会自动调用外部服务。</span>
+            </header>
 
-            <div class="sep" />
-            <label class="field">
-              粘贴外部 AI 返回的 DirectorPlan（YAML / JSON）
-              <textarea v-model="pasteText" rows="8" placeholder="intent:&#10;  shot_function: wide&#10;  visual_thesis: …"></textarea>
-            </label>
-            <div class="row">
-              <button class="sm" @click="parsePaste">解析预览</button>
-              <button v-if="parseResult?.ok" class="primary sm" @click="applyParsed">应用为新版本</button>
-            </div>
-            <div v-if="parseResult && !parseResult.ok" class="badge bad">解析失败：{{ parseResult.error }} — 可手工搬字段</div>
-            <div v-if="parseResult?.ok" class="muted">解析成功，应用后作为新 DirectorPlan 版本保存。</div>
+            <section class="external-step">
+              <span class="step-number">1</span>
+              <div class="step-content">
+                <label class="field">
+                  <span><strong>选择要 AI 做什么</strong></span>
+                  <select v-model="externalTask">
+                    <option v-for="t in EXTERNAL_TASKS" :key="t.id" :value="t.id">{{ t.label }}</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="external-step">
+              <span class="step-number">2</span>
+              <div class="step-content">
+                <strong>复制 Prompt，粘贴给外部 AI</strong>
+                <p class="muted">Prompt 已包含当前故事、镜头、参考素材、四项必填要求和返回格式。</p>
+                <div class="row">
+                  <button class="primary sm" @click="copyExternalAiPrompt">复制给 AI 的完整 Prompt</button>
+                  <button class="sm ghost" @click="copyContextPackageOnly">仅复制数据包</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="external-step">
+              <span class="step-number">3</span>
+              <div class="step-content">
+                <div class="spread">
+                  <strong>把 AI 返回的内容整段贴回来</strong>
+                  <button class="sm ghost" @click="insertDirectorPlanExample">填入示例</button>
+                </div>
+                <p class="muted">支持 YAML 或 JSON、camelCase 或 snake_case，也兼容 AI 常见的 Markdown 代码围栏。</p>
+                <details class="format-example">
+                  <summary>查看最简有效格式</summary>
+                  <pre>{{ DIRECTOR_PLAN_EXAMPLE }}</pre>
+                </details>
+                <label class="field paste-field">
+                  <span class="sr-only">外部 AI 返回的 DirectorPlan</span>
+                  <textarea v-model="pasteText" rows="9" :placeholder="DIRECTOR_PLAN_EXAMPLE"></textarea>
+                </label>
+                <div class="row">
+                  <button class="sm" :disabled="!pasteText.trim()" @click="parsePaste">检查格式</button>
+                  <button v-if="parseResult?.ok && parsedMissingFields.length === 0" class="primary sm" @click="applyParsed">应用为新版本</button>
+                </div>
+                <div v-if="parseResult && !parseResult.ok" class="parse-message bad">格式无法识别：{{ parseResult.error }}</div>
+                <div v-else-if="parseResult?.ok && parsedMissingFields.length" class="parse-message warn">格式可识别，但还缺：{{ parsedMissingFields.join('、') }}</div>
+                <div v-else-if="parseResult?.ok" class="parse-message ok">格式正确，四项必填内容完整，可以应用。</div>
+              </div>
+            </section>
           </div>
         </div>
       </section>
@@ -816,6 +901,25 @@ const TABS = [
 .dirty-dot { color: var(--warn); font-size: 9px; margin-left: 3px; }
 .tab-body { padding: 14px; max-height: calc(100vh - 230px); overflow: auto; }
 .workspace-body { padding: 12px; }
+.external-flow { display: grid; gap: 10px; }
+.external-intro { display: flex; flex-direction: column; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.external-intro strong { font-size: 15px; }
+.external-intro span { color: var(--text-2); font-size: 11.5px; line-height: 1.5; }
+.external-step { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.external-step:last-child { border-bottom: 0; }
+.step-number { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); font-size: 12px; font-weight: 800; }
+.step-content { min-width: 0; display: grid; gap: 8px; }
+.step-content p { margin: 0; line-height: 1.5; }
+.format-example { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-subtle); overflow: hidden; }
+.format-example summary { padding: 8px 10px; cursor: pointer; color: var(--text-2); font-size: 11.5px; }
+.format-example pre { margin: 0; padding: 10px; border-top: 1px solid var(--line); overflow: auto; color: var(--text-2); font: 11px/1.5 var(--mono); white-space: pre-wrap; }
+.paste-field { margin: 0; }
+.paste-field textarea { width: 100%; min-height: 190px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; }
+.parse-message { padding: 8px 10px; border-radius: var(--radius-sm); font-size: 11.5px; }
+.parse-message.bad { background: var(--bad-soft); color: var(--bad); }
+.parse-message.warn { background: var(--warn-soft); color: var(--warn); }
+.parse-message.ok { background: var(--ok-soft); color: var(--ok); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .takes-section { border-top: 1px solid var(--line); margin-top: 4px; }
 .takes-head { padding: 4px 2px 10px; }
 .takes-head h2 { margin: 0; font-size: 16px; font-family: var(--serif); }

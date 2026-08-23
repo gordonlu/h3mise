@@ -1,4 +1,4 @@
-// Render Queue — PRD §27-28. Persisted jobs; a single worker processes the
+﻿// Render Queue 鈥?PRD 搂27-28. Persisted jobs; a single worker processes the
 // queue sequentially (cost protection); the queue survives restarts and
 // re-polls provider tasks. Events push status to the UI (SSE).
 //
@@ -18,7 +18,7 @@ import type { Ffmpeg } from '../ffmpeg.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { RenderJobHandle } from '../providers/types.js';
 import { ProviderError } from '../providers/types.js';
-import { getShot, updateShot, advanceShotStatus } from './shots.js';
+import { getShot, updateShot, advanceShotStatus, advanceTo } from './shots.js';
 import { getPrompt } from './prompt.js';
 import { getMedia, insertMedia } from './assets.js';
 import { createTake } from './takes.js';
@@ -70,6 +70,7 @@ export function jobFromRow(r: JobRow): RenderJob {
 }
 
 const ACTIVE_STATUSES: RenderJobStatus[] = ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'];
+const TERMINAL_STATUSES: RenderJobStatus[] = ['SUCCEEDED', 'LOCAL_READY', 'FAILED', 'CANCELLED', 'EXPIRED'];
 
 const runKey = (projectId: string, jobId: string) => `${projectId}/${jobId}`;
 
@@ -119,6 +120,25 @@ export class RenderQueue {
     }
   }
 
+  /**
+   * Context for BACKGROUND pipeline work. Unlike ensureDetached, this NEVER
+   * hands out `store.current`: the UI can switch projects at any moment and
+   * store.open() closes the previous current db 鈥?a job running on that
+   * handle would die mid-flight ("database is not open"). Only the cached
+   * dedicated connections are safe for long-lived work.
+   */
+  private async pipelineCtx(projectId: string): Promise<ProjectContext | null> {
+    const cached = this.detached.get(projectId);
+    if (cached) return cached;
+    try {
+      const ctx = await this.getStore().openDetached(projectId);
+      this.detached.set(projectId, ctx);
+      return ctx;
+    } catch {
+      return null;
+    }
+  }
+
   /** Drop a detached context (e.g. project deleted while jobs were pending). */
   forgetProject(projectId: string): void {
     const ctx = this.detached.get(projectId);
@@ -139,6 +159,13 @@ export class RenderQueue {
   private saveStatus(projectId: string, jobId: string, status: RenderJobStatus, patch: Partial<Omit<RenderJob, 'id'>> = {}): void {
     const p = this.ctxFor(projectId);
     if (!p) return;
+    // Terminal states are final: a worker racing a cancel()/fail() must not
+    // resurrect the job by writing a stale transient status over it (a cancel
+    // that lands mid-submit used to be overwritten back to QUEUED/RUNNING).
+    if (!TERMINAL_STATUSES.includes(status)) {
+      const curStatus = p.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [jobId])?.status;
+      if (curStatus && TERMINAL_STATUSES.includes(curStatus as RenderJobStatus)) return;
+    }
     const cols: string[] = ['status = ?'];
     const vals: unknown[] = [status];
     if (patch.providerTaskId !== undefined) {
@@ -187,7 +214,12 @@ export class RenderQueue {
     return job;
   }
 
-  /** Look a job up across all projects (jobs are owned by their project DB). */
+  /**
+   * Look a job up across all projects (jobs are owned by their project DB).
+   * P2: opens connections TRANSIENTLY — cancel/retry are rare user actions,
+   * and caching every project's handle here leaked one sqlite connection per
+   * known project for the lifetime of the process.
+   */
   private async findJobAnywhere(jobId: string): Promise<{ job: RenderJob; projectId: string } | null> {
     const cur = this.getStore().current;
     if (cur) {
@@ -195,10 +227,25 @@ export class RenderQueue {
       if (job) return { job, projectId: cur.meta.id };
     }
     for (const meta of await this.getStore().list()) {
-      const ctx = await this.ensureDetached(meta.id);
-      if (!ctx) continue;
-      const job = this.getJob(meta.id, jobId);
-      if (job) return { job, projectId: meta.id };
+      let ctx: ProjectContext | null = null;
+      try {
+        ctx = await this.getStore().openDetached(meta.id);
+      } catch {
+        continue;
+      }
+      try {
+        const r = ctx.db.get<JobRow>('SELECT * FROM render_jobs WHERE id = ?', [jobId]);
+        if (!r) continue;
+        const job = jobFromRow(r);
+        if (!job.projectId) {
+          // Legacy row without project_id: adopt the context it lives in.
+          ctx.db.run('UPDATE render_jobs SET project_id = ? WHERE id = ?', [meta.id, jobId]);
+          job.projectId = meta.id;
+        }
+        return { job, projectId: meta.id };
+      } finally {
+        ctx.close();
+      }
     }
     return null;
   }
@@ -231,68 +278,94 @@ export class RenderQueue {
     if (input.projectId !== p.meta.id) throw new Error('render job must be created in the open project');
     const shot = getShot(p, input.shotId);
     const prompt = getPrompt(p, input.promptVersionId);
-    // Idempotency: the same intent already active for this shot is rejected —
+    // Idempotency: the same intent already active for this shot is rejected 鈥?
     // covers double-click, multi-tab, and network replay (no double cost).
     const active = p.db.get<{ id: string; status: string }>(
       `SELECT id, status FROM render_jobs WHERE shot_id = ? AND render_intent_hash = ? AND status IN (${ACTIVE_STATUSES.map(() => '?').join(',')}) ORDER BY created_at DESC LIMIT 1`,
       [input.shotId, input.intentHash, ...ACTIVE_STATUSES],
     );
     if (active) {
-      throw new Error(`a render job for this exact intent is already active (${active.id}, ${active.status}) — wait for it to finish or change parameters`);
+      throw new Error(`a render job for this exact intent is already active (${active.id}, ${active.status}) 鈥?wait for it to finish or change parameters`);
     }
-    const id = nextId(p.db, 'job');
-    const now = new Date().toISOString();
     const dpvId = prompt.directorPlanVersionId;
-    p.db.run(
-      `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, director_plan_version_id, provider, status, request_snapshot_json, render_intent_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'SUBMITTING', ?, ?, ?, ?)`,
-      [id, p.meta.id, input.shotId, input.promptVersionId, dpvId, input.provider, j(input.request), input.intentHash, now, now],
-    );
-    updateShot(p, input.shotId, { h3Mode: input.request.mode });
-    if (shot.status !== 'RENDERING') advanceShotStatus(p, input.shotId, 'RENDERING');
+    // P2: the row insert and its state transitions are one transaction — an
+    // invalid transition used to throw AFTER the insert, leaving an orphan
+    // SUBMITTING job that only restart recovery could clean up.
+    const id = p.db.tx(() => {
+      const newId = nextId(p.db, 'job');
+      const now = new Date().toISOString();
+      p.db.run(
+        `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, director_plan_version_id, provider, status, request_snapshot_json, render_intent_hash, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'SUBMITTING', ?, ?, ?, ?)`,
+        [newId, p.meta.id, input.shotId, input.promptVersionId, dpvId, input.provider, j(input.request), input.intentHash, now, now],
+      );
+      updateShot(p, input.shotId, { h3Mode: input.request.mode });
+      if (shot.status !== 'RENDERING') advanceShotStatus(p, input.shotId, 'RENDERING');
+      return newId;
+    });
     this.pending.add(runKey(p.meta.id, id));
     this.bus.emit({ type: 'render.job.created', jobId: id, shotId: input.shotId });
     this.pump();
     return this.getJob(p.meta.id, id)!;
   }
 
-  cancel(jobId: string): void {
-    void this.doCancel(jobId);
-  }
-
-  private async doCancel(jobId: string): Promise<void> {
-    const found = await this.findJobAnywhere(jobId);
-    if (!found) return;
-    const { job, projectId } = found;
-    const key = runKey(projectId, jobId);
-    this.pending.delete(key);
-    const handle = this.handles.get(key);
-    if (handle) {
-      const provider = this.registry.get(job.provider);
-      if (provider) provider.cancel(handle).catch(() => undefined);
+  /**
+   * Best-effort cancel: stops local tracking and polling. Remote RunningHub
+   * tasks cannot be cancelled and may still consume credits (the UI warns).
+   * Never throws 鈥?cancelling an already-finished/unknown job is a no-op.
+   */
+  async cancel(jobId: string): Promise<void> {
+    try {
+      const found = await this.findJobAnywhere(jobId);
+      if (!found) return;
+      const { job, projectId } = found;
+      const key = runKey(projectId, jobId);
+      this.pending.delete(key);
+      const handle = this.handles.get(key);
+      if (handle) {
+        const provider = this.registry.get(job.provider);
+        if (provider) provider.cancel(handle).catch(() => undefined);
+      }
+      if (ACTIVE_STATUSES.includes(job.status)) {
+        this.saveStatus(projectId, jobId, 'CANCELLED', { finishedAt: new Date().toISOString() });
+        this.bus.emit({ type: 'render.job.updated', jobId, shotId: job.shotId, status: 'CANCELLED' });
+      }
+    } catch (e) {
+      // P1: cancel used to be fire-and-forget; an in-flight throw became an
+      // unhandled rejection that could kill the process.
+      console.error('[render-queue] cancel failed:', e);
     }
-    if (ACTIVE_STATUSES.includes(job.status)) {
-      this.saveStatus(projectId, jobId, 'CANCELLED', { finishedAt: new Date().toISOString() });
-      this.bus.emit({ type: 'render.job.updated', jobId, shotId: job.shotId, status: 'CANCELLED' });
-    }
   }
 
-  retry(jobId: string): void {
-    // P1: retry creates a NEW job (keeps the failed attempt's traceability),
-    // linked via the request snapshot; the old job stays as the failure record.
-    void this.doRetry(jobId);
-  }
-
-  private async doRetry(jobId: string): Promise<void> {
+  /**
+   * Retry a FAILED/CANCELLED job as a NEW job (traceability). Throws when the
+   * retry is not allowed so callers can surface a real error to the user.
+   * P1 hardening over the old fire-and-forget version:
+   *  - same-intent idempotency: a double-clicked retry cannot create two
+   *    paid jobs;
+   *  - the shot returns to RENDERING so take arrival advances HAS_TAKES
+   *    instead of leaving it stuck in PREFLIGHT_READY/DIRECTED.
+   */
+  async retry(jobId: string): Promise<void> {
     const found = await this.findJobAnywhere(jobId);
-    if (!found) return;
+    if (!found) throw new Error(`render job not found: ${jobId}`);
     const { job, projectId } = found;
-    if (job.status !== 'FAILED' && job.status !== 'CANCELLED') return;
-    const p = await this.ensureDetached(projectId);
-    if (!p || !job.requestSnapshot) return;
+    if (job.status !== 'FAILED' && job.status !== 'CANCELLED') {
+      throw new Error(`job is ${job.status} 鈥?only FAILED or CANCELLED jobs can be retried`);
+    }
+    const p = await this.pipelineCtx(projectId);
+    if (!p) throw new Error('project unavailable for retry');
+    if (!job.requestSnapshot) throw new Error('cannot retry: request snapshot missing');
+    if (job.renderIntentHash) {
+      const active = p.db.get<{ id: string }>(
+        `SELECT id FROM render_jobs WHERE shot_id = ? AND render_intent_hash = ? AND status IN (${ACTIVE_STATUSES.map(() => '?').join(',')}) ORDER BY created_at DESC LIMIT 1`,
+        [job.shotId, job.renderIntentHash, ...ACTIVE_STATUSES],
+      );
+      if (active) throw new Error(`a render job for this exact intent is already active (${active.id}) 鈥?wait for it to finish`);
+    }
+    const prompt = getPrompt(p, job.promptVersionId);
     const newId = nextId(p.db, 'job');
     const now = new Date().toISOString();
-    const prompt = getPrompt(p, job.promptVersionId);
     p.db.run(
       `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, director_plan_version_id, provider, status, request_snapshot_json, render_intent_hash, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, 'SUBMITTING', ?, ?, ?, ?)`,
@@ -300,32 +373,56 @@ export class RenderQueue {
     );
     this.pending.add(runKey(projectId, newId));
     this.bus.emit({ type: 'render.job.created', jobId: newId, shotId: job.shotId });
+    try {
+      const shot = getShot(p, job.shotId);
+      if (shot.status !== 'RENDERING') advanceTo(p, job.shotId, 'RENDERING');
+    } catch (e) {
+      console.warn('[render-queue] could not advance shot to RENDERING on retry:', e instanceof Error ? e.message : e);
+    }
     this.pump();
   }
 
   /** Boot recovery: requeue active jobs of EVERY project, keep polling known
-   * taskIds. Never resubmits (no double cost). */
+   * taskIds. Never resubmits (no double cost).
+   * P2: scans through TRANSIENT connections — only projects that actually
+   * hold recovered jobs get cached later (the worker opens its own context). */
   async recover(): Promise<void> {
+    let recovered = 0;
     for (const meta of await this.getStore().list()) {
-      const p = await this.ensureDetached(meta.id);
-      if (!p) continue;
-      const rows = p.db.all<JobRow>("SELECT * FROM render_jobs WHERE status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')");
-      for (const r of rows) {
-        const job = jobFromRow(r);
-        if (!job.projectId) {
-          p.db.run('UPDATE render_jobs SET project_id = ? WHERE id = ?', [meta.id, job.id]);
-          job.projectId = meta.id;
+      let p: ProjectContext | null = null;
+      try {
+        p = await this.getStore().openDetached(meta.id);
+      } catch {
+        continue;
+      }
+      try {
+        const rows = p.db.all<JobRow>("SELECT * FROM render_jobs WHERE status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')");
+        for (const r of rows) {
+          const job = jobFromRow(r);
+          if (!job.projectId) {
+            p.db.run('UPDATE render_jobs SET project_id = ? WHERE id = ?', [meta.id, job.id]);
+            job.projectId = meta.id;
+          }
+          if (job.providerTaskId) {
+            // Resume polling immediately; no resubmit (avoid double cost).
+            this.handles.set(runKey(job.projectId, job.id), { providerTaskId: job.providerTaskId });
+            this.pending.add(runKey(job.projectId, job.id));
+          } else {
+            // Never resubmitted without user action — mark failed with a hint.
+            const now = new Date().toISOString();
+            p.db.run(
+              'UPDATE render_jobs SET status = ?, error = ?, finished_at = ?, updated_at = ? WHERE id = ?',
+              ['FAILED', 'interrupted before provider taskId was returned; retry to render', now, now, job.id],
+            );
+            this.bus.emit({ type: 'render.job.failed', jobId: job.id, shotId: job.shotId, error: 'interrupted before provider taskId was returned; retry to render' });
+          }
+          recovered++;
         }
-        if (job.providerTaskId) {
-          // Resume polling immediately; no resubmit (avoid double cost).
-          this.handles.set(runKey(job.projectId, job.id), { providerTaskId: job.providerTaskId });
-          this.pending.add(runKey(job.projectId, job.id));
-        } else {
-          // Never resubmitted without user action — mark failed with a hint.
-          this.saveStatus(job.projectId, job.id, 'FAILED', { error: 'interrupted before provider taskId was returned; retry to render' });
-        }
+      } finally {
+        p.close();
       }
     }
+    if (recovered > 0) console.log(`[render-queue] recovered ${recovered} active job(s)`);
     this.bus.emit({ type: 'project.updated' });
     this.pump();
   }
@@ -347,7 +444,7 @@ export class RenderQueue {
         const sep = key.indexOf('/');
         const projectId = key.slice(0, sep);
         const jobId = key.slice(sep + 1);
-        const ctx = await this.ensureDetached(projectId);
+        const ctx = await this.pipelineCtx(projectId);
         if (!ctx) continue;
         const job = this.getJob(projectId, jobId);
         if (!job) continue;
@@ -362,11 +459,13 @@ export class RenderQueue {
   }
 
   private async process(job: RenderJob): Promise<void> {
-    const p = this.ctxFor(job.projectId);
+    // P1: resolve the owning project even when the UI switched away 鈥?a bare
+    // ctxFor() returns null after the switch and silently dropped the job.
+    const p = await this.pipelineCtx(job.projectId);
     if (!p) return;
     const provider = this.registry.get(job.provider);
     if (!provider) {
-      this.fail(job, 'provider not found: ' + job.provider);
+      await this.fail(job, 'provider not found: ' + job.provider);
       return;
     }
     try {
@@ -403,7 +502,7 @@ export class RenderQueue {
         this.handles.set(runKey(job.projectId, job.id), handle);
         this.saveStatus(job.projectId, job.id, 'QUEUED', { providerTaskId: handle.providerTaskId, providerResponseSnapshot: handle.raw });
         // P0-6: a real submission that returned a taskId confirms the node
-        // mapping is executable → profile becomes 'verified'.
+        // mapping is executable 鈫?profile becomes 'verified'.
         if (job.provider !== 'mock') {
           try {
             this.registry.confirmVerified();
@@ -416,37 +515,64 @@ export class RenderQueue {
         return;
       }
 
-      // 2) Job has a handle (recovered or already submitted) — poll.
+      // 2) Job has a handle (recovered or already submitted) 鈥?poll.
       if (this.handles.has(runKey(job.projectId, job.id))) {
         await this.pollUntilDone(job);
       }
     } catch (e) {
       if (e instanceof ProviderError) {
-        this.fail(job, `${e.stage}: ${e.message}`);
+        await this.fail(job, `${e.stage}: ${e.message}`);
       } else {
-        this.fail(job, e instanceof Error ? e.message : String(e));
+        await this.fail(job, e instanceof Error ? e.message : String(e));
       }
     }
   }
 
   private async pollUntilDone(job: RenderJob): Promise<void> {
-    // The caller's `job` is a pre-submit snapshot (no providerTaskId yet) —
+    // The caller's `job` is a pre-submit snapshot (no providerTaskId yet) 鈥?
     // re-read the row the worker itself persisted so polling actually starts.
-    const fresh = this.getJob(job.projectId, job.id) ?? job;
+    const fresh = (await this.getJobEnsured(job.projectId, job.id)) ?? job;
     if (!fresh.providerTaskId) return;
     const provider = this.registry.get(job.provider);
     if (!provider) {
-      this.fail(job, 'provider not found');
+      await this.fail(job, 'provider not found');
       return;
     }
     const handle = this.handles.get(runKey(job.projectId, job.id))!;
     let lastStatus: RenderJobStatus = job.status;
+    // P1: a paid render must survive transient polling hiccups (network
+    // blips, unrecognized payloads). Fail only after a sustained streak 鈥?
+    // roughly 5 minutes at production pollMs, bounded for fast test polls.
+    const maxTransient = Math.min(60, Math.max(3, Math.round(300_000 / this.pollMs)));
+    let transientStreak = 0;
     for (let i = 0; i < 600; i++) {
-      // CANCELLED/FAILED while polling?
-      const cur = this.getJob(job.projectId, job.id);
-      if (!cur) return;
+      // CANCELLED/FAILED while polling? Re-read through pipelineCtx — a UI
+      // project switch must not end the poll silently.
+      const cur = await this.getJobEnsured(job.projectId, job.id);
+      if (!cur) {
+        await sleep(this.pollMs);
+        continue;
+      }
       if (cur.status === 'CANCELLED' || cur.status === 'FAILED') return;
-      const st = await provider.status(handle);
+      let st;
+      try {
+        st = await provider.status(handle);
+        if (st.transient) {
+          transientStreak += 1;
+          if (transientStreak >= maxTransient) {
+            await this.fail(cur, `provider unusable for ${transientStreak} consecutive polls: ${st.error ?? 'unknown'}`);
+            return;
+          }
+          await sleep(this.pollMs);
+          continue;
+        }
+        transientStreak = 0;
+      } catch (e) {
+        transientStreak += 1;
+        if (transientStreak >= maxTransient) throw e instanceof Error ? e : new Error(String(e));
+        await sleep(this.pollMs);
+        continue;
+      }
       const mapped: RenderJobStatus = st.status === 'SUCCEEDED' ? 'SUCCEEDED' : st.status === 'FAILED' ? 'FAILED' : st.status === 'EXPIRED' ? 'EXPIRED' : 'RUNNING';
       if (mapped === 'SUCCEEDED') {
         this.saveStatus(job.projectId, job.id, 'DOWNLOADING', { startedAt: new Date().toISOString() });
@@ -456,7 +582,7 @@ export class RenderQueue {
         return;
       }
       if (mapped === 'FAILED' || mapped === 'EXPIRED') {
-        this.fail(cur, st.error ?? `provider task ${mapped.toLowerCase()}`);
+        await this.fail(cur, st.error ?? `provider task ${mapped.toLowerCase()}`);
         return;
       }
       if (mapped !== lastStatus) {
@@ -466,11 +592,18 @@ export class RenderQueue {
       }
       await sleep(this.pollMs);
     }
-    this.fail(job, 'poll timeout (100 minutes)');
+    await this.fail(job, 'poll timeout (100 minutes)');
+  }
+
+  /** getJob that also materializes the owning project context on demand. */
+  private async getJobEnsured(projectId: string, jobId: string): Promise<RenderJob | null> {
+    const ctx = await this.pipelineCtx(projectId);
+    if (!ctx) return null;
+    return this.getJob(projectId, jobId);
   }
 
   private async downloadAndCreateTake(job: RenderJob, url: string, cost?: RenderJob['cost']): Promise<void> {
-    const p = this.ctxFor(job.projectId);
+    const p = await this.pipelineCtx(job.projectId);
     if (!p) return;
     // Idempotent take creation: if a take already exists for this job (crash
     // between INSERT and status update), reuse it instead of creating a second.
@@ -512,11 +645,11 @@ export class RenderQueue {
     if (shot.status === 'RENDERING') advanceShotStatus(p, job.shotId, 'HAS_TAKES');
   }
 
-  private fail(job: RenderJob, error: string): void {
+  private async fail(job: RenderJob, error: string): Promise<void> {
     this.saveStatus(job.projectId, job.id, 'FAILED', { error, finishedAt: new Date().toISOString() });
     this.handles.delete(runKey(job.projectId, job.id));
     this.bus.emit({ type: 'render.job.failed', jobId: job.id, shotId: job.shotId, error });
-    const p = this.ctxFor(job.projectId);
+    const p = await this.pipelineCtx(job.projectId);
     if (p) {
       const shot = getShot(p, job.shotId);
       if (shot.status === 'RENDERING') advanceShotStatus(p, job.shotId, 'PREFLIGHT_READY');

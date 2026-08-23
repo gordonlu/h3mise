@@ -30,6 +30,7 @@ import * as mediaMod from '../modules/media.js';
 import * as aiActions from '../modules/ai-actions.js';
 import * as guideMod from '../modules/guide.js';
 import { serveMedia } from './media-route.js';
+import { createKeyedMutex } from '../modules/mutex.js';
 
 export interface AppServices {
   store: ProjectStore;
@@ -56,6 +57,9 @@ export function buildRoutes(services: AppServices): App {
     if (!ctx) throw new HttpError(409, 'no project open');
     return ctx;
   };
+
+  // Serializes preflight→submit per shot (see POST /api/render).
+  const renderGate = createKeyedMutex();
 
   // --- session / health ----------------------------------------------------
 
@@ -142,12 +146,27 @@ export function buildRoutes(services: AppServices): App {
 
   app.patch('/api/current-project/config', async (c) => {
     const ctx = p(c);
-    const body = await c.req.json().catch(() => ({}));
-    if (typeof body.default_aspect_ratio === 'string' && body.default_aspect_ratio !== ctx.config.default_aspect_ratio) {
-      const now = new Date().toISOString();
-      ctx.db.run('UPDATE shots SET aspect_ratio = ?, updated_at = ?', [body.default_aspect_ratio, now]);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    // P2: whitelist — arbitrary keys must not be persisted into project.json.
+    const allowed: Array<keyof typeof ctx.config> = ['title', 'format', 'default_aspect_ratio', 'visual_style', 'default_duration_seconds'];
+    const patch: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (body[key] !== undefined) patch[key] = body[key];
     }
-    ctx.config = { ...ctx.config, ...body };
+    if (typeof patch.title === 'string' && !patch.title.trim()) delete patch.title;
+    const duration = Number(patch.default_duration_seconds);
+    if (patch.default_duration_seconds !== undefined && (!Number.isFinite(duration) || duration <= 0)) delete patch.default_duration_seconds;
+    // Propagate a changed project default only to shots still ON the old
+    // default — per-shot customizations are kept.
+    if (typeof patch.default_aspect_ratio === 'string' && patch.default_aspect_ratio !== ctx.config.default_aspect_ratio) {
+      const now = new Date().toISOString();
+      ctx.db.run('UPDATE shots SET aspect_ratio = ?, updated_at = ? WHERE aspect_ratio = ?', [
+        patch.default_aspect_ratio,
+        now,
+        ctx.config.default_aspect_ratio,
+      ]);
+    }
+    ctx.config = { ...ctx.config, ...patch } as typeof ctx.config;
     await services.store.saveConfig();
     return c.json({ config: ctx.config });
   });
@@ -339,49 +358,55 @@ export function buildRoutes(services: AppServices): App {
     // P0-2: build the EXACT render intent (client overrides included), gate
     // on that intent, and only then submit. The intent hash is persisted on
     // the job so any later re-submission can be audited against it.
-    const intent = await preflightMod.intentFromInput(ctx, services.providers, {
-      shotId,
-      promptVersionId,
-      providerId,
-      durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
-      aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
-      resolution: body.resolution,
-      providerParams: body.providerParams ?? {},
-    });
-    const preflight = await preflightMod.runBasicPreflightIntent(ctx, services.providers, intent);
-    if (preflight.blocked) {
-      const reasons = preflight.basic
-        .flatMap((section) => section.checks)
-        .filter((check) => check.severity === 'error')
-        .map((check) => check.message);
-      return c.json({
-        error: reasons.length ? `生成检查未通过：${reasons.join('；')}` : '生成检查未通过，请查看检查结果',
-        preflight,
-      }, 422);
-    }
-    const profile = services.providers.getProfile();
-    const intentHash = preflightMod.renderIntentHash(intent, { appId: profile?.appId ?? '', checkedAt: profile?.verification.checkedAt ?? null });
-    const request = {
-      provider: providerId,
-      aiAppId: body.aiAppId ?? '2089265538441764866',
-      mode: intent.mode,
-      promptVersionId,
-      durationSeconds: intent.durationSeconds,
-      aspectRatio: intent.aspectRatio,
-      resolution: intent.resolution,
-      references: intent.references,
-      providerParams: intent.providerParams,
-    };
-    let job;
-    try {
-      job = services.queue.submit({ projectId: ctx.meta.id, shotId, promptVersionId, provider: providerId, request, intentHash });
-    } catch (e) {
-      if (e instanceof Error && /already active/.test(e.message)) {
-        return c.json({ error: e.message }, 409);
+    // P1: the whole gate+submit sequence is serialized per shot — preflight's
+    // duplicate check and the INSERT are separated by awaits, so two
+    // overlapping requests (double-click, multi-tab, different params) used to
+    // be able to pass the gate twice and double-charge.
+    return renderGate(`render:${ctx.meta.id}:${shotId}`, async () => {
+      const intent = await preflightMod.intentFromInput(ctx, services.providers, {
+        shotId,
+        promptVersionId,
+        providerId,
+        durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
+        aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
+        resolution: body.resolution,
+        providerParams: body.providerParams ?? {},
+      });
+      const preflight = await preflightMod.runBasicPreflightIntent(ctx, services.providers, intent);
+      if (preflight.blocked) {
+        const reasons = preflight.basic
+          .flatMap((section) => section.checks)
+          .filter((check) => check.severity === 'error')
+          .map((check) => check.message);
+        return c.json({
+          error: reasons.length ? `生成检查未通过：${reasons.join('；')}` : '生成检查未通过，请查看检查结果',
+          preflight,
+        }, 422);
       }
-      throw e;
-    }
-    return c.json(job, 201);
+      const profile = services.providers.getProfile();
+      const intentHash = preflightMod.renderIntentHash(intent, { appId: profile?.appId ?? '', checkedAt: profile?.verification.checkedAt ?? null });
+      const request = {
+        provider: providerId,
+        aiAppId: body.aiAppId ?? '2089265538441764866',
+        mode: intent.mode,
+        promptVersionId,
+        durationSeconds: intent.durationSeconds,
+        aspectRatio: intent.aspectRatio,
+        resolution: intent.resolution,
+        references: intent.references,
+        providerParams: intent.providerParams,
+      };
+      let job;
+      try {
+        job = services.queue.submit({ projectId: ctx.meta.id, shotId, promptVersionId, provider: providerId, request, intentHash });
+      } catch (e) {
+        if (e instanceof Error && /already active/.test(e.message)) {
+          return c.json({ error: e.message }, 409);
+        }
+        throw e;
+      }
+      return c.json(job, 201);
+    });
   });
 
   app.get('/api/render', (c) => {
@@ -392,12 +417,17 @@ export function buildRoutes(services: AppServices): App {
     const job = services.queue.get(c.req.param('id'));
     return job ? c.json(job) : c.json({ error: 'job not found' }, 404);
   });
-  app.post('/api/render/:id/cancel', (c) => {
-    services.queue.cancel(c.req.param('id'));
+  app.post('/api/render/:id/cancel', async (c) => {
+    // cancel is best-effort and never throws (see RenderQueue.cancel).
+    await services.queue.cancel(c.req.param('id'));
     return c.json({ ok: true });
   });
-  app.post('/api/render/:id/retry', (c) => {
-    services.queue.retry(c.req.param('id'));
+  app.post('/api/render/:id/retry', async (c) => {
+    try {
+      await services.queue.retry(c.req.param('id'));
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 409);
+    }
     return c.json({ ok: true });
   });
 
@@ -451,13 +481,22 @@ export function buildRoutes(services: AppServices): App {
   app.post('/api/timeline/export', async (c) => {
     const ctx = p(c);
     const body = await c.req.json().catch(() => ({}));
+    const projectId = ctx.meta.id;
+    // P1: run against a DETACHED context. The closure outlives the request,
+    // and store.open() closes the old current db when the UI switches
+    // projects — a captured `ctx` would die mid-export.
     const job = services.jobs.start('timeline.export', 'Timeline export', async (update) => {
-      update({ message: 'trimming clips' });
-      const result = await timelineMod.exportTimeline(ctx, services.ffmpeg, body.title, (done, total) => {
-        update({ progress: done / total, message: `trimming clip ${done}/${total}` });
-      });
-      update({ progress: 1, message: 'concatenating…' });
-      return { ...result, url: `/api/file/${encodeURIComponent(result.relPath)}` };
+      const pctx = await services.store.openDetached(projectId);
+      try {
+        update({ message: 'trimming clips' });
+        const result = await timelineMod.exportTimeline(pctx, services.ffmpeg, body.title, (done, total) => {
+          update({ progress: done / total, message: `trimming clip ${done}/${total}` });
+        });
+        update({ progress: 1, message: 'concatenating…' });
+        return { ...result, url: `/api/file/${encodeURIComponent(result.relPath)}` };
+      } finally {
+        pctx.close();
+      }
     });
     return c.json({ jobId: job.id, status: job.status }, 202);
   });
@@ -606,11 +645,19 @@ export function buildRoutes(services: AppServices): App {
     const ctx = p(c);
     const body = await c.req.json();
     const action = c.req.param('action');
+    const projectId = ctx.meta.id;
+    // P1: detached context — AI actions can run long; a project switch in the
+    // UI must not close the database out from under them.
     const job = services.jobs.start('ai.action', `AI: ${action}`, async (update) => {
-      update({ message: 'asking the model…' });
-      const out = await aiActions.runAction(services.ai, ctx, action, body);
-      update({ message: 'done' });
-      return out;
+      const pctx = await services.store.openDetached(projectId);
+      try {
+        update({ message: 'asking the model…' });
+        const out = await aiActions.runAction(services.ai, pctx, action, body);
+        update({ message: 'done' });
+        return out;
+      } finally {
+        pctx.close();
+      }
     });
     return c.json({ jobId: job.id, status: job.status }, 202);
   });
@@ -670,7 +717,10 @@ export class HttpError extends Error {
   }
 }
 
-function serveLocalFile(c: Context, abs: string): Response {
+/** Range-capable local file response. Shared with the static web middleware
+ * in http/app.ts so production asset serving behaves identically on Windows
+ * and Unix (hono's serveStatic expects a cwd-relative root). */
+export function serveLocalFile(c: Context, abs: string): Response {
   let st;
   try {
     st = statSync(abs);
@@ -680,6 +730,15 @@ function serveLocalFile(c: Context, abs: string): Response {
   if (!st.isFile()) return c.json({ error: 'not a file' }, 400);
   const ext = abs.split('.').pop()?.toLowerCase() ?? '';
   const mime: Record<string, string> = {
+    html: 'text/html; charset=utf-8',
+    js: 'text/javascript; charset=utf-8',
+    mjs: 'text/javascript; charset=utf-8',
+    css: 'text/css; charset=utf-8',
+    svg: 'image/svg+xml',
+    ico: 'image/x-icon',
+    woff: 'font/woff',
+    woff2: 'font/woff2',
+    ttf: 'font/ttf',
     mp4: 'video/mp4',
     webm: 'video/webm',
     mov: 'video/quicktime',

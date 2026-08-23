@@ -41,6 +41,9 @@ async function main(): Promise<void> {
     config.runningHubApiKey,
     config.providerMode,
     bus,
+    // P1: mock renders keep their task state under the global home dir so a
+    // project switch (providers.refresh()) cannot orphan an in-flight render.
+    config.home,
   );
   const queue = new RenderQueue(() => store, registry, ffmpeg, bus);
   const jobs = new JobRunner(bus);
@@ -82,7 +85,7 @@ async function main(): Promise<void> {
   if (!config.webDist) {
     console.log('  (API only — UI runs on Vite: http://localhost:5173)');
   } else {
-    console.log('  (serving built UI — H3MISE_SERVE_WEB=1)');
+    console.log('  (serving built UI — disable with H3MISE_SERVE_WEB=0)');
   }
 
   // Persist which project was open so restart reopens it.

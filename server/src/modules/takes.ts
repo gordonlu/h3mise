@@ -10,7 +10,7 @@ import { nextId } from '../db/ids.js';
 import type { ProjectContext } from '../project-store.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 import type { EventBus } from '../events.js';
-import { advanceShotStatus, getShot } from './shots.js';
+import { advanceShotStatus, advanceTo, getShot } from './shots.js';
 import { insertMedia } from './assets.js';
 
 interface TakeRow {
@@ -166,6 +166,12 @@ export function selectTake(p: ProjectContext, takeId: string, bus?: EventBus): T
   const shot = getShot(p, take.shotId);
   if (shot.status === 'HAS_TAKES' || shot.status === 'SELECTED') {
     advanceShotStatus(p, take.shotId, 'SELECTED');
+  } else if (shot.status === 'CONTINUITY_COMMITTED' || shot.status === 'LOCKED') {
+    // P2: the committed ACTUAL continuity cites the OLD take — after a
+    // reselect it is stale. Walk the shot back to SELECTED (the ledger keeps
+    // its immutable history) so the UI asks for a re-commit instead of
+    // claiming continuity that no longer matches the selection.
+    advanceTo(p, take.shotId, 'SELECTED');
   }
   bus?.emit({ type: 'take.selected', takeId, shotId: take.shotId });
   return getTake(p, takeId);

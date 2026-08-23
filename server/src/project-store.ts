@@ -174,14 +174,32 @@ export class ProjectStore {
   }
 
   async readConfig(dirPath: string): Promise<ProjectConfig> {
+    // P2: per-field merge over defaults. The old all-or-nothing fallback
+    // (missing/falsy default_duration_seconds ⇒ discard the WHOLE user config)
+    // silently reset titles and styles; a half-written file now keeps its
+    // good fields instead.
+    let raw: Partial<ProjectConfig> = {};
     try {
-      const raw = await readFile(join(dirPath, 'project.json'), 'utf8');
-      return jget<Partial<ProjectConfig>>(raw, {}).default_duration_seconds
-        ? (jget<ProjectConfig>(raw, {} as ProjectConfig))
-        : DEFAULT_CONFIG;
+      raw = jget<Partial<ProjectConfig>>(await readFile(join(dirPath, 'project.json'), 'utf8'), {});
     } catch {
-      return DEFAULT_CONFIG;
+      /* missing/unreadable file — fall through to defaults */
     }
+    const duration = Number(raw.default_duration_seconds);
+    return {
+      title: typeof raw.title === 'string' && raw.title ? raw.title : DEFAULT_CONFIG.title,
+      format: raw.format ?? DEFAULT_CONFIG.format,
+      default_aspect_ratio: typeof raw.default_aspect_ratio === 'string' && raw.default_aspect_ratio
+        ? raw.default_aspect_ratio
+        : DEFAULT_CONFIG.default_aspect_ratio,
+      visual_style: typeof raw.visual_style === 'string' ? raw.visual_style : DEFAULT_CONFIG.visual_style,
+      default_provider: typeof raw.default_provider === 'string' && raw.default_provider
+        ? raw.default_provider
+        : DEFAULT_CONFIG.default_provider,
+      default_video_model: typeof raw.default_video_model === 'string' && raw.default_video_model
+        ? raw.default_video_model
+        : DEFAULT_CONFIG.default_video_model,
+      default_duration_seconds: Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_CONFIG.default_duration_seconds,
+    };
   }
 
   async saveConfig(): Promise<void> {

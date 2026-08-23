@@ -69,9 +69,10 @@ export function loadConfig(): ServerConfig {
       apiKey: readEnv('AI_API_KEY') ?? null,
       model: readEnv('AI_MODEL') ?? null,
     },
-    // Built SPA is only served when explicitly enabled (H3MISE_SERVE_WEB=1).
-    // Default is API-only — the UI always runs on Vite (5173) in dev, so this
-    // port never shows a stale build.
-    webDist: readEnv('H3MISE_SERVE_WEB') === '1' && existsSync(webDist) ? webDist : null,
+    // Built SPA is served whenever a build exists — `pnpm start` shows the UI
+    // with no extra env vars (README quick start). Opt out for pure-API runs
+    // (e.g. developing against Vite while a stale dist lingers) via
+    // H3MISE_SERVE_WEB=0.
+    webDist: readEnv('H3MISE_SERVE_WEB') !== '0' && existsSync(webDist) ? webDist : null,
   };
 }

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useRenderStore } from '../stores/render';
 import { post } from '../api/client';
 import { confirmDialog } from '../stores/confirm';
+import { toast } from '../stores/toast';
 import { H3_MODE_LABEL } from '@h3mise/shared';
 import type { RenderJob } from '@h3mise/shared';
 
@@ -58,12 +59,23 @@ async function cancel(job: RenderJob) {
     });
     if (!ok) return;
   }
-  await post(`/api/render/${job.id}/cancel`);
+  try {
+    await post(`/api/render/${job.id}/cancel`);
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e), 'err');
+    return;
+  }
   await render.refresh();
 }
 
 async function retry(job: RenderJob) {
-  await post(`/api/render/${job.id}/retry`);
+  try {
+    await post(`/api/render/${job.id}/retry`);
+  } catch (e) {
+    // e.g. "a render job for this exact intent is already active" (409)
+    toast(e instanceof Error ? e.message : String(e), 'err');
+    return;
+  }
   await render.refresh();
 }
 

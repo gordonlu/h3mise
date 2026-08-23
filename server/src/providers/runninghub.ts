@@ -135,7 +135,9 @@ export class RunningHubAiAppProvider implements VideoProvider {
     const buf = await import('node:fs/promises').then((fs) => fs.readFile(localPath));
     const form = new FormData();
     const blob = new Blob([new Uint8Array(buf)], { type: asset.mimeType || 'application/octet-stream' });
-    form.append('file', blob, asset.fileName.split('/').pop() ?? 'upload');
+    // P2: stored relative paths use the platform separator — accept both so
+    // Windows uploads don't carry a whole "assets\xxx.png" path as filename.
+    form.append('file', blob, asset.fileName.split(/[\\/]/).pop() ?? 'upload');
     let res: Response;
     try {
       res = await fetch(`${RH_BASE}/openapi/v2/media/upload/binary`, {
@@ -262,7 +264,19 @@ export class RunningHubAiAppProvider implements VideoProvider {
   }
 
   async status(handle: RenderJobHandle): Promise<RenderStatus> {
-    const raw = (await this.v2('/openapi/v2/query', { taskId: handle.providerTaskId })) as {
+    // P1: transport-level failures are TRANSIENT. A paid task must not be
+    // failed because one poll timed out or the gateway hiccupped — the queue
+    // tolerates a bounded streak of transient answers before giving up.
+    let raw: unknown;
+    try {
+      raw = await this.v2('/openapi/v2/query', { taskId: handle.providerTaskId });
+    } catch (e) {
+      return { status: 'RUNNING', transient: true, error: e instanceof Error ? e.message : String(e) };
+    }
+    if (raw === null || typeof raw !== 'object') {
+      return { status: 'RUNNING', transient: true, error: 'unrecognized query response body' };
+    }
+    const r = raw as {
       status?: string;
       errorCode?: string;
       errorMessage?: string;
@@ -270,26 +284,31 @@ export class RunningHubAiAppProvider implements VideoProvider {
       results?: Array<{ url?: string; outputType?: string }> | null;
       usage?: { consumeMoney?: number | string | null; consumeCoins?: number | string | null; taskCostTime?: string | null };
     };
-    const mapped = STATUS_MAP[String(raw?.status ?? '')];
+    const mapped = STATUS_MAP[String(r.status ?? '')];
     if (!mapped) {
-      // Error encoded in body (e.g. 806 user not found).
-      return { status: 'FAILED', error: `${raw?.errorCode ?? '?'}: ${raw?.errorMessage ?? JSON.stringify(raw)?.slice(0, 200)}` };
+      // Unknown status string (new state / localized error envelope): keep
+      // observing instead of killing the job on first sight.
+      return {
+        status: 'RUNNING',
+        transient: true,
+        error: `unrecognized task status ${r.errorCode ?? ''} "${String(r.status ?? '')}" ${r.errorMessage ?? JSON.stringify(raw).slice(0, 200)}`.trim(),
+      };
     }
-    const result: RenderStatus = { status: mapped, error: raw?.failedReason ? JSON.stringify(raw.failedReason) : undefined };
+    const result: RenderStatus = { status: mapped, error: r.failedReason ? JSON.stringify(r.failedReason) : undefined };
     if (mapped === 'SUCCEEDED') {
-      const urls = (raw?.results ?? []).map((r) => r.url).filter((u): u is string => Boolean(u));
+      const urls = (r.results ?? []).map((x) => x.url).filter((u): u is string => Boolean(u));
       result.resultUrl = urls[0];
-      result.cost = raw?.usage
+      result.cost = r.usage
         ? {
-            credits: Number(raw.usage.consumeMoney ?? 0),
+            credits: Number(r.usage.consumeMoney ?? 0),
             unit: 'CNY',
-            raw: raw.usage,
+            raw: r.usage,
           }
         : undefined;
       if (!result.resultUrl) return { status: 'FAILED', error: 'task succeeded but no result URL' };
     }
     if (mapped === 'FAILED') {
-      result.error = `${raw?.errorCode ?? ''} ${raw?.errorMessage ?? ''}`.trim() || 'task failed';
+      result.error = `${r.errorCode ?? ''} ${r.errorMessage ?? ''}`.trim() || 'task failed';
     }
     return result;
   }

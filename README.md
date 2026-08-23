@@ -57,7 +57,7 @@ pnpm start        # 打开 http://127.0.0.1:4789
 | **AI App** | 默认接入官方 H3 工作流；可在设置页粘贴自己的 AI App ID 与节点映射，或点「检测并获取节点映射」自动适配 |
 | **内置 AI（可选）** | 设置环境变量 `AI_BASE_URL / AI_API_KEY / AI_MODEL`（OpenAI 兼容） |
 
-环境变量一览（均为可选）：`PORT`（默认 4789）、`H3MISE_HOME`（数据目录，默认 `~/.h3mise`）、`H3MISE_PROVIDER=mock|runninghub`、`RUNNINGHUB_API_KEY`、`AI_BASE_URL / AI_API_KEY / AI_MODEL`。
+环境变量一览（均为可选）：`PORT`（默认 4789）、`H3MISE_HOME`（数据目录，默认 `~/.h3mise`）、`H3MISE_PROVIDER=mock|runninghub`、`RUNNINGHUB_API_KEY`、`AI_BASE_URL / AI_API_KEY / AI_MODEL`、`H3MISE_SERVE_WEB=0`（禁用 :4789 托管已构建 UI，纯 API 模式）。
 
 > 未配置 API Key 时渲染走内置 Mock Provider（离线合成），可完整体验全流程。
 

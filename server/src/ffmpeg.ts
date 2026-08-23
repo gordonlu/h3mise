@@ -22,15 +22,23 @@ export class FfmpegError extends Error {
   }
 }
 
-function run(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string): Promise<string> {
+function run(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new FfmpegError(`${bin} timed out after ${Math.round(timeoutMs / 1000)}s`, stderr));
+    }, timeoutMs);
     child.stdout.on('data', (d) => (stdout += d.toString()));
     child.stderr.on('data', (d) => (stderr += d.toString()));
-    child.on('error', (err) => reject(new FfmpegError(`${bin} failed to start: ${err.message}`, stderr)));
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new FfmpegError(`${bin} failed to start: ${err.message}`, stderr));
+    });
     child.on('close', (code) => {
+      clearTimeout(timer);
       if (code === 0) resolve(stdout);
       else reject(new FfmpegError(`${bin} ${inputLabel ? `(${inputLabel}) ` : ''}exited with code ${code}`, stderr));
     });
@@ -131,21 +139,38 @@ export class Ffmpeg {
     if (audio?.mute) {
       args.push('-an');
     }
-    if (options?.ensureAudio && mapAudio) {
-      // Guarantee a mono/stereo audio track for later amix/xfade (P1): a clip
-      // without any audio stream would otherwise break the export graph.
-      args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+    // P0 fix: anullsrc is a FILL-IN for silent sources, never a replacement.
+    // Mapping it unconditionally (-map 1:a) discarded the source audio on
+    // every timeline export. Only inject when a track must exist but the
+    // source has none.
+    let sourceHasAudio = false;
+    if (mapAudio && options?.ensureAudio) {
+      try {
+        sourceHasAudio = (await this.probe(input)).hasAudio;
+      } catch {
+        sourceHasAudio = false;
+      }
+      if (!sourceHasAudio) {
+        // Guarantee a mono/stereo audio track for later amix/xfade (P1): a clip
+        // without any audio stream would otherwise break the export graph.
+        args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+      }
     }
     args.push('-t', String(Math.max(0.1, end - start)));
-    if (audio?.volume !== undefined && audio.volume !== 1) {
-      args.push('-af', `volume=${Number(audio.volume).toFixed(3)}`);
+    const volumeFilter =
+      audio?.volume !== undefined && audio.volume !== 1 ? `volume=${Number(audio.volume).toFixed(3)}` : null;
+    if (volumeFilter && mapAudio) {
+      args.push('-af', volumeFilter);
     }
     args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
     if (mapAudio) {
-      if (options?.ensureAudio) {
-        args.push('-map', '0:v', '-map', '1:a');
-      } else {
+      if (sourceHasAudio) {
+        // Keep the ORIGINAL audio: default stream selection picks 0:a.
         args.push('-c:a', 'aac');
+      } else if (options?.ensureAudio) {
+        args.push('-map', '0:v', '-map', '1:a', '-c:a', 'aac');
+      } else {
+        args.push('-an');
       }
     }
     args.push('-shortest', '-movflags', '+faststart', outPath);

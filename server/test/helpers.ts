@@ -20,8 +20,57 @@ export function makeTempRoot(tag: string): string {
   return dir;
 }
 
-export function cleanupTempRoot(dir: string): void {
-  rmSync(dir, { recursive: true, force: true });
+/** Everything these helpers ever opened. On Windows an unclosed SQLite handle
+ * (the registry db, the last `store.current`) keeps `project.db-wal/-shm`
+ * locked and makes rmSync fail with EPERM, so cleanup closes them all first. */
+const liveStores = new Set<ProjectStore>();
+const liveHandles = new Set<{ close(): void }>();
+const liveRoots = new Set<string>();
+
+function closeQuietly(handle: { close(): void }): void {
+  try {
+    handle.close();
+  } catch {
+    /* already closed */
+  }
+}
+
+function rmSyncRetry(dir: string, attempts = 6): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      if (attempt >= attempts) throw e;
+      // Brief sync pause: antivirus/indexers transiently lock fresh files.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40 * attempt);
+    }
+  }
+}
+
+/**
+ * Close EVERY database handle issued by makeStore/makeProject*, then remove
+ * `dir` along with any remaining helper-created roots. Idempotent — safe
+ * against double-close and repeated calls. Existing per-file
+ * `after(() => roots.forEach(cleanupTempRoot))` hooks work unchanged.
+ */
+export function cleanupTempRoot(dir?: string): void {
+  for (const store of liveStores) {
+    // store.current is replaced on every open(); its newest handle is the one
+    // tests most often leave behind.
+    try {
+      store.current?.db.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  liveStores.clear();
+  for (const handle of liveHandles) closeQuietly(handle);
+  liveHandles.clear();
+  const targets = new Set(liveRoots);
+  liveRoots.clear();
+  if (dir) targets.add(dir);
+  for (const target of targets) rmSyncRetry(target);
 }
 
 export async function makeStore(tag: string): Promise<{ root: string; store: ProjectStore }> {
@@ -29,20 +78,27 @@ export async function makeStore(tag: string): Promise<{ root: string; store: Pro
   const registry = new Db(join(root, 'registry.db'));
   migrate(registry, REGISTRY_MIGRATIONS);
   const store = new ProjectStore(registry, join(root, 'projects'));
+  liveRoots.add(root);
+  liveStores.add(store);
+  liveHandles.add(registry);
   return { root, store };
 }
 
 export async function makeProject(store: ProjectStore, title: string): Promise<ProjectContext> {
   await store.create({ title, format: 'single_shot' });
   const meta = (await store.list()).find((m) => m.title === title)!;
-  return store.open(meta.id);
+  const ctx = await store.open(meta.id);
+  liveHandles.add(ctx);
+  return ctx;
 }
 
 /** Open WITHOUT touching `store.current` (open() closes the previous one). */
 export async function makeProjectDetached(store: ProjectStore, title: string): Promise<ProjectContext> {
   await store.create({ title, format: 'single_shot' });
   const meta = (await store.list()).find((m) => m.title === title)!;
-  return store.openDetached(meta.id);
+  const ctx = await store.openDetached(meta.id);
+  liveHandles.add(ctx);
+  return ctx;
 }
 
 /** Shot with a compiled prompt so preflight/render can run. */

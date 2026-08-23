@@ -276,6 +276,9 @@ ALTER TABLE render_jobs ADD COLUMN render_intent_hash TEXT;
     sql: `
 -- One selected take per shot, enforced in the DB (P1). Existing duplicates
 -- (if any) are downgraded to candidate keeping the newest selection.
+-- NB: MAX(id) is lexicographic over ids like take-001; it misorders beyond
+-- 999 takes. Acceptable for a one-time migration (multiple simultaneous
+-- selected rows were themselves a bug); do not copy this pattern.
 UPDATE takes SET status = 'candidate'
   WHERE status = 'selected'
     AND id NOT IN (SELECT MAX(id) FROM takes WHERE status = 'selected' GROUP BY shot_id);

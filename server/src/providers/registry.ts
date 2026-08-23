@@ -4,6 +4,8 @@
 // RunningHub account, not to any single project), so switching projects never
 // loses the verified node mapping.
 
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { AiAppProfile, H3Mode, ProviderCapabilities, ProviderStatus, ReferenceRole } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
@@ -146,6 +148,10 @@ export class ProviderRegistry {
     private readonly envApiKey: string | null,
     private readonly mode: 'runninghub' | 'mock',
     private readonly bus?: { emit: (e: import('@h3mise/shared').AppEvent) => void },
+    /** P1: global (project-independent) workdir for the mock provider's task
+     * state. Polling must survive project switches, so it can NEVER live in a
+     * per-project cache dir that changes when `refresh()` re-runs. */
+    private readonly mockWorkDir?: string,
   ) {}
 
   /** User-set key from the settings page (kv) wins over the env var default. */
@@ -183,7 +189,11 @@ export class ProviderRegistry {
     const p = this.getProject();
     this.providers.clear();
     this.capsCache.clear();
-    const mock = new MockProvider(this.ffmpeg, p?.paths.cache ?? '/tmp/h3mise-mock');
+    // P1: mock task state lives in a GLOBAL dir (default ~/.h3mise/mock-tasks).
+    // Pinning it to the current project's cache made any in-flight mock render
+    // fail with "unknown mock task" as soon as the user switched projects.
+    const workDir = this.mockWorkDir ?? p?.paths.cache ?? resolve(tmpdir(), 'h3mise-mock');
+    const mock = new MockProvider(this.ffmpeg, workDir);
     if (this.mode === 'mock') {
       this.providers.set('mock', mock);
       return;

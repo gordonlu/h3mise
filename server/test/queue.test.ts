@@ -1,24 +1,28 @@
-// Render queue invariants — P0-1 multi-project isolation.
+﻿// Render queue invariants 鈥?P0-1 multi-project isolation.
 // Jobs are bound to their owning project; recovery spans every project; the
 // worker never depends on `store.current`.
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { makeStore, makeProject, makeProjectDetached, makeShotWithPrompt, fakeTake, cleanupTempRoot, bus } from './helpers.js';
-import { advanceTo } from '../src/modules/shots.js';
+import { advanceTo, getShot } from '../src/modules/shots.js';
 import { RenderQueue } from '../src/modules/render.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { Ffmpeg } from '../src/ffmpeg.js';
 import type { ProjectStore } from '../src/project-store.js';
 import type { Db } from '../src/db/sqlite.js';
 import { getTimeline } from '../src/modules/timeline.js';
+import type { RenderJobHandle, RenderRequestInput, RenderResult, RenderStatus, VideoProvider } from '../src/providers/types.js';
+import type { MediaAsset } from '@h3mise/shared';
 
 const roots: string[] = [];
 after(() => { for (const r of roots) cleanupTempRoot(r); });
 
-function makeRegistry(registryDb: Db) {
-  // mock mode: no network, real ffmpeg synthetic rendering
-  const r = new ProviderRegistry(() => null, () => registryDb, new Ffmpeg(), null, 'mock');
+function makeRegistry(registryDb: Db, mockWorkDir?: string) {
+  // mock mode: no network, real ffmpeg synthetic rendering. The mock task dir
+  // is global by design (P1); tests pin it under their temp root for isolation.
+  const r = new ProviderRegistry(() => null, () => registryDb, new Ffmpeg(), null, 'mock', undefined, mockWorkDir);
   r.refresh(); // production wires providers on boot; tests must too
   return r;
 }
@@ -49,10 +53,10 @@ test('jobs live in the owning project DB and submit in the open project', async 
   const pB = await makeProjectDetached(store, 'projB');
   const { shotId, promptVersionId } = makeShotWithPrompt(pA, 't2va');
   advanceTo(pA, shotId, 'PREFLIGHT_READY');
-  const registry = makeRegistry(store.registry);
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
   const queue = makeQueue(store, registry, 999_999); // never poll in this test
 
-  // open project is pB — submitting for pA must be rejected (P0-1)
+  // open project is pB 鈥?submitting for pA must be rejected (P0-1)
   await store.open(pB.meta.id);
   assert.throws(() =>
     queue.submit({
@@ -66,7 +70,7 @@ test('jobs live in the owning project DB and submit in the open project', async 
     /open project/,
   );
 
-  // open pA and submit — job row goes into pA's DB with project_id set
+  // open pA and submit 鈥?job row goes into pA's DB with project_id set
   const cur = await store.open(pA.meta.id);
   pA.close(); // queue keeps its own detached ctx for pA after this
   assert.equal(cur.meta.id, pA.meta.id);
@@ -102,7 +106,7 @@ test('submit rejects a duplicate active job for the same intent', async () => {
   const p = await makeProjectDetached(store, 'dupP');
   const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
   advanceTo(p, shotId, 'PREFLIGHT_READY');
-  const registry = makeRegistry(store.registry);
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
   const queue = makeQueue(store, registry, 999_999);
   const cur = await store.open(p.meta.id);
   p.close();
@@ -130,7 +134,7 @@ test('retry creates a NEW job and keeps the old failure record', async () => {
   const p = await makeProjectDetached(store, 'retryP');
   const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
   advanceTo(p, shotId, 'PREFLIGHT_READY');
-  const registry = makeRegistry(store.registry);
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
   const queue = makeQueue(store, registry, 999_999);
   const cur = await store.open(p.meta.id);
   p.close();
@@ -161,7 +165,7 @@ test('end-to-end mock render: upload -> success -> take created once', async () 
   const p = await makeProjectDetached(store, 'e2eP');
   const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
   advanceTo(p, shotId, 'PREFLIGHT_READY');
-  const registry = makeRegistry(store.registry);
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
   const queue = makeQueue(store, registry, 150);
   const cur = await store.open(p.meta.id);
   p.close();
@@ -204,7 +208,7 @@ test('recover() scans ALL projects and does not touch store.current', async () =
   const { shotId, promptVersionId } = makeShotWithPrompt(pA, 't2va');
   advanceTo(pA, shotId, 'PREFLIGHT_READY');
   const bShot = makeShotWithPrompt(pB, 't2va');
-  const registry = makeRegistry(store.registry);
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
   const queue = makeQueue(store, registry, 999_999);
 
 
@@ -223,7 +227,7 @@ test('recover() scans ALL projects and does not touch store.current', async () =
   pB.db.run("UPDATE render_jobs SET provider_task_id = 'mock-b' WHERE id = 'job-b'");
   pA.close(); // current switches below; queue keeps its own detached ctx
 
-  // switch to pB — recover must pick up pA's pending job even so
+  // switch to pB 鈥?recover must pick up pA's pending job even so
   const before = curA.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])!.status;
   await store.open(pB.meta.id);
   await queue.recover();
@@ -231,11 +235,11 @@ test('recover() scans ALL projects and does not touch store.current', async () =
   const afterRow = dA.db.get<{ status: string; error: string | null }>('SELECT status, error FROM render_jobs WHERE id = ?', [job.id])!;
   dA.close();
   // a job submitted but never polled (no taskId) is NEVER resubmitted on
-  // recovery — it is failed with a retry hint (no double cost)
+  // recovery 鈥?it is failed with a retry hint (no double cost)
   assert.equal(afterRow.status, 'FAILED');
   assert.match(afterRow.error ?? '', /retry/);
   assert.ok(before !== afterRow.status); // state actually changed
-  // job-b (with a taskId) is re-enqueued and picked up by the worker — its
+  // job-b (with a taskId) is re-enqueued and picked up by the worker 鈥?its
   // mock task file does not exist, so it fails with a provider error
   await waitFor(() => pB.db.get<{ status: string }>("SELECT status FROM render_jobs WHERE id = 'job-b'")?.status !== 'QUEUED', 3000);
   const bRow = pB.db.get<{ status: string; error: string | null }>("SELECT status, error FROM render_jobs WHERE id = 'job-b'")!;
@@ -253,7 +257,7 @@ test('exportTimeline refuses clips whose take is no longer selected', async () =
   const p = await makeProjectDetached(store, 'tlP');
   const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
   advanceTo(p, shotId, 'PREFLIGHT_READY');
-  const registry = makeRegistry(store.registry);
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
   const queue = makeQueue(store, registry, 999_999);
   const cur = await store.open(p.meta.id);
   p.close();
@@ -264,7 +268,7 @@ test('exportTimeline refuses clips whose take is no longer selected', async () =
   });
   cur.db.run("UPDATE render_jobs SET status = 'SUCCEEDED' WHERE id = ?", [job.id]);
   const take = await fakeTake(cur, shotId, promptVersionId, 'e');
-  // add a valid clip first, THEN demote the take — export must refuse
+  // add a valid clip first, THEN demote the take 鈥?export must refuse
   const { selectTake } = await import('../src/modules/takes.js');
   selectTake(cur, take.id);
   const { addClip, exportTimeline } = await import('../src/modules/timeline.js');
@@ -273,4 +277,128 @@ test('exportTimeline refuses clips whose take is no longer selected', async () =
   await assert.rejects(() => exportTimeline(cur, new Ffmpeg()), /no longer selected/);
   queue.forgetProject(p.meta.id);
   cur.close();
+});
+
+// --- P1 hardening -----------------------------------------------------------
+
+const REQUEST = (promptVersionId: string, durationSeconds = 1) => ({
+  provider: 'mock', aiAppId: 'x', mode: 't2va' as const, promptVersionId, durationSeconds, aspectRatio: '16:9', references: [], providerParams: {},
+});
+
+/** Provider whose status() hiccups a few times before succeeding 鈥?models a
+ * network blip / unrecognized payload during a long paid render. */
+class FlakyProvider implements VideoProvider {
+  readonly id = 'flaky';
+  readonly name = 'flaky';
+  readonly configured = true;
+  attempts = 0;
+  constructor(private readonly failForever = false) {}
+  async capabilities() { return { supportedModes: ['t2va' as const] }; }
+  async uploadAsset(_a: MediaAsset, _p: string) { return { providerRef: 'x' }; }
+  async submit(_r: RenderRequestInput): Promise<RenderJobHandle> { return { providerTaskId: 't1' }; }
+  async status(): Promise<RenderStatus> {
+    this.attempts++;
+    if (this.failForever) return { status: 'RUNNING', transient: true, error: `garbage answer #${this.attempts}` };
+    if (this.attempts <= 3) throw new Error('network blip');
+    if (this.attempts <= 5) return { status: 'RUNNING', transient: true, error: 'unrecognized task status' };
+    return { status: 'SUCCEEDED', resultUrl: `mock://${this.clipPath}` };
+  }
+  clipPath = '';
+  async result(): Promise<RenderResult> { return { url: `mock://${this.clipPath}`, cost: { credits: 0, unit: 'mock' } }; }
+  async cancel() {}
+}
+
+async function flakyFixture(tag: string, provider: FlakyProvider, pollMs: number) {
+  const { root, store } = await makeStore(`queue-${tag}`);
+  roots.push(root);
+  const p = await makeProjectDetached(store, `${tag}P`);
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  advanceTo(p, shotId, 'PREFLIGHT_READY');
+  const registryStub = { get: () => provider } as unknown as ProviderRegistry;
+  const queue = new RenderQueue(() => store, registryStub, new Ffmpeg(), bus(), pollMs);
+  const cur = await store.open(p.meta.id);
+  p.close();
+  // A real (tiny) clip so the mock:// download + ffprobe path works. Lives
+  // inside the tracked temp root so suite cleanup removes it.
+  const clipPath = join(root, 'flaky-clip.mp4');
+  await new Ffmpeg().syntheticVideo(clipPath, 0.5, 'flaky');
+  provider.clipPath = clipPath;
+  return { store, p, cur, queue, shotId, promptVersionId, clipPath };
+}
+
+test('polling survives transient provider errors and still delivers the take', async () => {
+  const provider = new FlakyProvider(false);
+  const { cur, queue, shotId, promptVersionId, clipPath, store, p } = await flakyFixture('recover', provider, 40);
+  const job = queue.submit({ projectId: cur.meta.id, shotId, promptVersionId, provider: 'flaky', request: REQUEST(promptVersionId), intentHash: 'h' });
+  await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status === 'LOCAL_READY', 30_000);
+  assert.equal(provider.attempts >= 6, true); // actually went through the hiccup window
+  assert.equal(cur.db.get<{ c: number }>('SELECT COUNT(*) AS c FROM takes')!.c, 1);
+  assert.equal(getShot(cur, shotId).status, 'HAS_TAKES');
+  queue.forgetProject(cur.meta.id);
+  cur.close();
+  store.registry.close();
+  void p;
+});
+
+test('sustained unusable provider answers eventually fail the job (no silent hang)', async () => {
+  const provider = new FlakyProvider(true);
+  const { cur, queue, shotId, promptVersionId } = await flakyFixture('dead', provider, 25);
+  const job = queue.submit({ projectId: cur.meta.id, shotId, promptVersionId, provider: 'flaky', request: REQUEST(promptVersionId), intentHash: 'h' });
+  await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status === 'FAILED', 60_000);
+  assert.match(cur.db.get<{ error: string | null }>('SELECT error FROM render_jobs WHERE id = ?', [job.id])?.error ?? '', /consecutive polls/);
+  queue.forgetProject(cur.meta.id);
+  cur.close();
+});
+
+test('double retry cannot create two jobs; retry puts the shot back to RENDERING', async () => {
+  const { root, store } = await makeStore('queue-retry-dedupe');
+  roots.push(root);
+  const p = await makeProjectDetached(store, 'dedupeP');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  advanceTo(p, shotId, 'PREFLIGHT_READY');
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
+  const queue = makeQueue(store, registry, 999_999);
+  const cur = await store.open(p.meta.id);
+  p.close();
+
+  const job = queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request: REQUEST(promptVersionId), intentHash: 'same' });
+  await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status !== 'SUBMITTING', 5000);
+  cur.db.run("UPDATE render_jobs SET status = 'FAILED' WHERE id = ?", [job.id]);
+
+  const results = await Promise.allSettled([queue.retry(job.id), queue.retry(job.id)]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(results.filter((r) => r.status === 'rejected').length, 1);
+  const jobs = cur.db.all<{ id: string; status: string }>('SELECT id, status FROM render_jobs ORDER BY created_at');
+  assert.equal(jobs.length, 2); // original + exactly ONE retry
+  await assert.rejects(() => queue.retry(job.id), /already active/); // third attempt blocked while active
+  assert.equal(getShot(cur, shotId).status, 'RENDERING');
+  queue.forgetProject(p.meta.id);
+  cur.close();
+});
+
+test('mock render survives switching projects + provider refresh (global task dir)', async () => {
+  const { root, store } = await makeStore('queue-switch');
+  roots.push(root);
+  const pA = await makeProjectDetached(store, 'swA');
+  const pB = await makeProjectDetached(store, 'swB');
+  const { shotId, promptVersionId } = makeShotWithPrompt(pA, 't2va');
+  advanceTo(pA, shotId, 'PREFLIGHT_READY');
+  // Global mock workdir like production wiring (index.ts passes config.home).
+  const registry = new ProviderRegistry(() => store.current, () => store.registry, new Ffmpeg(), null, 'mock', bus(), join(root, 'global-mock'));
+  registry.refresh();
+  const queue = makeQueue(store, registry, 100);
+
+  await store.open(pA.meta.id);
+  const job = queue.submit({ projectId: pA.meta.id, shotId, promptVersionId, provider: 'mock', request: REQUEST(promptVersionId), intentHash: 'h' });
+
+  // UI switches to project B and providers are rebuilt on open (route behavior)
+  await store.open(pB.meta.id);
+  registry.refresh();
+
+  await waitFor(() => {
+    const s = pA.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status;
+    return s === 'LOCAL_READY';
+  }, 30_000);
+  assert.equal(pA.db.get<{ c: number }>('SELECT COUNT(*) AS c FROM takes')!.c, 1);
+  queue.forgetProject(pA.meta.id);
 });

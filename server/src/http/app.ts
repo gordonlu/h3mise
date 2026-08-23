@@ -2,12 +2,11 @@
 // Order matters: guards and static middleware are registered on the root app
 // BEFORE mounting the routes sub-app, so they always run first.
 
-import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { Hono } from 'hono';
 import { hostGuard, originGuard, sessionGuard } from './security.js';
-import { buildRoutes, type AppServices } from './routes.js';
+import { buildRoutes, serveLocalFile, type AppServices } from './routes.js';
 
 export const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -37,13 +36,28 @@ export function buildApp(services: AppServices, webDist: string | null): Hono<{ 
   }
 
   // 3) Production: static web (built SPA) with history fallback — skips /api/*.
+  //    P2: paths are resolved and contained inside webDist (no ".."), and
+  //    assets stream through serveLocalFile — hono's serveStatic wants a
+  //    cwd-relative root and silently mis-served with an absolute one on Windows.
   if (webDist && existsSync(webDist)) {
+    const rootAbs = resolve(webDist);
     app.use('*', async (c, next) => {
       const path = c.req.path;
       if (path.startsWith('/api/')) return next();
-      const filePath = join(webDist, path === '/' ? 'index.html' : path.slice(1));
-      if (existsSync(filePath) && statSync(filePath).isFile()) {
-        return serveStatic({ root: webDist })(c, next);
+      const rel = path === '/' ? 'index.html' : path.slice(1);
+      const abs = resolve(rootAbs, rel);
+      const relFromRoot = relative(rootAbs, abs);
+      if (relFromRoot.startsWith('..') || isAbsolute(relFromRoot)) {
+        return c.text('not found', 404);
+      }
+      let st;
+      try {
+        st = statSync(abs);
+      } catch {
+        /* fall through to history fallback */
+      }
+      if (st?.isFile()) {
+        return serveLocalFile(c, abs);
       }
       const html = readFileSync(join(webDist, 'index.html'));
       c.header('Content-Type', 'text/html; charset=utf-8');

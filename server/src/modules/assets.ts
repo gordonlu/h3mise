@@ -48,6 +48,13 @@ export function getEntity(p: ProjectContext, id: string): Entity {
   return entityFromRow(r);
 }
 
+/** Null-safe read for legacy/dangling shot references (defense in depth —
+ * deleteEntity clears them, but older databases may still hold stale ids). */
+function tryGetEntity(p: ProjectContext, id: string): Entity | null {
+  const r = p.db.get<EntityRow>('SELECT * FROM entities WHERE id = ?', [id]);
+  return r ? entityFromRow(r) : null;
+}
+
 export function createEntity(p: ProjectContext, input: { kind: EntityKind; name: string; description?: string; notes?: string; traits?: Record<string, string>; imageAssetId?: string | null }): Entity {
   assertImageAsset(p, input.imageAssetId);
   const id = nextId(p.db, 'ent');
@@ -76,7 +83,15 @@ export function updateEntity(p: ProjectContext, id: string, patch: Partial<Pick<
 }
 
 export function deleteEntity(p: ProjectContext, id: string): void {
-  p.db.run('DELETE FROM entities WHERE id = ?', [id]);
+  p.db.tx(() => {
+    // P0 fix: shots.primary_character_id / scene_id carry no foreign key, so
+    // deleting an entity used to leave dangling ids that crashed the whole
+    // shotboard / guide (getEntity threw 'entity not found'). Clear them first;
+    // character_states and managed bindings cascade via their own FKs.
+    p.db.run('UPDATE shots SET primary_character_id = NULL WHERE primary_character_id = ?', [id]);
+    p.db.run('UPDATE shots SET scene_id = NULL WHERE scene_id = ?', [id]);
+    p.db.run('DELETE FROM entities WHERE id = ?', [id]);
+  });
 }
 
 // --- CharacterState --------------------------------------------------------
@@ -395,7 +410,8 @@ export function ensureShotEntityImageBindings(
 
   for (const item of selected) {
     if (!item.id) continue;
-    const entity = getEntity(p, item.id);
+    const entity = tryGetEntity(p, item.id);
+    if (!entity) continue;
     const managed = current.find((binding) => binding.sourceEntityId === entity.id);
     if (managed && managed.assetId !== entity.imageAssetId) {
       deleteBinding(p, managed.id);
@@ -449,19 +465,29 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
   const hasRefAudio = bindings.some((binding) => binding.type === 'audio' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'));
 
   if (shot.primaryCharacterId) {
-    out.push({ level: 'ok', kind: 'character', label: 'Character', detail: getEntity(p, shot.primaryCharacterId).name });
-    const hasState = states.some((s) => s.characterId === shot.primaryCharacterId);
-    out.push(
-      hasState
-        ? { level: 'ok', kind: 'character_state', label: 'CharacterState', detail: 'exists' }
-        : { level: 'required', kind: 'character_state', label: 'CharacterState missing', detail: 'create a CharacterState for continuity' },
-    );
+    const character = tryGetEntity(p, shot.primaryCharacterId);
+    if (!character) {
+      out.push({ level: 'optional', kind: 'character', label: 'Character', detail: 'referenced character no longer exists' });
+    } else {
+      out.push({ level: 'ok', kind: 'character', label: 'Character', detail: character.name });
+      const hasState = states.some((s) => s.characterId === shot.primaryCharacterId);
+      out.push(
+        hasState
+          ? { level: 'ok', kind: 'character_state', label: 'CharacterState', detail: 'exists' }
+          : { level: 'required', kind: 'character_state', label: 'CharacterState missing', detail: 'create a CharacterState for continuity' },
+      );
+    }
   } else {
     out.push({ level: 'optional', kind: 'character', label: 'Character', detail: 'no primary character set' });
   }
 
   if (shot.sceneId) {
-    out.push({ level: 'ok', kind: 'scene', label: 'Scene', detail: getEntity(p, shot.sceneId).name });
+    const scene = tryGetEntity(p, shot.sceneId);
+    out.push(
+      scene
+        ? { level: 'ok', kind: 'scene', label: 'Scene', detail: scene.name }
+        : { level: 'optional', kind: 'scene', label: 'Scene', detail: 'referenced scene no longer exists' },
+    );
   } else {
     out.push({ level: 'optional', kind: 'scene', label: 'Scene', detail: 'no scene set' });
   }

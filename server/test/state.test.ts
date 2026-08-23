@@ -103,3 +103,18 @@ test('selectTakeAndCommit advances shot to CONTINUITY_COMMITTED', async () => {
   assert.equal(getShot(p, shotId).status, 'CONTINUITY_COMMITTED');
   assert.equal(getPrompt(p, promptVersionId).text.length > 0, true);
 });
+
+test('reselecting after CONTINUITY_COMMITTED walks the shot back to SELECTED (stale continuity)', async () => {
+  const { p, shotId, promptVersionId } = await fixture();
+  const a = await fakeTake(p, shotId, promptVersionId, 'a');
+  advanceTo(p, shotId, 'HAS_TAKES');
+  selectTakeAndCommit(p, a.id, emptyVisualState(), bus());
+  assert.equal(getShot(p, shotId).status, 'CONTINUITY_COMMITTED');
+
+  // new take arrives and the user reselects — committed continuity cites the
+  // OLD take, so the shot must drop back to SELECTED (re-commit required)
+  const b = await fakeTake(p, shotId, promptVersionId, 'b');
+  selectTake(p, b.id, bus());
+  assert.equal(getShot(p, shotId).status, 'SELECTED');
+  assert.equal(listTakes(p, shotId).find((t) => t.status === 'selected')!.id, b.id);
+});

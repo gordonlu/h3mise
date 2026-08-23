@@ -30,6 +30,9 @@ export interface RenderJobHandle {
 export interface RenderStatus {
   status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'EXPIRED';
   error?: string;
+  /** Transient hiccup (network blip / unrecognized payload): the queue keeps
+   * polling instead of failing a paid job. Cleared by the next good answer. */
+  transient?: boolean;
   /** Video result URL once succeeded. */
   resultUrl?: string;
   cost?: { credits?: number; unit?: string; raw?: unknown };

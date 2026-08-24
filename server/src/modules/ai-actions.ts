@@ -266,6 +266,8 @@ Ref2VA 专项规则：
 4. 首帧/尾帧指定的参考图在 detailed_description 中用自然语句锚定时间轴（如“视频从 <Picture 1> 的构图开始”）。
 5. detailed_description 中每个主体首次出现时必须使用其 <Subject n> 标签（如“<Subject 1> 缓慢抬头”），不得只写名称或只引用 <Picture n>。
 6. 环境连续性（帧桥接必写）：若参考图是上一镜头的结尾画面，必须明确锁定机位与方位——具体写出画面中各元素在哪一侧（如“长桌从左向右延伸、胶片在画面右侧”），并声明“禁止镜像、禁止换侧”；只说“与 <Picture n> 一致”不够，要把方位细节描述出来。
+7. 帧模式（I2VA/L2VA/FL2VA）首帧/尾帧内容锚定：模型能理解帧图内容——先描述图内可见的主体、构图、场景层次（前景/中景/背景）与关键物体，再展开动作；主体外观、服装、颜色、关键物体与空间关系全程与帧图保持一致。
+8. 动作因果与对象被动性：明确谁是运动的发出者。涉及主体作用于物体的动作（拿取/推动/碰撞）时：(a) 把主体的运动过程按时间段写满整个时长（如“视频前两秒 <Subject 1> 迈步靠近；随后双手接触并拾起”），不给模型留空白时间片；(b) 被动物体用【正向描述】锁定——“<Subject n> 是桌面上的静物，保持位置不变”，禁止用否定句（“不会滑动不滚动”——否定句遵循度低）；(c) 写明“画面中唯一的位移来自 <Subject 1> 的身体”。
 动作确定性规则：每个动作必须写全“身体部位＋方向＋先后顺序＋空间参照”，把压缩动作展开为不可歧义的连续动作链。例如不写“打开车门并上车”，而写“他走到驾驶座一侧，左手拉开左侧车门，先迈右腿坐进座位，收左腿后用左手关上车门”。杜绝左右侧、主体归属、动作顺序的一切误判空间。
 其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。正文保持中文（<Subject n>/<Picture n> 等标签和任务类型前缀等结构性标记除外）。只输出提示词正文，不要解释。`,
         messages: [
@@ -305,7 +307,9 @@ Ref2VA 专项规则：
     }
     case 'story_to_beats': {
       const story = storyMod.getStory(ctx);
-      const firstSystem = `你把故事拆成 StoryBeats。每个 beat：title、category（setup|inciting_incident|rising_action|climax|falling_action|resolution|transition|other）、summary、location、timeOfDay、weather、characters（实体名）、stateChange、durationSeconds（1-15）。所有 beat 的 durationSeconds 之和尽量等于计划总时长；慢节奏场景用少而长的 beat，蒙太奇/转场用多而短的 beat。title、summary 等文字字段一律用中文。
+      const firstSystem = `你把故事拆成 StoryBeats。每个 beat：title、category（setup|inciting_incident|rising_action|climax|falling_action|resolution|transition|other）、summary、location、timeOfDay、weather、characters（实体名）、stateChange、durationSeconds（1-15）。所有 beat 的 durationSeconds 之和尽量等于计划总时长。
+
+时长分配必须从动作分析倒推：把每个 beat 的动作拆成子步骤（如“走近→接触→拾起→抱起→转身”），按真实物理节奏给每一步留秒数（行走约每米1秒、拾取约1.5-2秒、转身约1秒），加总后向上取整作为该 beat 的 durationSeconds。优先落在 8-12 秒（理想 10 秒左右）：5 秒以下的 beat 会过碎、剪辑困难；15 秒成本高。若动作链在 15 秒内装不下，必须把该 beat 拆成多个 beat，绝不压缩动作。一个 beat 容纳“一个完整动作+其直接反应”。title、summary 等文字字段一律用中文。
 
 FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element: "title" (string), "summary" (string). Optional: category, location, timeOfDay, weather, characters, stateChange, durationSeconds. No prose. No markdown. No code fences. No tables. Begin with '[' and end with ']'. Example:
 [{"title":"节拍标题","summary":"一句话概括","category":"setup","location":"","timeOfDay":"","weather":"","characters":[],"stateChange":"","durationSeconds":5}]`;

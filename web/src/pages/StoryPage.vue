@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { get, post, patch, del } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
@@ -52,7 +52,12 @@ async function load() {
 }
 
 async function saveStory(patchData: Partial<NonNullable<typeof story.value>>) {
-  story.value = await patch('/api/story', patchData);
+  try {
+    story.value = await patch('/api/story', patchData);
+    toasts.push({ kind: 'ok', text: '已保存' });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : '保存失败' });
+  }
 }
 
 async function addBeat() {
@@ -61,8 +66,79 @@ async function addBeat() {
 }
 
 async function updateBeat(id: string, patchData: Partial<StoryBeat>) {
+  const before = beats.value;
   beats.value = beats.value.map((b) => (b.id === id ? { ...b, ...patchData } : b));
-  await patch(`/api/story/beats/${id}`, patchData);
+  try {
+    const saved = await patch<StoryBeat & { shotsSynced?: number; shotsSkipped?: number }>(`/api/story/beats/${id}`, patchData);
+    beats.value = beats.value.map((b) => (b.id === id ? saved : b));
+    if (saved.shotsSynced != null) {
+      const parts = [`已保存`];
+      if (saved.shotsSynced > 0) parts.push(`同步 ${saved.shotsSynced} 个镜头时长`);
+      if ((saved.shotsSkipped ?? 0) > 0) parts.push(`${saved.shotsSkipped} 个镜头为手动时长未动`);
+      toasts.push({ kind: 'ok', text: parts.join('，') });
+    }
+  } catch (e) {
+    beats.value = before;
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : '节拍保存失败' });
+  }
+}
+
+/** Draft-based editing: inputs write into local drafts; an explicit save
+ * button commits them. Avoids the invisible "saved on blur" behavior. */
+const storyDraft = ref({ title: '', plannedDurationSeconds: '', synopsis: '', body: '' });
+function syncStoryDraft() {
+  storyDraft.value = {
+    title: story.value?.title ?? '',
+    plannedDurationSeconds: story.value?.plannedDurationSeconds != null ? String(story.value.plannedDurationSeconds) : '',
+    synopsis: story.value?.synopsis ?? '',
+    body: story.value?.body ?? '',
+  };
+}
+watch(story, syncStoryDraft, { immediate: true });
+
+const storyDirty = computed(() => {
+  if (!story.value) return false;
+  const d = storyDraft.value;
+  return (
+    d.title !== (story.value.title ?? '') ||
+    (Number(d.plannedDurationSeconds) || 0) !== (story.value.plannedDurationSeconds ?? 0) ||
+    d.synopsis !== (story.value.synopsis ?? '') ||
+    d.body !== (story.value.body ?? '')
+  );
+});
+
+async function saveStoryDraft() {
+  await saveStory({
+    title: storyDraft.value.title,
+    plannedDurationSeconds: Number(storyDraft.value.plannedDurationSeconds) || 0,
+    synopsis: storyDraft.value.synopsis,
+    body: storyDraft.value.body,
+  });
+  syncStoryDraft();
+}
+
+const beatDrafts = ref<Record<string, { title?: string; category?: string; durationSeconds?: number }>>({});
+function beatValue(b: StoryBeat) {
+  const d = beatDrafts.value[b.id] ?? {};
+  return { ...b, ...d } as StoryBeat;
+}
+function setBeatDraft(id: string, patch: { title?: string; category?: string; durationSeconds?: number }) {
+  beatDrafts.value = { ...beatDrafts.value, [id]: { ...(beatDrafts.value[id] ?? {}), ...patch } };
+}
+function beatDirty(id: string): boolean {
+  const d = beatDrafts.value[id];
+  if (!d) return false;
+  const b = beats.value.find((x) => x.id === id);
+  if (!b) return false;
+  return Object.entries(d).some(([k, v]) => (b as unknown as Record<string, unknown>)[k] !== v);
+}
+async function saveBeatDraft(id: string) {
+  const d = beatDrafts.value[id];
+  if (!d) return;
+  await updateBeat(id, d as Partial<StoryBeat>);
+  const rest = { ...beatDrafts.value };
+  delete rest[id];
+  beatDrafts.value = rest;
 }
 
 async function removeBeat(id: string) {
@@ -161,32 +237,35 @@ onMounted(load);
       <div class="panel facts-panel">
         <div class="panel-title">{{ t('pages.story.subtitle') }}</div>
         <div class="panel-body col facts-body">
+          <div class="spread">
+            <span class="muted">修改后点击「保存」提交</span>
+            <button class="primary sm" :disabled="!storyDirty" @click="saveStoryDraft">保存故事</button>
+          </div>
           <div class="grid two">
           <label class="field">
             {{ t('pages.story.titleField') }}
-            <input :value="story?.title ?? ''" :disabled="aiBusy" placeholder="故事标题" @change="saveStory({ title: ($event.target as HTMLInputElement).value })" />
+            <input v-model="storyDraft.title" :disabled="aiBusy" placeholder="故事标题" />
           </label>
           <label class="field">
             规划总时长 (s)
-            <input :value="story?.plannedDurationSeconds ?? ''" :disabled="aiBusy" type="number" min="0" max="900" placeholder="如 90（AI 拆解按此分配节拍时长）" @change="saveStory({ plannedDurationSeconds: Number(($event.target as HTMLInputElement).value) || 0 })" />
+            <input v-model="storyDraft.plannedDurationSeconds" :disabled="aiBusy" type="number" min="0" max="900" placeholder="如 90（AI 拆解按此分配节拍时长）" />
           </label>
         </div>
           <label class="field">
             {{ t('pages.story.synopsis') }}
-            <textarea :disabled="aiBusy" class="field-synopsis" :value="story?.synopsis ?? ''" rows="6" placeholder="剧情梗概：主角是谁、发生什么、如何收场（供 AI 拆解使用）" @change="saveStory({ synopsis: ($event.target as HTMLTextAreaElement).value })"></textarea>
+            <textarea v-model="storyDraft.synopsis" :disabled="aiBusy" class="field-synopsis" rows="6" placeholder="剧情梗概：主角是谁、发生什么、如何收场（供 AI 拆解使用）"></textarea>
           </label>
           <div class="script-frame">
             <div class="script-head">
               <span>正文稿</span>
-              <span class="script-count mono">{{ story?.body ? story.body.length : 0 }} 字</span>
+              <span class="script-count mono">{{ storyDraft.body.length }} 字</span>
             </div>
             <textarea
+              v-model="storyDraft.body"
               class="script-body"
               rows="16"
               :disabled="aiBusy"
               placeholder="在此粘贴剧本 / 小说片段…"
-              :value="story?.body ?? ''"
-              @change="saveStory({ body: ($event.target as HTMLTextAreaElement).value })"
             ></textarea>
           </div>
         </div>
@@ -212,9 +291,10 @@ onMounted(load);
             <div class="spread">
               <div class="row beat-head">
                 <span class="mono muted beat-idx">{{ String(i + 1).padStart(2, '0') }}</span>
-                <input :value="b.title" :disabled="aiBusy" class="beat-title" placeholder="Beat 标题" @change="updateBeat(b.id, { title: ($event.target as HTMLInputElement).value })" />
-                <input :value="b.durationSeconds" :disabled="aiBusy" type="number" min="1" max="60" class="beat-dur" title="节拍时长（秒）" @change="updateBeat(b.id, { durationSeconds: Number(($event.target as HTMLInputElement).value) || 5 })" />
-                <select :value="b.category" :disabled="aiBusy" @change="updateBeat(b.id, { category: ($event.target as HTMLSelectElement).value as never })">
+                <input :value="beatValue(b).title" :disabled="aiBusy" class="beat-title" placeholder="Beat 标题" @input="setBeatDraft(b.id, { title: ($event.target as HTMLInputElement).value })" />
+                <input :value="beatValue(b).durationSeconds" :disabled="aiBusy" type="number" min="1" max="60" class="beat-dur" title="节拍时长（秒）" @input="setBeatDraft(b.id, { durationSeconds: Number(($event.target as HTMLInputElement).value) || 5 })" />
+                <button v-if="beatDirty(b.id)" class="sm primary" @click="saveBeatDraft(b.id)">保存</button>
+                <select :value="beatValue(b).category" :disabled="aiBusy" @change="setBeatDraft(b.id, { category: ($event.target as HTMLSelectElement).value as never })">
                   <option v-for="c in CATEGORIES" :key="c" :value="c">{{ CATEGORY_LABEL[c] ?? c }}</option>
                 </select>
               </div>

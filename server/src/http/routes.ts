@@ -186,7 +186,35 @@ export function buildRoutes(services: AppServices): App {
 
   app.get('/api/story/beats', (c) => c.json(storyMod.listBeats(p(c))));
   app.post('/api/story/beats', async (c) => c.json(storyMod.createBeat(p(c), await c.req.json()), 201));
-  app.patch('/api/story/beats/:id', async (c) => c.json(storyMod.updateBeat(p(c), c.req.param('id'), await c.req.json())));
+  app.patch('/api/story/beats/:id', async (c) => {
+    const ctx = p(c);
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as { durationSeconds?: number };
+    const before = ctx.db.get<{ duration_seconds: number }>('SELECT duration_seconds FROM story_beats WHERE id = ?', [id]);
+    const updated = storyMod.updateBeat(ctx, id, body);
+    // Propagate beat duration to linked shots — but only those that still
+    // mirror the beat's old duration. A shot manually set to a different
+    // length is an intentional override and must not be clobbered.
+    if (
+      before &&
+      body.durationSeconds !== undefined &&
+      Number.isFinite(Number(body.durationSeconds)) &&
+      Number(body.durationSeconds) > 0 &&
+      Number(body.durationSeconds) !== before.duration_seconds
+    ) {
+      const mirrored = ctx.db.get<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM shots WHERE story_beat_id = ? AND duration_seconds = ?',
+        [id, before.duration_seconds],
+      )?.n ?? 0;
+      const linked = ctx.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM shots WHERE story_beat_id = ?', [id])?.n ?? 0;
+      ctx.db.run(
+        'UPDATE shots SET duration_seconds = ?, updated_at = ? WHERE story_beat_id = ? AND duration_seconds = ?',
+        [Number(body.durationSeconds), new Date().toISOString(), id, before.duration_seconds],
+      );
+      return c.json({ ...updated, shotsSynced: mirrored, shotsSkipped: linked - mirrored });
+    }
+    return c.json(updated);
+  });
   app.delete('/api/story/beats/:id', (c) => {
     storyMod.deleteBeat(p(c), c.req.param('id'));
     return c.json({ ok: true });

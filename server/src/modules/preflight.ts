@@ -135,6 +135,18 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
         message: `提示词 ${prompt.text.length} 字符，已接近 MiniMax H3 上限 7000 字符`,
       });
     }
+    // Timeline-vs-duration consistency: a prompt whose internal timeline runs
+    // past the requested duration gets its pacing silently compressed by the
+    // model — warn so the timeline can be rewritten for the real length.
+    const stamps = [...prompt.text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:s|秒)/gi)].map((m) => Number(m[1]));
+    const maxStamp = stamps.length ? Math.max(...stamps) : 0;
+    if (maxStamp > intent.durationSeconds + 0.5) {
+      sections[0]!.checks.push({
+        key: 'prompt.timeline_mismatch',
+        severity: 'warning',
+        message: `提示词时间轴最远到 ${maxStamp}s，超过本次生成时长 ${intent.durationSeconds}s——节奏会被模型压缩，建议按 ${intent.durationSeconds}s 重排时间轴`,
+      });
+    }
   }
 
   // Duration (checked on the INTENT, not the shot defaults — P0-2)

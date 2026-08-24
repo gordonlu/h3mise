@@ -93,6 +93,30 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
       `For the target video, at the end of the video, ${lastFrame.tag} ${refLabel(lastFrame.binding)} is fully referenced.`,
     );
   }
+  // Base-mode keyframe anchoring (base-en.txt §3): the model COMPREHENDS the
+  // frame image, so establish what is visible inside it — subjects, position,
+  // scene layers — before describing action; identity/colors/objects/spatial
+  // relations must stay consistent with the frame throughout.
+  const anchorFrame = mode === 'l2va' ? lastFrame : firstFrame;
+  if (anchorFrame && (mode === 'i2va' || mode === 'fl2va' || mode === 'l2va')) {
+    const { plan: fp } = modeCtx;
+    const bits = [
+      fp.subject.primarySubject.trim() && `主体：${fp.subject.primarySubject.trim()}`,
+      fp.blocking.startPosition.trim() && `位置：${fp.blocking.startPosition.trim()}`,
+      fp.environment.foreground.trim() && `前景：${fp.environment.foreground.trim()}`,
+      fp.environment.midground.trim() && `中景：${fp.environment.midground.trim()}`,
+      fp.environment.background.trim() && `背景：${fp.environment.background.trim()}`,
+    ].filter(Boolean);
+    if (bits.length) {
+      const roleText =
+        mode === 'l2va'
+          ? `尾帧内容锚定（视频结束时画面应呈现 <Picture ${num.pictures.findIndex((p) => p.binding.roles.includes('last_frame')) + 1}> 中可见的内容）`
+          : `首帧内容锚定（<Picture 1> 中可见）`;
+      blocks.push(
+        `${roleText}：${bits.join('；')}。后续动作与镜头运动均从该画面出发；主体外观、服装、颜色、关键物体与空间关系全程与该帧保持一致。`,
+      );
+    }
+  }
   const imd = integratedMultimodalDescription(modeCtx, num);
   if (imd) blocks.push(imd);
   const sound = overallSoundscape(modeCtx);

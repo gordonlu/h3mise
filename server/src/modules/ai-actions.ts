@@ -48,8 +48,9 @@ const DIRECTOR_SYSTEM_PROMPT = `你是 H3Mise 内置电影导演助手，负责�
 3. 严格遵守故事、角色、参考素材与已提交连续性；不得补写上下文中不存在的事实。
 4. 摄影机、表演、环境和现实约束必须互相兼容，并适合当前时长、画幅与生成模式。
 5. 信息不足时采用保守方案或留空，不使用空泛形容词，不解释创作过程。
+6. 动作描述必须确定性完整：身体部位、方向、先后顺序、空间参照缺一不可。把“打开车门并上车”这类压缩动作展开为无歧义的连续动作链（如：走到驾驶座一侧→左手拉开左侧车门→先迈右腿入座→收左腿→左手关门），杜绝左右侧、主体归属、顺序的一切误判。
 
-输出要求：只返回符合 DirectorPlan schema 的完整 JSON 对象，不要 Markdown、代码围栏或额外说明。字段内容应简洁、具体、可拍摄。`;
+输出要求：只返回符合 DirectorPlan schema 的完整 JSON 对象，不要 Markdown、代码围栏或额外说明。所有字段内容一律使用中文（仅保留必要的英文技术标识如枚举值），简洁、具体、可拍摄。`;
 
 type BeatsResult = Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
 
@@ -211,7 +212,7 @@ export async function runAction(
     case 'improve_camera': {
       if (!shotId) throw new Error('shotId required');
       const raw = await ai.model.structured<unknown>({
-        system: `You are the H3 Shot Pattern Library. Improve ONLY the camera block of the given plan. Keep every other block unchanged. Return the full plan JSON.\n${PLAN_SCHEMA_HINT}`,
+        system: `你是 H3 镜头设计模式库。只改进给定方案的 camera 块，其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}` }],
         temperature: 0.5,
       });
@@ -221,7 +222,7 @@ export async function runAction(
     case 'improve_performance': {
       if (!shotId) throw new Error('shotId required');
       const raw = await ai.model.structured<unknown>({
-        system: `You are the H3 Performance Director. Improve ONLY the performance block (objective/obstacle/tactic/turn, movement quality, anticipation, follow-through, recovery, gaze, end pose). Keep every other block unchanged. Return the full plan JSON.\n${PLAN_SCHEMA_HINT}`,
+        system: `你是 H3 表演导演。只改进给定方案的 performance 块（objective/obstacle/tactic/turn、movement quality、anticipation、primaryAction、followThrough、recovery、gaze、endPose），其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。动作描述必须确定性完整：身体部位＋方向＋先后顺序＋空间参照，展开压缩动作为连续动作链，杜绝左右侧/主体/顺序歧义。\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}` }],
         temperature: 0.5,
       });
@@ -231,7 +232,7 @@ export async function runAction(
     case 'reality_check': {
       if (!shotId) throw new Error('shotId required');
       const text = await ai.model.complete({
-        system: `You are a physics/reality reviewer. Check the shot against: geometry/structure, gravity/support/contact, inertia/momentum, cause→effect, medium rules, biology/anatomy, vehicle mechanics, light/shadow, temporal continuity, known-fact contradictions. Break one law intentionally, not every law accidentally. Output a short list "ISSUE: ... | SEVERITY: minor/major | FIX: ..." per problem, then a verdict line.`,
+        system: `你是物理与现实审查员。对照检查该镜头：几何结构、重力支撑接触、惯性动量、因果、介质规律、生物解剖、载具机械、光影、时间连续性、已知事实矛盾。只故意违反一条定律而非到处破绽。每个问题输出一行“问题：… | 严重度：轻微/严重 | 修复：…”，最后输出一行结论。只用中文。`,
         messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\n\nReality mode: ${plan?.reality.mode ?? 'strict_realism'}` }],
         temperature: 0.3,
       });
@@ -254,7 +255,12 @@ export async function runAction(
       const current = promptMod.listPrompts(ctx, shotId).at(-1);
       if (!current) throw new Error('请先从镜头设计生成或手动输入一版提示词');
       const text = await ai.model.complete({
-        system: `你是专业的 H3 视频提示词编辑。优化当前提示词的清晰度、可执行性和语言紧凑度；保留全部事实、参考素材标签和原有段落结构，不增加事件，不改变镜头意图。只输出优化后的提示词正文，不要解释。`,
+        system: `你是专业的 MiniMax H3 视频提示词编辑，严格遵循 H3 官方提示词规范。
+结构规则（必须保留段落与顺序、参考标签 <Picture n>/<Audio n> 及其一致性）：
+- 基础模式：对齐行（首帧/尾帧引用声明）→ integrated_multimodal_description → overall_soundscape → non_diegetic_music；
+- Ref2VA：subject_definitions → summary → retention_analysis → detailed_description → overall_soundscape → non_diegetic_music。
+动作确定性规则：每个动作必须写全“身体部位＋方向＋先后顺序＋空间参照”，把压缩动作展开为不可歧义的连续动作链。例如不写“打开车门并上车”，而写“他走到驾驶座一侧，左手拉开左侧车门，先迈右腿坐进座位，收左腿后用左手关上车门”。杜绝左右侧、主体归属、动作顺序的一切误判空间。
+其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。用中文输出（保留必要的英文段落标识）。只输出提示词正文，不要解释。`,
         messages: [
           { role: 'user', content: `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}` },
         ],
@@ -268,7 +274,7 @@ export async function runAction(
       const take = takesMod.getTake(ctx, takeId);
       const prompt = promptMod.getPrompt(ctx, take.promptVersionId);
       const text = await ai.model.complete({
-        system: `You diagnose failed H3 takes. Input: DirectorPlan, Prompt, Reference labels, Failure tags, Take notes. Output likely causes (ranked) and concrete fixes to try (plan edits, reference role changes, prompt changes). Never suggest paying for another render.`,
+        system: `你诊断失败的 H3 生成。输入：导演方案、提示词、参考素材标签、失败标签、Take 备注。按可能性排序输出原因和具体可尝试的修复（改方案、换参考角色、改提示词）。绝不建议再花钱重渲染。只用中文。`,
         messages: [
           {
             role: 'user',
@@ -284,7 +290,7 @@ export async function runAction(
       if (!promptId) throw new Error('promptId required');
       const pv = promptMod.getPrompt(ctx, promptId);
       const text = await ai.model.complete({
-        system: `You repair H3 prompts. Fix only the stated problems; keep all other content identical. Output the repaired prompt only.`,
+        system: `你是 H3 提示词修复器。只修复指出的问题，其余内容保持不变；输出语言与原提示词一致（原文无英文必要时用中文）。只输出修复后的提示词正文。`,
         messages: [{ role: 'user', content: `Prompt:\n${pv.text}\n\nProblems: ${String(body.problems ?? '')}` }],
         temperature: 0.3,
       });
@@ -292,10 +298,10 @@ export async function runAction(
     }
     case 'story_to_beats': {
       const story = storyMod.getStory(ctx);
-      const firstSystem = `You break a story into StoryBeats. Each beat: title, category (setup|inciting_incident|rising_action|climax|falling_action|resolution|transition|other), summary, location, timeOfDay, weather, characters (entity names), stateChange, durationSeconds (1-15). Allocate beats so their durationSeconds sum matches the planned total duration as closely as possible; use fewer, longer beats for slow scenes and more short beats for montages/transitions.
+      const firstSystem = `你把故事拆成 StoryBeats。每个 beat：title、category（setup|inciting_incident|rising_action|climax|falling_action|resolution|transition|other）、summary、location、timeOfDay、weather、characters（实体名）、stateChange、durationSeconds（1-15）。所有 beat 的 durationSeconds 之和尽量等于计划总时长；慢节奏场景用少而长的 beat，蒙太奇/转场用多而短的 beat。title、summary 等文字字段一律用中文。
 
 FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element: "title" (string), "summary" (string). Optional: category, location, timeOfDay, weather, characters, stateChange, durationSeconds. No prose. No markdown. No code fences. No tables. Begin with '[' and end with ']'. Example:
-[{"title":"Beat title","summary":"one line","category":"setup","location":"","timeOfDay":"","weather":"","characters":[],"stateChange":"","durationSeconds":5}]`;
+[{"title":"节拍标题","summary":"一句话概括","category":"setup","location":"","timeOfDay":"","weather":"","characters":[],"stateChange":"","durationSeconds":5}]`;
       const userMsg = `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}`;
 
       let raw: unknown;
@@ -323,7 +329,7 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
     case 'beats_to_shots': {
       const beats = body.beats as Array<{ title?: string; summary?: string; id?: string }> | undefined;
       const items = await ai.model.structured<Array<{ title: string; purpose: string; shotFunction: string; durationSeconds: number; h3Mode: string }>>({
-        system: `You convert StoryBeats into H3 shot plans. Default: one shot = one continuous event. Each shot: title, purpose, shotFunction (establishing|wide|medium|closeup|insert|reaction|action|transition|montage|pov|aerial|dialogue|other), durationSeconds (1-15; base it on the beat's durationSeconds unless the story needs more or less), h3Mode (t2va|i2va|fl2va|l2va|ref2va). Return ONLY a JSON array.`,
+        system: `你把 StoryBeats 转成 H3 镜头序列。默认一个镜头=一个连续事件。每个镜头：title、purpose（中文）、shotFunction（establishing|wide|medium|closeup|insert|reaction|action|transition|montage|pov|aerial|dialogue|other）、durationSeconds（1-15，以 beat 的 durationSeconds 为基准）、h3Mode（t2va|i2va|fl2va|l2va|ref2va）。title 和 purpose 一律用中文。只返回 JSON 数组。`,
         messages: [{ role: 'user', content: `Beats:\n${JSON.stringify(beats ?? [])}\n\nConvert each beat into one shot.` }],
         temperature: 0.4,
       });

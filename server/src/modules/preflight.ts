@@ -117,6 +117,20 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     sections[0]!.checks.push({ key: 'prompt.empty', severity: 'error', message: '提示词为空' });
   } else {
     sections[0]!.checks.push({ key: 'prompt.ok', severity: 'info', message: `提示词有效（${prompt.h3Mode}，${prompt.text.length} 字符）` });
+    // MiniMax H3 hard limit: prompts must not exceed 7000 characters.
+    if (prompt.text.length > 7000) {
+      sections[0]!.checks.push({
+        key: 'prompt.too_long',
+        severity: 'error',
+        message: `提示词 ${prompt.text.length} 字符，超过 MiniMax H3 上限 7000 字符，请精简后再生成`,
+      });
+    } else if (prompt.text.length > 6300) {
+      sections[0]!.checks.push({
+        key: 'prompt.near_limit',
+        severity: 'warning',
+        message: `提示词 ${prompt.text.length} 字符，已接近 MiniMax H3 上限 7000 字符`,
+      });
+    }
   }
 
   // Duration (checked on the INTENT, not the shot defaults — P0-2)

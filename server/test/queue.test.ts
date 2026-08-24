@@ -213,11 +213,15 @@ test('recover() scans ALL projects and does not touch store.current', async () =
 
 
   const curA = await store.open(pA.meta.id);
-  const job = queue.submit({
-    projectId: pA.meta.id, shotId, promptVersionId, provider: 'mock',
-    request: { provider: 'mock', aiAppId: 'x', mode: 't2va', promptVersionId, durationSeconds: 1, aspectRatio: '16:9', references: [], providerParams: {} },
-    intentHash: 'h',
-  });
+  // Seed job A directly as SUBMITTING without a taskId. Going through
+  // queue.submit() races the worker: the mock provider returns a taskId
+  // synchronously, recover() would then see it as pollable (RUNNING) instead
+  // of exercising the "interrupted before submit" branch under test.
+  curA.db.run(
+    `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, director_plan_version_id, provider, status, request_snapshot_json, render_intent_hash, created_at, updated_at)
+     VALUES ('job-a', ?, ?, ?, NULL, 'mock', 'SUBMITTING', '{}', NULL, datetime('now'), datetime('now'))`,
+    [pA.meta.id, shotId, promptVersionId],
+  );
   // simulate a job mid-flight in pB as well (real FK targets)
   pB.db.run(
     `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, director_plan_version_id, provider, status, request_snapshot_json, render_intent_hash, created_at, updated_at)
@@ -228,11 +232,11 @@ test('recover() scans ALL projects and does not touch store.current', async () =
   pA.close(); // current switches below; queue keeps its own detached ctx
 
   // switch to pB 鈥?recover must pick up pA's pending job even so
-  const before = curA.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])!.status;
+  const before = curA.db.get<{ status: string }>("SELECT status FROM render_jobs WHERE id = 'job-a'")!.status;
   await store.open(pB.meta.id);
   await queue.recover();
   const dA = await store.openDetached(pA.meta.id);
-  const afterRow = dA.db.get<{ status: string; error: string | null }>('SELECT status, error FROM render_jobs WHERE id = ?', [job.id])!;
+  const afterRow = dA.db.get<{ status: string; error: string | null }>("SELECT status, error FROM render_jobs WHERE id = 'job-a'")!;
   dA.close();
   // a job submitted but never polled (no taskId) is NEVER resubmitted on
   // recovery 鈥?it is failed with a retry hint (no double cost)

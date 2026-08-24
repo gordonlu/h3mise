@@ -218,7 +218,11 @@ export class RunningHubAiAppProvider implements VideoProvider {
       push(inputs.lastFrame, lastFrameRef?.providerRef);
     }
     push(inputs.duration, request.durationSeconds ? String(Math.round(request.durationSeconds)) : undefined);
-    push(inputs.resolution, request.resolution);
+    // The "resolution" slot maps whatever video-shape parameter the workflow
+    // exposes (here: 视频比例 / aspect_ratio). H3Mise's canonical value lives
+    // on request.aspectRatio — resolution is only a legacy fallback.
+    // Sending neither left the node at its workflow default (9:16).
+    push(inputs.resolution, request.aspectRatio || request.resolution);
     // Sampling steps: default 10 for t2va / frame modes, 20 for ref2va.
     push(inputs.steps, request.mode === 'ref2va' ? '20' : '10');
     // P0-4: providerParams are ONLY written through explicit per-key bindings

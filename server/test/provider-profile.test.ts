@@ -70,6 +70,9 @@ test('prompt compiler never substitutes generic RefImages for frame inputs', () 
   assert.doesNotMatch(l2va, /generic-ref|first-frame/);
 
   const ref2va = compileDeterministic(context, 'ref2va');
+  // Ref2VA keeps the first_frame-designated picture among the numbered
+  // references AND pins it as the literal start frame in the prompt text.
   assert.match(ref2va, /generic-ref/);
-  assert.doesNotMatch(ref2va, /first-frame/);
+  assert.match(ref2va, /first-frame/);
+  assert.match(ref2va, /First frame:.*<Picture 2>[\s\S]*?literal first frame/);
 });

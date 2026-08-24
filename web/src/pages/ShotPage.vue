@@ -466,12 +466,34 @@ async function useTakeFrame(takeId: string, which: 'first' | 'last') {
     toasts.push({ kind: 'err', text: `未找到 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧资产` });
     return;
   }
-  await s.addBinding({
+  // Frame Bridge semantics: a take's LAST frame is the NEXT shot's first
+  // frame (continuity chaining); its FIRST frame references this shot.
+  let bindShotId = shotId;
+  let where = '本镜头';
+  if (which === 'last') {
+    const shots = await get<Array<{ id: string; sequenceId: string | null; order: number; title: string }>>('/api/shots');
+    const cur = shots.find((x) => x.id === shotId);
+    if (!cur) {
+      toasts.push({ kind: 'err', text: '找不到当前镜头' });
+      return;
+    }
+    const next = shots
+      .filter((x) => x.sequenceId === cur.sequenceId && x.order > cur.order)
+      .sort((a, b) => a.order - b.order)[0];
+    if (!next) {
+      toasts.push({ kind: 'err', text: '当前序列没有下一镜头，无法做尾帧桥接' });
+      return;
+    }
+    bindShotId = next.id;
+    where = `下一镜「${next.title || next.id}」`;
+  }
+  await post('/api/assets/bindings', {
     assetId: target.id,
     roles: ['first_frame'],
     label: `Frame bridge from ${takeId} (${which === 'last' ? 'last' : 'first'} frame)`,
+    shotId: bindShotId,
   });
-  toasts.push({ kind: 'ok', text: `已把 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧绑定为本镜头的 First Frame` });
+  toasts.push({ kind: 'ok', text: `已把 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧绑定为${where}的 First Frame` });
 }
 
 /** Drag an asset from the rail library onto the shot → bind as reference. */

@@ -58,8 +58,20 @@ const modeHint = computed(() => ({
   i2va: 'I2VA 只使用首帧图',
   l2va: 'L2VA 只使用尾帧图',
   fl2va: 'FL2VA 使用首帧图和尾帧图',
-  ref2va: 'Ref2VA 至少需要一张参考图；参考音频可选',
+  ref2va: 'Ref2VA 至少需要一张参考图；参考音频可选。首尾帧也可以在参考模式里用（在提示词中声明为开场/结尾画面）',
 })[props.currentMode]);
+/** Ref2VA is slower and pricier — if the shot only has frame images and no
+ * other references, the dedicated frame modes do the same job for less. */
+const suggestFrameMode = computed(() => {
+  if (props.currentMode !== 'ref2va') return '';
+  const imageBindings = props.bindings.filter((b) => b.type === 'image');
+  const hasNonFrameRefs =
+    props.bindings.some((b) => b.type === 'audio') || imageBindings.some((b) => !b.roles.includes('first_frame') && !b.roles.includes('last_frame'));
+  if (hasNonFrameRefs || !imageBindings.length) return '';
+  const roles = imageBindings.flatMap((b) => b.roles);
+  if (roles.includes('first_frame') && roles.includes('last_frame')) return 'fl2va';
+  return roles.includes('last_frame') ? 'l2va' : 'i2va';
+});
 
 /** Official RunningHub cap is 12 total refs (slots may offer more). */
 const refTotalCap = computed(() => Math.min(slots.value.total, 12));
@@ -108,6 +120,10 @@ function selectAsset(group: RefGroup, assetId: string) {
       <span v-if="!bindings.length" class="muted">{{ modeHint }}</span>
     </div>
 
+    <div v-if="suggestFrameMode" class="note">
+      当前只有首尾帧、没有其他参考图——建议改用 <strong>{{ suggestFrameMode.toUpperCase() }}</strong>：同样的首尾帧控制，但生成更快、更便宜（Ref2VA 会按多参考计费）。
+    </div>
+
     <div v-if="pickerOpen" class="panel picker">
       <div class="panel-title">绑定参考资源（按类型填入工作流槽位）</div>
       <div class="panel-body col">
@@ -135,7 +151,8 @@ function selectAsset(group: RefGroup, assetId: string) {
           </div>
           <div class="note">
             <template v-if="currentMode === 'ref2va'">
-              当前是 <strong>Ref2VA 参考模式</strong>：只提交 RefImages / RefAudios，不会提交首帧或尾帧。参考图 ≤{{ slots.images }} 张、参考音频 ≤{{ slots.audios }} 个，合计 ≤{{ refTotalCap }} 个；音频必须同时有参考图。
+              当前是 <strong>Ref2VA 参考模式</strong>：提交 RefImages / RefAudios。参考图 ≤{{ slots.images }} 张、参考音频 ≤{{ slots.audios }} 个，合计 ≤{{ refTotalCap }} 个；音频必须同时有参考图。
+              若同时绑定了「首帧图」，该图会作为开场画面发给首帧槽（不占参考槽）；工作流在参考模式下是否消费首帧以真实渲染为准。
             </template>
             <template v-else>
               当前是 <strong>{{ currentMode.toUpperCase() }} 帧控制模式</strong>：只提交 FirstFrame / LastFrame，不会提交 RefImages 或参考音频。

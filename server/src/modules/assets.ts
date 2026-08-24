@@ -287,6 +287,24 @@ export function updateMediaLabel(p: ProjectContext, id: string, patch: { label?:
 
 export function deleteMedia(p: ProjectContext, id: string): MediaAsset {
   const asset = getMedia(p, id);
+  // Deletion guard: refuse when anything still references the asset, so a
+  // stray click in Assets cannot silently break bindings or Frame Bridge.
+  const usage = mediaUsage(p, id);
+  const parts: string[] = [];
+  if (usage.bindings > 0) parts.push(`${usage.bindings} 个参考绑定`);
+  if (usage.entities > 0) parts.push(`${usage.entities} 个实体主图`);
+  if (usage.states > 0) parts.push(`${usage.states} 个角色状态`);
+  if (asset.source === 'frame_extract') {
+    const cited =
+      p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM takes WHERE first_frame_path = ? OR last_frame_path = ?', [
+        asset.fileName,
+        asset.fileName,
+      ])?.n ?? 0;
+    if (cited > 0) parts.push(`${cited} 个 Take 帧（尾帧桥接依赖）`);
+  }
+  if (parts.length > 0) {
+    throw new Error(`资产正在被${parts.join('、')}使用，请先解除引用再删除`);
+  }
   p.db.run('DELETE FROM media_assets WHERE id = ?', [id]);
   return asset;
 }
@@ -461,7 +479,7 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
   const states = listCharacterStates(p);
   const hasFirst = roles.has('first_frame');
   const hasLast = roles.has('last_frame');
-  const hasRefImage = bindings.some((binding) => binding.type === 'image' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'));
+  const hasRefImage = bindings.some((binding) => binding.type === 'image');
   const hasRefAudio = bindings.some((binding) => binding.type === 'audio' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'));
 
   if (shot.primaryCharacterId) {

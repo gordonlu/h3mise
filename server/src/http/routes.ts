@@ -559,7 +559,12 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/assets/media/:id/usage', (c) => c.json(assetsMod.mediaUsage(p(c), c.req.param('id'))));
   app.delete('/api/assets/media/:id', async (c) => {
     const ctx = p(c);
-    const asset = assetsMod.deleteMedia(ctx, c.req.param('id'));
+    let asset;
+    try {
+      asset = assetsMod.deleteMedia(ctx, c.req.param('id'));
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 409);
+    }
     await mediaMod.removeStoredMediaFiles(ctx, asset).catch((error) => {
       console.warn('[media] database row deleted but file cleanup failed', error);
     });

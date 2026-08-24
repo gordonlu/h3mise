@@ -175,13 +175,48 @@ export class RunningHubAiAppProvider implements VideoProvider {
     });
   }
 
+  /** LIST nodes validate values against their option labels (fieldData JSON).
+   * H3Mise sends canonical bare values (e.g. "16:9"); workflows often use
+   * decorated labels ("16:9 (Widescreen)"). Match by exact label, then by
+   * "value + space/paren" prefix; pass through when nothing matches (the
+   * provider will surface the error). */
+  private resolveListValue(slot: { nodeId: string; fieldName: string }, value: string): string {
+    const node = this.profile.nodes.find((n) => n.nodeId === slot.nodeId && n.fieldName === slot.fieldName);
+    if (!node || node.fieldType !== 'LIST' || !node.fieldData) return value;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(node.fieldData);
+    } catch {
+      return value;
+    }
+    if (!Array.isArray(parsed)) return value;
+    // Two observed fieldData shapes:
+    //  - option list: [{name, index, description}, ...] (webapp LIST fields)
+    //  - ComfyUI combo: ["COMBO", {default, options: ["16:9 (Widescreen)", ...]}]
+    const labels: string[] = [];
+    for (const el of parsed) {
+      if (typeof el === 'string') continue;
+      if (typeof el === 'object' && el !== null) {
+        const rec = el as Record<string, unknown>;
+        if (typeof rec.name === 'string') labels.push(rec.name);
+        else if (typeof rec.index === 'string') labels.push(rec.index);
+        else if (Array.isArray(rec.options)) {
+          for (const o of rec.options) if (typeof o === 'string') labels.push(o);
+        }
+      }
+    }
+    if (labels.length === 0) return value;
+    if (labels.includes(value)) return value;
+    return labels.find((l) => l.startsWith(`${value} `) || l.startsWith(`${value}(`)) ?? value;
+  }
+
   private buildNodeInfoList(request: RenderRequestInput): Array<{ nodeId: string; fieldName: string; fieldValue: string }> {
     const inputs = this.profile.inputs;
     const out: Array<{ nodeId: string; fieldName: string; fieldValue: string }> = [];
     const push = (slot: { nodeId: string; fieldName: string } | undefined, value: string | undefined) => {
       // nodeId '' = disabled slot (workflow has no such node): never send it.
       if (slot && slot.nodeId !== '' && value !== undefined && value !== '') {
-        out.push({ nodeId: slot.nodeId, fieldName: slot.fieldName, fieldValue: value });
+        out.push({ nodeId: slot.nodeId, fieldName: slot.fieldName, fieldValue: this.resolveListValue(slot, value) });
       }
     };
     // Fill an array slot (ref_images.ref_image_0..8) in order; each entry is
@@ -200,16 +235,18 @@ export class RunningHubAiAppProvider implements VideoProvider {
       push(inputs.mode, request.mode.toUpperCase());
     }
     // Two mutually exclusive reference modes (workflow contract):
-    //  - ref2va → reference slots (ref_images/ref_audios); first/last frame
-    //    inputs are ignored. (ref_videos was dropped from the RunningHub API.)
+    //  - ref2va → reference slots only (ref_images/ref_audios). A first-frame
+    //    designation is expressed IN THE PROMPT ("this picture is the start
+    //    frame"), not via the frame slot nodes.
     //  - i2va/l2va/fl2va → first/last frame slots only; reference slots are
     //    not sent.
     const firstFrameRef = request.references.find((r) => r.roles.includes('first_frame'));
     const lastFrameRef = request.references.find((r) => r.roles.includes('last_frame'));
+    void firstFrameRef;
+    void lastFrameRef;
     if (request.mode === 'ref2va') {
-      const genericReferences = request.references.filter((r) => !r.roles.includes('first_frame') && !r.roles.includes('last_frame'));
-      const images = genericReferences.filter((r) => r.asset.kind === 'image').map((r) => r.providerRef);
-      const audios = genericReferences.filter((r) => r.asset.kind === 'audio').map((r) => r.providerRef);
+      const images = request.references.filter((r) => r.asset.kind === 'image').map((r) => r.providerRef);
+      const audios = request.references.filter((r) => r.asset.kind === 'audio').map((r) => r.providerRef);
       this.validateRefLimits(images.length, audios.length, request.references);
       pushArray(inputs.refImages, images);
       pushArray(inputs.refAudios, audios);
@@ -306,6 +343,8 @@ export class RunningHubAiAppProvider implements VideoProvider {
         ? {
             credits: Number(r.usage.consumeMoney ?? 0),
             unit: 'CNY',
+            // RH 币: many accounts are pre-paid in coins instead of money.
+            coins: Number(r.usage.consumeCoins ?? 0) || undefined,
             raw: r.usage,
           }
         : undefined;

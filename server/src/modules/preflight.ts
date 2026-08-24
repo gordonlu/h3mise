@@ -80,7 +80,11 @@ export async function intentFromInput(
       const roles = jget<string[]>(row.roles_json ?? '[]', []);
       const first = roles.includes('first_frame');
       const last = roles.includes('last_frame');
-      if (mode === 'ref2va') return !first && !last;
+      // Ref2VA consumes EVERY image/audio binding: first/last-frame
+      // designations ride along as numbered references and are pinned to the
+      // timeline via prompt declarations. Filtering them here desyncs the
+      // submitted media from the compiled prompt's <Picture N> tags.
+      if (mode === 'ref2va') return row.type === 'image' || row.type === 'audio';
       if (mode === 'i2va') return first;
       if (mode === 'l2va') return last;
       if (mode === 'fl2va') return first || last;

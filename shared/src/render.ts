@@ -45,7 +45,9 @@ export interface RenderJob {
   /** Hash of the preflight-checked render intent (P0-2 audit trail). */
   renderIntentHash: string | null;
   providerResponseSnapshot: Record<string, unknown> | null;
-  cost: { credits?: number; unit?: string; raw?: unknown } | null;
+  /** Provider-reported cost. credits = CNY money, coins = RH 币 (RunningHub
+   * coin balance) — an account consumes one or the other per task. */
+  cost: { credits?: number; unit?: string; coins?: number; raw?: unknown } | null;
   error: string | null;
   takeId: string | null;
   createdAt: string;

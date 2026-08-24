@@ -256,11 +256,18 @@ export async function runAction(
       if (!current) throw new Error('请先从镜头设计生成或手动输入一版提示词');
       const text = await ai.model.complete({
         system: `你是专业的 MiniMax H3 视频提示词编辑，严格遵循 H3 官方提示词规范。
-结构规则（必须保留段落与顺序、参考标签 <Picture n>/<Audio n> 及其一致性）：
+结构规则（必须保留段落与顺序、参考标签 <Picture n>/<Audio n>/<Subject n> 及其全文一致性）：
 - 基础模式：对齐行（首帧/尾帧引用声明）→ integrated_multimodal_description → overall_soundscape → non_diegetic_music；
 - Ref2VA：subject_definitions → summary → retention_analysis → detailed_description → overall_soundscape → non_diegetic_music。
+Ref2VA 专项规则：
+1. subject_definitions 必须给每个被追踪内容显式定义标签：<Subject 1> 是主体（引用其身份图 <Picture n> 为外观来源），其余参考内容各占一行定义，不留未解析的标签。
+2. summary 必须以固定英文任务类型前缀开头（如 [image reference]、[image reference + keyframe completion]、[image reference + audio reference]）。
+3. retention_analysis 每行必须使用固定英文关系标记——视觉：fully_preserved / partially_preserved / attribute_transfer / weak_reference；音频：fully_copy / partially_copy / reference / weak_reference，后接简短说明。
+4. 首帧/尾帧指定的参考图在 detailed_description 中用自然语句锚定时间轴（如“视频从 <Picture 1> 的构图开始”）。
+5. detailed_description 中每个主体首次出现时必须使用其 <Subject n> 标签（如“<Subject 1> 缓慢抬头”），不得只写名称或只引用 <Picture n>。
+6. 环境连续性（帧桥接必写）：若参考图是上一镜头的结尾画面，必须明确锁定机位与方位——具体写出画面中各元素在哪一侧（如“长桌从左向右延伸、胶片在画面右侧”），并声明“禁止镜像、禁止换侧”；只说“与 <Picture n> 一致”不够，要把方位细节描述出来。
 动作确定性规则：每个动作必须写全“身体部位＋方向＋先后顺序＋空间参照”，把压缩动作展开为不可歧义的连续动作链。例如不写“打开车门并上车”，而写“他走到驾驶座一侧，左手拉开左侧车门，先迈右腿坐进座位，收左腿后用左手关上车门”。杜绝左右侧、主体归属、动作顺序的一切误判空间。
-其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。用中文输出（保留必要的英文段落标识）。只输出提示词正文，不要解释。`,
+其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。正文保持中文（<Subject n>/<Picture n> 等标签和任务类型前缀等结构性标记除外）。只输出提示词正文，不要解释。`,
         messages: [
           { role: 'user', content: `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}` },
         ],

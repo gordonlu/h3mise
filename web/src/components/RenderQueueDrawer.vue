@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useRenderStore } from '../stores/render';
 import { post } from '../api/client';
@@ -29,19 +29,41 @@ const queueGroups = computed(() => [
   { key: 'done', label: '最近完成', jobs: done.value },
 ].filter((group) => group.jobs.length > 0));
 
-/** PRD §41 成本保护: 项目累计渲染消耗（RunningHub usage 回传时累加）。 */
-const totalCost = computed(() => {
-  let credits = 0;
-  let hasCost = false;
+/** PRD §41 成本保护: 项目累计渲染消耗。CNY（consumeMoney）与 RH 币
+ * （consumeCoins）分开累计——账户按任务只消耗其中一种。 */
+const totals = computed(() => {
+  let cny = 0;
+  let coins = 0;
+  let has = false;
   for (const j of render.jobs) {
-    const c = j.cost as { credits?: number } | null;
-    if (c?.credits !== undefined && c.credits !== null) {
-      credits += c.credits;
-      hasCost = true;
+    const c = j.cost as { credits?: number; coins?: number } | null;
+    if (c?.credits) {
+      cny += c.credits;
+      has = true;
+    }
+    if (c?.coins) {
+      coins += c.coins;
+      has = true;
     }
   }
-  return hasCost ? credits : null;
+  return { cny, coins, has };
 });
+
+/** Elapsed-time ticker for in-flight jobs (1s resolution). */
+const nowTick = ref(Date.now());
+let ticker: number | undefined;
+onMounted(() => {
+  render.refresh();
+  ticker = window.setInterval(() => (nowTick.value = Date.now()), 1000);
+});
+onUnmounted(() => window.clearInterval(ticker));
+
+function elapsedText(job: { startedAt: string | null; createdAt: string }): string {
+  const start = job.startedAt ?? job.createdAt;
+  const sec = Math.max(0, Math.floor((nowTick.value - new Date(start).getTime()) / 1000));
+  const m = Math.floor(sec / 60);
+  return m > 0 ? `${m}分${String(sec % 60).padStart(2, '0')}秒` : `${sec}秒`;
+}
 
 const CANCELLABLE = ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'];
 
@@ -81,8 +103,11 @@ async function retry(job: RenderJob) {
 
 function costText(job: RenderJob): string {
   if (!job.cost) return '';
-  const c = job.cost as { credits?: number; unit?: string };
-  return `¥${c.credits ?? 0}${c.unit ? ` ${c.unit}` : ''}`;
+  const c = job.cost as { credits?: number; coins?: number };
+  const parts: string[] = [];
+  if (c.credits) parts.push(`≈¥${Number(c.credits).toFixed(2)} CNY`);
+  if (c.coins) parts.push(`${c.coins} RH币`);
+  return parts.join(' + ');
 }
 
 onMounted(() => render.refresh());
@@ -98,8 +123,9 @@ onMounted(() => render.refresh());
         </div>
         <button class="ghost close-btn" aria-label="关闭渲染队列" @click="$emit('close')">✕</button>
       </div>
-      <div v-if="totalCost !== null" class="cost-bar">
-        <span class="badge warn">项目累计消耗 ≈ {{ totalCost.toFixed(totalCost % 1 ? 2 : 0) }} <span v-if="totalCost % 1">CNY</span><span v-else>credits</span></span>
+      <div v-if="totals.has" class="cost-bar">
+        <span v-if="totals.cny" class="badge warn">累计消耗 ≈¥{{ totals.cny.toFixed(2) }} CNY</span>
+        <span v-if="totals.coins" class="badge warn">累计消耗 {{ Number(totals.coins.toFixed(2)) }} RH币</span>
         <span class="muted">（RunningHub usage 回传）</span>
       </div>
 
@@ -116,6 +142,7 @@ onMounted(() => render.refresh());
             <div class="job-meta muted">
               <button class="shot-link" @click="router.push(`/shots/${job.shotId}`)">镜头 {{ job.shotId }}</button>
               <span class="badge no-dot mode-badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
+              <span v-if="active.includes(job)" class="badge no-dot elapsed">⏱ {{ elapsedText(job) }}</span>
               <span v-if="costText(job)" class="cost-text">{{ costText(job) }}</span>
             </div>
             <div v-if="job.providerTaskId" class="task-ref">

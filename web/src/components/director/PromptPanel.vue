@@ -17,6 +17,25 @@ const rawText = ref('');
 const showRaw = ref(false);
 const busy = ref('');
 const copied = ref('');
+/** Inline edit: an existing version becomes the draft for a NEW version
+ * (prompt versions themselves are immutable for audit/revert). */
+const editingId = ref('');
+const editText = ref('');
+
+function startEdit(pv: PromptVersion) {
+  editingId.value = pv.id;
+  editText.value = pv.text;
+}
+
+async function saveEdit() {
+  if (!editText.value.trim()) return;
+  await run('edit', async () => {
+    const target = props.prompts.find((p) => p.id === editingId.value);
+    await props.onRaw(editText.value, target?.h3Mode ?? mode.value);
+    editingId.value = '';
+    editText.value = '';
+  });
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   deterministic_compiler: '规则生成',

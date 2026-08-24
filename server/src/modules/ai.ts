@@ -43,7 +43,9 @@ export class OpenAICompatModel implements DirectorModel {
         temperature: input.temperature ?? 0.7,
         ...(input.json ? { response_format: { type: 'json_object' } } : {}),
       }),
-      signal: AbortSignal.timeout(90_000),
+      // Reasoning models (deepseek-v4 etc.) routinely think for 1–2 minutes
+      // on director-plan sized inputs — 90s aborted healthy requests.
+      signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) throw new Error(`AI HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };

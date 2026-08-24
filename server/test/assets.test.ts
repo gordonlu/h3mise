@@ -7,8 +7,10 @@ import {
   createBinding,
   createCharacterState,
   createEntity,
+  deleteBinding,
+  deleteEntity,
   deleteMedia,
-  getEntity,
+  getMedia,
   ensureShotEntityImageBindings,
   insertMedia,
   listBindings,
@@ -45,7 +47,7 @@ test('entity images are inherited by state unless the state has an override', as
   assert.equal(overridden.effectiveImageAssetId, stateImage.id);
 });
 
-test('deleting media clears entity/state images and reference bindings', async () => {
+test('deleting a referenced media is blocked; unreferenced media deletes cleanly', async () => {
   const { root, store } = await makeStore('asset-delete');
   roots.push(root);
   const project = await makeProject(store, 'asset delete');
@@ -54,16 +56,20 @@ test('deleting media clears entity/state images and reference bindings', async (
   });
   const entity = createEntity(project, { kind: 'character', name: 'MISE', imageAssetId: image.id });
   const state = createCharacterState(project, { characterId: entity.id, name: 'Wet', imageAssetId: image.id });
-  createBinding(project, { assetId: image.id, roles: [], label: 'RefImage' });
+  const binding = createBinding(project, { assetId: image.id, roles: [], label: 'RefImage' });
 
   assert.deepEqual(mediaUsage(project, image.id), { bindings: 1, entities: 1, states: 1 });
-  deleteMedia(project, image.id);
+  // Deletion guard: referenced assets are refused (accidental-delete protection).
+  assert.throws(() => deleteMedia(project, image.id), /正在被/);
+  assert.equal(getMedia(project, image.id).id, image.id);
 
-  assert.equal(getEntity(project, entity.id).imageAssetId, null);
-  const clearedState = listCharacterStates(project).find((item) => item.id === state.id);
-  assert.equal(clearedState?.imageAssetId, null);
-  assert.equal(clearedState?.effectiveImageAssetId, null);
-  assert.equal(listBindings(project).length, 0);
+  // After every reference is released the delete goes through.
+  deleteBinding(project, binding.id);
+  assert.deepEqual(mediaUsage(project, image.id), { bindings: 0, entities: 1, states: 1 });
+  assert.throws(() => deleteMedia(project, image.id), /正在被/);
+  deleteEntity(project, entity.id);
+  deleteMedia(project, image.id);
+  assert.throws(() => getMedia(project, image.id));
 });
 
 test('media file cleanup removes the project-owned file', async () => {

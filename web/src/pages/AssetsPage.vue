@@ -18,6 +18,10 @@ const toasts = useToastStore();
 const entities = ref<Entity[]>([]);
 const states = ref<CharacterState[]>([]);
 const media = ref<MediaAsset[]>([]);
+/** System frame assets (Take first/last frames) are working files for Frame
+ * Bridge — hidden by default so the library only shows user-imported media. */
+const showSystemFrames = ref(false);
+const visibleMedia = computed(() => (showSystemFrames.value ? media.value : media.value.filter((m) => m.source !== 'frame_extract')));
 const bindings = ref<ReferenceBinding[]>([]);
 const kindFilter = ref('');
 
@@ -319,7 +323,12 @@ async function removeMedia(asset: MediaAsset) {
     danger: true,
   });
   if (!ok) return;
-  await del(`/api/assets/media/${asset.id}`);
+  try {
+    await del(`/api/assets/media/${asset.id}`);
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : '删除失败' });
+    return;
+  }
   toasts.push({ kind: 'ok', text: '资产已删除' });
   await load();
 }
@@ -476,9 +485,13 @@ onMounted(load);
           <input v-model="importPath" placeholder="或输入图片 / 音频的本地绝对路径" class="grow mono" />
           <button class="primary" :disabled="importing || !importPath">{{ importing ? '导入中…' : '导入路径' }}</button>
         </form>
-        <EmptyState v-if="!media.length" icon="▦" title="媒体库为空" desc="上传首尾帧、Ref2VA 参考图片或参考音频，之后再到 Shot 中绑定用途。" />
-        <div v-else class="grid list">
-          <article v-for="m in media" :key="m.id" class="card media-card">
+        <EmptyState v-if="!visibleMedia.length" icon="▦" title="媒体库为空" desc="上传首尾帧、Ref2VA 参考图片或参考音频，之后再到 Shot 中绑定用途。" />
+        <label v-if="media.some((m) => m.source === 'frame_extract')" class="muted sys-toggle">
+          <input v-model="showSystemFrames" type="checkbox" />
+          显示系统帧资产（Take 首尾帧，供尾帧桥接使用）
+        </label>
+        <div v-if="visibleMedia.length" class="grid list">
+          <article v-for="m in visibleMedia" :key="m.id" class="card media-card">
             <div class="thumb">
               <img v-if="thumbOf(m)" :src="thumbOf(m)!" :alt="m.label" loading="lazy" />
               <span v-else class="thumb-glyph">{{ m.kind === 'video' ? '▶' : m.kind === 'audio' ? '♪' : '▧' }}</span>
@@ -710,4 +723,6 @@ onMounted(load);
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .modal-foot .primary { flex: none; }
 @keyframes pop { from { transform: scale(0.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.sys-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; cursor: pointer; }
+.sys-toggle input { width: auto; }
 </style>

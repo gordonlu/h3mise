@@ -31,6 +31,7 @@ import * as aiActions from '../modules/ai-actions.js';
 import * as guideMod from '../modules/guide.js';
 import { serveMedia } from './media-route.js';
 import { createKeyedMutex } from '../modules/mutex.js';
+import { BibleFormatError, importBible } from '../modules/import-bible.js';
 
 export interface AppServices {
   store: ProjectStore;
@@ -126,6 +127,21 @@ export function buildRoutes(services: AppServices): App {
     services.providers.refresh();
     await services.queue.recover();
     return c.json(meta);
+  });
+
+  // --- import (h3mise-bible@1) ---------------------------------------------
+
+  app.post('/api/import/bible', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    try {
+      const result = await importBible(services.store, services.ffmpeg, body);
+      services.providers.refresh();
+      services.bus.emit({ type: 'project.updated' });
+      return c.json(result, 201);
+    } catch (e) {
+      if (e instanceof BibleFormatError) return c.json({ error: e.message }, 400);
+      throw e;
+    }
   });
 
   app.post('/api/projects/:id/delete', async (c) => {

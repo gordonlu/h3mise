@@ -115,6 +115,11 @@ export function useShot(shotId: string) {
     await load();
   }
 
+  async function deleteTake(takeId: string) {
+    await del(`/api/takes/${takeId}`);
+    await load();
+  }
+
   async function updateTake(takeId: string, patchData: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes' | 'status'>>) {
     await patch(`/api/takes/${takeId}`, patchData);
     await load();
@@ -171,6 +176,7 @@ export function useShot(shotId: string) {
     render,
     selectTake,
     rejectTake,
+    deleteTake,
     updateTake,
     selectAndCommit,
     commitContinuity,

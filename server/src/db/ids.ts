@@ -17,7 +17,8 @@ export type IdKind =
   | 'job'
   | 'take'
   | 'cont'
-  | 'clip';
+  | 'clip'
+  | 'export';
 
 export function nextId(db: Db, kind: IdKind): string {
   const row = db.get<{ value: string }>('SELECT value FROM kv WHERE key = ?', [`counter:${kind}`]);

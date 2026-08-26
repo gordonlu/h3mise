@@ -3,6 +3,8 @@ import { after, test } from 'node:test';
 import type { ProjectMeta } from '@h3mise/shared';
 import { buildRoutes, type AppServices } from '../src/http/routes.js';
 import { cleanupTempRoot, makeStore } from './helpers.js';
+import { createShot } from '../src/modules/shots.js';
+import { access } from 'node:fs/promises';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -92,4 +94,23 @@ test('blocked project creation does not leave an unused project behind', async (
   assert.equal(created.status, 201);
   assert.equal(store.current?.config.title, 'Second');
   assert.equal((await store.list()).length, before + 1);
+});
+
+test('demo installation creates an independent editable project copy', async () => {
+  const { root, store } = await makeStore('project-demo-install');
+  roots.push(root);
+  const sourceMeta = await store.create({ title: 'Bundled Demo', format: 'story' });
+  const source = await store.open(sourceMeta.id);
+  createShot(source, { title: 'Demo Shot' });
+  source.close();
+
+  const installed = await store.installDemo(source.root);
+  assert.notEqual(installed.id, sourceMeta.id);
+  assert.notEqual(installed.dirPath, sourceMeta.dirPath);
+  assert.equal(installed.title, 'Bundled Demo');
+  await access(`${installed.dirPath}/cache`);
+
+  const copy = await store.openDetached(installed.id);
+  assert.equal(copy.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM shots')?.n, 1);
+  copy.close();
 });

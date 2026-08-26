@@ -11,7 +11,7 @@ const currentKey = computed(() => {
   if (route.path === '/story') return 'story';
   if (route.path === '/shots') return 'shots';
   if (route.path.startsWith('/shots/')) return 'production';
-  if (route.path === '/timeline' && props.summary?.attention.kind === 'export') return 'export';
+  if (route.path === '/timeline' && (props.summary?.attention.kind === 'export' || props.summary?.attention.kind === 'complete')) return 'export';
   if (route.path === '/timeline') return 'timeline';
   return props.summary?.shotCount ? 'production' : 'story';
 });
@@ -24,7 +24,7 @@ const stages = computed(() => {
     { key: 'shots', label: 'Shot 列表', to: '/shots', done: Boolean(summary?.shotCount) },
     { key: 'production', label: '镜头制作', to: summary?.attention.to?.startsWith('/shots/') ? summary.attention.to : '/shots', done: productionDone },
     { key: 'timeline', label: '成片编排', to: '/timeline', done: Boolean(summary?.timelineClipCount) },
-    { key: 'export', label: '导出', to: '/timeline', done: false },
+    { key: 'export', label: '导出', to: '/timeline', done: Boolean(summary?.exportCount) },
   ];
   return definitions.map((stage) => ({
     ...stage,

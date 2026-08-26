@@ -43,3 +43,11 @@ test('completed project proceeds to timeline before export', () => {
   const summary = deriveProjectAttention([shot({ selectedTakeId: 'take-001', takeCount: 1 })], 0);
   assert.equal(summary.attention.kind, 'open_timeline');
 });
+
+test('a persisted timeline export completes the project guide', () => {
+  const ready = [shot({ selectedTakeId: 'take-001', takeCount: 1 })];
+  assert.equal(deriveProjectAttention(ready, 1, 0).attention.kind, 'export');
+  const completed = deriveProjectAttention(ready, 1, 1);
+  assert.equal(completed.attention.kind, 'complete');
+  assert.equal(completed.exportCount, 1);
+});

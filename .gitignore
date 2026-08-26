@@ -14,6 +14,10 @@ dist/
 # --- project data (local-first) ---
 .h3mise-home/
 *.h3studio/
+!demo/*.h3studio/
+!demo/*.h3studio/**
+demo/**/*.db-wal
+demo/**/*.db-shm
 .rh-research/
 .doc/
 

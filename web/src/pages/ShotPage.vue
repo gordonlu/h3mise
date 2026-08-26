@@ -29,6 +29,19 @@ function aiText(v: unknown): string {
   return (v as { text?: string })?.text ?? '';
 }
 
+type VisionStatus = { mode: 'multimodal' | 'text_fallback' | 'text_only'; imageCount: number };
+function showVisionStatus(result: unknown) {
+  const vision = (result as { vision?: VisionStatus } | null)?.vision;
+  if (!vision) return;
+  if (vision.mode === 'multimodal') {
+    toasts.push({ kind: 'ok', text: `图片请求成功：AI 已接收 ${vision.imageCount} 张参考图` });
+  } else if (vision.mode === 'text_fallback') {
+    toasts.push({ kind: 'info', text: `识图请求失败，已自动降级为纯文字（原计划发送 ${vision.imageCount} 张图）`, timeout: 8000 });
+  } else {
+    toasts.push({ kind: 'info', text: '本次 AI 请求未附带可读取的镜头参考图，使用纯文字处理', timeout: 8000 });
+  }
+}
+
 const s = useShot(shotId);
 
 const {
@@ -247,21 +260,28 @@ async function runAi(action: string, body: Record<string, unknown>): Promise<unk
   aiJobs.value[key] = res.jobId;
   toasts.push({ kind: 'info', text: `AI 任务已提交，后台处理中（通常 10–60 秒，最长 3 分钟），结果会即时提示…` });
   let waited = 0;
-  for (let i = 0; i < 180; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
-    waited += 1.5;
-    const job = await get<{ status: string; result: unknown; error: string | null }>(`/api/jobs/${res.jobId}`);
-    if (job.status === 'done') {
-      delete aiJobs.value[key];
-      return job.result;
+  let longRunningReminderShown = false;
+  try {
+    for (let i = 0; i < 180; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      waited += 1.5;
+      const job = await get<{ status: string; result: unknown; error: string | null }>(`/api/jobs/${res.jobId}`);
+      if (job.status === 'done') {
+        showVisionStatus(job.result);
+        return job.result;
+      }
+      if (job.status === 'failed') throw new Error(job.error ?? 'AI job failed');
+      // The old 30 <= waited < 32 window matched both the 30s and 31.5s
+      // polls, producing two consecutive "still processing" toasts.
+      if (!longRunningReminderShown && waited >= 30) {
+        longRunningReminderShown = true;
+        toasts.push({ kind: 'info', text: 'AI 仍在处理，请稍候…（超过 3 分钟会提示超时）' });
+      }
     }
-    if (job.status === 'failed') {
-      delete aiJobs.value[key];
-      throw new Error(job.error ?? 'AI job failed');
-    }
-    if (waited >= 30 && waited < 32) toasts.push({ kind: 'info', text: 'AI 仍在处理，请稍候…（超过 3 分钟会提示超时）' });
+    throw new Error('AI job timeout');
+  } finally {
+    delete aiJobs.value[key];
   }
-  throw new Error('AI job timeout');
 }
 
 const aiBusy = computed(() => Object.keys(aiJobs.value).length > 0);
@@ -903,6 +923,7 @@ const TABS = [
         :character-states="sDetail?.characterStates ?? []"
         :on-select="s.selectTake"
         :on-reject="s.rejectTake"
+        :on-delete="s.deleteTake"
         :on-update="s.updateTake"
         :on-ai-diagnose="aiDiagnose"
         :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"

@@ -153,6 +153,17 @@ export function buildRoutes(services: AppServices): App {
     });
   });
 
+  app.post('/api/projects/demo', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    return projectSwitchGate('interactive-project', async () => {
+      if (services.store.current && body.force !== true) return projectLocked(c);
+      const meta = await services.store.installDemo();
+      await services.store.open(meta.id);
+      services.providers.refresh();
+      return c.json(meta, 201);
+    });
+  });
+
   app.post('/api/projects/:id/open', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json().catch(() => ({})) as { force?: boolean };
@@ -560,6 +571,18 @@ export function buildRoutes(services: AppServices): App {
     return c.json(take);
   });
   app.post('/api/takes/:id/reject', (c) => c.json(takesMod.rejectTake(p(c), c.req.param('id'))));
+  app.delete('/api/takes/:id', async (c) => {
+    try {
+      const take = await takesMod.deleteRejectedTake(p(c), c.req.param('id'));
+      services.bus.emit({ type: 'shot.updated', shotId: take.shotId, status: shotsMod.getShot(p(c), take.shotId).status });
+      return c.json({ ok: true, id: take.id, shotId: take.shotId });
+    } catch (error) {
+      if (error instanceof Error && /only rejected takes/.test(error.message)) {
+        return c.json({ error: error.message }, 409);
+      }
+      throw error;
+    }
+  });
   app.post('/api/takes/:id/select-commit', async (c) => {
     const ctx = p(c);
     const body = await c.req.json();
@@ -594,6 +617,10 @@ export function buildRoutes(services: AppServices): App {
     return c.json({ ok: true });
   });
   app.post('/api/timeline/clips/reorder', async (c) => c.json(timelineMod.reorderClips(p(c), (await c.req.json()).ids)));
+  app.get('/api/timeline/exports', (c) => c.json(timelineMod.listTimelineExports(p(c)).map((item) => ({
+    ...item,
+    url: `/api/file/${encodeURIComponent(item.relPath)}`,
+  }))));
   app.post('/api/timeline/export', async (c) => {
     const ctx = p(c);
     const body = await c.req.json().catch(() => ({}));
@@ -608,6 +635,7 @@ export function buildRoutes(services: AppServices): App {
         const result = await timelineMod.exportTimeline(pctx, services.ffmpeg, body.title, (done, total) => {
           update({ progress: done / total, message: `trimming clip ${done}/${total}` });
         });
+        services.bus.emit({ type: 'project.updated' });
         update({ progress: 1, message: 'concatenating…' });
         return { ...result, url: `/api/file/${encodeURIComponent(result.relPath)}` };
       } finally {

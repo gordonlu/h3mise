@@ -3,7 +3,7 @@
 // (poster / first / last frames) are generated locally on creation.
 
 import { join } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, unlink } from 'node:fs/promises';
 import { FAILURE_TAGS, type FailureTag, type Take } from '@h3mise/shared';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
@@ -11,7 +11,7 @@ import type { ProjectContext } from '../project-store.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 import type { EventBus } from '../events.js';
 import { advanceShotStatus, advanceTo, getShot } from './shots.js';
-import { insertMedia } from './assets.js';
+import { insertMedia, mediaUsage } from './assets.js';
 
 interface TakeRow {
   id: string;
@@ -192,4 +192,43 @@ export function rejectTake(p: ProjectContext, takeId: string): Take {
     if (shot.status === 'SELECTED') advanceShotStatus(p, take.shotId, 'HAS_TAKES');
   }
   return getTake(p, takeId);
+}
+
+/** Delete a rejected Take and its project-owned files. Extracted frames that
+ * are still bound as references remain available; all other generated files
+ * and frame MediaAsset rows are removed. The render job itself is retained as
+ * an audit/cost record, with its stale take_id cleared. */
+export async function deleteRejectedTake(p: ProjectContext, takeId: string): Promise<Take> {
+  const take = getTake(p, takeId);
+  if (take.status !== 'rejected') throw new Error('only rejected takes can be deleted');
+
+  const paths = new Set<string>([take.localVideoPath]);
+  if (take.posterPath) paths.add(take.posterPath);
+  const removableMediaIds: string[] = [];
+  for (const framePath of [take.firstFramePath, take.lastFramePath]) {
+    if (!framePath) continue;
+    const media = p.db.get<{ id: string }>('SELECT id FROM media_assets WHERE file_name = ?', [framePath]);
+    const usage = media ? mediaUsage(p, media.id) : { bindings: 0, entities: 0, states: 0 };
+    if (usage.bindings + usage.entities + usage.states === 0) {
+      paths.add(framePath);
+      if (media) removableMediaIds.push(media.id);
+    }
+  }
+
+  p.db.tx(() => {
+    const timelineClips = p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM timeline_clips WHERE take_id = ?', [takeId])?.n ?? 0;
+    for (const mediaId of removableMediaIds) p.db.run('DELETE FROM media_assets WHERE id = ?', [mediaId]);
+    p.db.run('UPDATE render_jobs SET take_id = NULL WHERE id = ?', [take.renderJobId]);
+    p.db.run('DELETE FROM takes WHERE id = ?', [takeId]);
+    if (timelineClips > 0) p.db.run('UPDATE timeline SET updated_at = ? WHERE id = ?', [new Date().toISOString(), 'timeline-001']);
+  });
+
+  await Promise.all([...paths].map(async (path) => {
+    try {
+      await unlink(p.resolveProjectPath(path));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn(`[takes] failed to remove ${path}:`, error);
+    }
+  }));
+  return take;
 }

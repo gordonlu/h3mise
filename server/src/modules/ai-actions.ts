@@ -4,7 +4,8 @@
 // the UI can fall back to Copy Context Package (external AI flow).
 
 import type { ProjectContext } from '../project-store.js';
-import type { AIService, DirectorModel } from './ai.js';
+import type { AIService, DirectorContentPart, DirectorModel, VisionStatus } from './ai.js';
+import { readFile } from 'node:fs/promises';
 import * as directorMod from './director.js';
 import * as promptMod from './prompt.js';
 import * as shotsMod from './shots.js';
@@ -49,10 +50,53 @@ const DIRECTOR_SYSTEM_PROMPT = `你是 H3Mise 内置电影导演助手，负责�
 4. 摄影机、表演、环境和现实约束必须互相兼容，并适合当前时长、画幅与生成模式。
 5. 信息不足时采用保守方案或留空，不使用空泛形容词，不解释创作过程。
 6. 动作描述必须确定性完整：身体部位、方向、先后顺序、空间参照缺一不可。把“打开车门并上车”这类压缩动作展开为无歧义的连续动作链（如：走到驾驶座一侧→左手拉开左侧车门→先迈右腿入座→收左腿→左手关门），杜绝左右侧、主体归属、顺序的一切误判。
+7. 只有在请求确实附带且你能读取参考图时，才能从图中提取左右位置、前中后景、人物朝向和物体关系；看不到图像时必须沿用已有文字，缺失则留空，严禁猜测。
 
 输出要求：只返回符合 DirectorPlan schema 的完整 JSON 对象，不要 Markdown、代码围栏或额外说明。所有字段内容一律使用中文（仅保留必要的英文技术标识如枚举值），简洁、具体、可拍摄。`;
 
 type BeatsResult = Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
+
+const MAX_VISION_IMAGES = 9;
+const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_VISION_TOTAL_BYTES = 24 * 1024 * 1024;
+
+/** Build one OpenAI-compatible multimodal user message. Images follow the
+ * same binding order used by prompt reference numbering, so each attachment
+ * can be identified as <Picture N>. Unreadable/oversized images are skipped;
+ * if none survive, callers retain the old plain-string request shape. */
+export async function shotMultimodalContent(
+  ctx: ProjectContext,
+  shotId: string,
+  text: string,
+): Promise<string | DirectorContentPart[]> {
+  const bindings = assetsMod.listBindings(ctx, shotId);
+  const candidates = bindings.filter((binding) => binding.type === 'image').slice(0, MAX_VISION_IMAGES);
+  const parts: DirectorContentPart[] = [{ type: 'text', text }];
+  let pictureNumber = 0;
+  let totalBytes = 0;
+  for (const binding of candidates) {
+    pictureNumber++;
+    try {
+      const asset = assetsMod.getMedia(ctx, binding.assetId);
+      if (!asset.mimeType.startsWith('image/') || asset.sizeBytes > MAX_VISION_IMAGE_BYTES) continue;
+      if (totalBytes + asset.sizeBytes > MAX_VISION_TOTAL_BYTES) continue;
+      const bytes = await readFile(ctx.resolveProjectPath(asset.fileName));
+      if (bytes.byteLength > MAX_VISION_IMAGE_BYTES || totalBytes + bytes.byteLength > MAX_VISION_TOTAL_BYTES) continue;
+      totalBytes += bytes.byteLength;
+      parts.push({
+        type: 'text',
+        text: `<Picture ${pictureNumber}>：${binding.label || asset.label || asset.id}；roles=${binding.roles.join(',') || 'reference'}；preserve=${binding.preserve.join(',') || 'unspecified'}；ignore=${binding.ignore.join(',') || 'none'}`,
+      });
+      parts.push({
+        type: 'image_url',
+        image_url: { url: `data:${asset.mimeType};base64,${bytes.toString('base64')}`, detail: 'high' },
+      });
+    } catch (error) {
+      console.warn(`[ai] skipped unreadable vision asset ${binding.assetId}: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  return parts.some((part) => part.type === 'image_url') ? parts : text;
+}
 
 function requireAiDirectorPlan(raw: unknown, base: DirectorPlan): DirectorPlan {
   const normalized = directorMod.normalizeDirectorPlan(raw, base);
@@ -197,46 +241,53 @@ export async function runAction(
   const shot = shotId ? shotsMod.getShot(ctx, shotId) : null;
   const suppliedPlan = body.plan ? directorMod.normalizeDirectorPlan(body.plan).plan : null;
   const plan = shotId ? suppliedPlan ?? directorMod.latestPlan(ctx, shotId)?.plan ?? emptyDirectorPlan() : null;
+  let vision: VisionStatus | null = null;
+  const trackVision = (status: VisionStatus) => { vision = status; };
+  const withVision = <T extends Record<string, unknown>>(result: T): T & { vision: VisionStatus | null } => ({ ...result, vision });
 
   switch (action as ActionName) {
     case 'plan_shot': {
       if (!shotId) throw new Error('shotId required');
       const raw = await ai.model.structured<unknown>({
         system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
-        messages: [{ role: 'user', content: planShotPrompt(ctx, shotId, body) }],
+        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, planShotPrompt(ctx, shotId, body)) }],
         temperature: 0.6,
+        onVisionStatus: trackVision,
       });
       const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
-      return { kind: 'director_plan', plan: dp };
+      return withVision({ kind: 'director_plan', plan: dp });
     }
     case 'improve_camera': {
       if (!shotId) throw new Error('shotId required');
       const raw = await ai.model.structured<unknown>({
         system: `你是 H3 镜头设计模式库。只改进给定方案的 camera 块，其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。\n${PLAN_SCHEMA_HINT}`,
-        messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}` }],
+        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}\n\n只有实际看见附图时才能修正空间方位；看不到图时不得猜测。`) }],
         temperature: 0.5,
+        onVisionStatus: trackVision,
       });
       const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
-      return { kind: 'director_plan', plan: dp };
+      return withVision({ kind: 'director_plan', plan: dp });
     }
     case 'improve_performance': {
       if (!shotId) throw new Error('shotId required');
       const raw = await ai.model.structured<unknown>({
         system: `你是 H3 表演导演。只改进给定方案的 performance 块（objective/obstacle/tactic/turn、movement quality、anticipation、primaryAction、followThrough、recovery、gaze、endPose），其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。动作描述必须确定性完整：身体部位＋方向＋先后顺序＋空间参照，展开压缩动作为连续动作链，杜绝左右侧/主体/顺序歧义。\n${PLAN_SCHEMA_HINT}`,
-        messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}` }],
+        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}\n\n只有实际看见附图时才能描述身体与物体的空间关系；看不到图时不得猜测。`) }],
         temperature: 0.5,
+        onVisionStatus: trackVision,
       });
       const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
-      return { kind: 'director_plan', plan: dp };
+      return withVision({ kind: 'director_plan', plan: dp });
     }
     case 'reality_check': {
       if (!shotId) throw new Error('shotId required');
       const text = await ai.model.complete({
         system: `你是物理与现实审查员。对照检查该镜头：几何结构、重力支撑接触、惯性动量、因果、介质规律、生物解剖、载具机械、光影、时间连续性、已知事实矛盾。只故意违反一条定律而非到处破绽。每个问题输出一行“问题：… | 严重度：轻微/严重 | 修复：…”，最后输出一行结论。只用中文。`,
-        messages: [{ role: 'user', content: `Plan:\n${JSON.stringify(plan)}\n\nReality mode: ${plan?.reality.mode ?? 'strict_realism'}` }],
+        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\n\nReality mode: ${plan?.reality.mode ?? 'strict_realism'}\n\n附图可读时可检查可见几何；不可读时只审查文字事实。`) }],
         temperature: 0.3,
+        onVisionStatus: trackVision,
       });
-      return { kind: 'review', text };
+      return withVision({ kind: 'review', text });
     }
     case 'continuity_check': {
       if (!shotId) throw new Error('shotId required');
@@ -266,16 +317,18 @@ Ref2VA 专项规则：
 4. 首帧/尾帧指定的参考图在 detailed_description 中用自然语句锚定时间轴（如“视频从 <Picture 1> 的构图开始”）。
 5. detailed_description 中每个主体首次出现时必须使用其 <Subject n> 标签（如“<Subject 1> 缓慢抬头”），不得只写名称或只引用 <Picture n>。
 6. 环境连续性（帧桥接必写）：若参考图是上一镜头的结尾画面，必须明确锁定机位与方位——具体写出画面中各元素在哪一侧（如“长桌从左向右延伸、胶片在画面右侧”），并声明“禁止镜像、禁止换侧”；只说“与 <Picture n> 一致”不够，要把方位细节描述出来。
-7. 帧模式（I2VA/L2VA/FL2VA）首帧/尾帧内容锚定：模型能理解帧图内容——先描述图内可见的主体、构图、场景层次（前景/中景/背景）与关键物体，再展开动作；主体外观、服装、颜色、关键物体与空间关系全程与帧图保持一致。
+7. 帧模式（I2VA/L2VA/FL2VA）首帧/尾帧内容锚定：请求附带且你确实能读取帧图时，先描述图内可见的主体、构图、场景层次（前景/中景/背景）与关键物体，再展开动作；主体外观、服装、颜色、关键物体与空间关系全程与帧图保持一致。若没有收到或无法读取图片，只保留当前提示词已有事实，严禁新增左右方位或空间关系。
 8. 动作因果与对象被动性：明确谁是运动的发出者。涉及主体作用于物体的动作（拿取/推动/碰撞）时：(a) 把主体的运动过程按时间段写满整个时长（如“视频前两秒 <Subject 1> 迈步靠近；随后双手接触并拾起”），不给模型留空白时间片；(b) 被动物体用【正向描述】锁定——“<Subject n> 是桌面上的静物，保持位置不变”，禁止用否定句（“不会滑动不滚动”——否定句遵循度低）；(c) 写明“画面中唯一的位移来自 <Subject 1> 的身体”。
 动作确定性规则：每个动作必须写全“身体部位＋方向＋先后顺序＋空间参照”，把压缩动作展开为不可歧义的连续动作链。例如不写“打开车门并上车”，而写“他走到驾驶座一侧，左手拉开左侧车门，先迈右腿坐进座位，收左腿后用左手关上车门”。杜绝左右侧、主体归属、动作顺序的一切误判空间。
 其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。正文保持中文（<Subject n>/<Picture n> 等标签和任务类型前缀等结构性标记除外）。只输出提示词正文，不要解释。`,
-        messages: [
-          { role: 'user', content: `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}` },
-        ],
+        messages: [{
+          role: 'user',
+          content: await shotMultimodalContent(ctx, shotId, `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}\n\n视觉输入规则：只有实际看见下方附图时才能修正画面位置；若接口降级为纯文字或图片不可见，保留原有空间描述，缺失信息不要补写。`),
+        }],
         temperature: 0.4,
+        onVisionStatus: trackVision,
       });
-      return { kind: 'prompt', text };
+      return withVision({ kind: 'prompt', text });
     }
     case 'diagnose_take': {
       const takeId = body.takeId ? String(body.takeId) : null;
@@ -287,12 +340,13 @@ Ref2VA 专项规则：
         messages: [
           {
             role: 'user',
-            content: `DirectorPlan:\n${JSON.stringify(plan)}\n\nPrompt:\n${prompt.text}\n\nFailure tags: ${take.failureTags.join(', ')}\nNotes: ${take.notes}`,
+            content: await shotMultimodalContent(ctx, take.shotId, `DirectorPlan:\n${JSON.stringify(plan)}\n\nPrompt:\n${prompt.text}\n\nFailure tags: ${take.failureTags.join(', ')}\nNotes: ${take.notes}\n\n只有实际看见附图时才能诊断视觉位置关系；不可见时不要猜测。`),
           },
         ],
         temperature: 0.4,
+        onVisionStatus: trackVision,
       });
-      return { kind: 'diagnosis', text };
+      return withVision({ kind: 'diagnosis', text });
     }
     case 'repair_prompt': {
       const promptId = body.promptId ? String(body.promptId) : null;
@@ -300,10 +354,11 @@ Ref2VA 专项规则：
       const pv = promptMod.getPrompt(ctx, promptId);
       const text = await ai.model.complete({
         system: `你是 H3 提示词修复器。只修复指出的问题，其余内容保持不变；输出语言与原提示词一致（原文无英文必要时用中文）。只输出修复后的提示词正文。`,
-        messages: [{ role: 'user', content: `Prompt:\n${pv.text}\n\nProblems: ${String(body.problems ?? '')}` }],
+        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, pv.shotId, `Prompt:\n${pv.text}\n\nProblems: ${String(body.problems ?? '')}\n\n空间位置只能依据实际可见附图修复；图片不可见时不得猜测。`) }],
         temperature: 0.3,
+        onVisionStatus: trackVision,
       });
-      return { kind: 'prompt', text };
+      return withVision({ kind: 'prompt', text });
     }
     case 'story_to_beats': {
       const story = storyMod.getStory(ctx);

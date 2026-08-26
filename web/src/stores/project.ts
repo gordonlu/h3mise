@@ -67,6 +67,21 @@ export const useProjectStore = defineStore('project', () => {
     return meta;
   }
 
+  async function installDemo(): Promise<ProjectMeta | null> {
+    const title = '最后一卷胶片（Demo）';
+    let meta: ProjectMeta;
+    try {
+      meta = await post<ProjectMeta>('/api/projects/demo', {});
+    } catch (error) {
+      if (!(await confirmProjectSwitch(error, title))) return null;
+      meta = await post<ProjectMeta>('/api/projects/demo', { force: true });
+    }
+    await refreshProjects();
+    await refreshCurrent();
+    await refreshProviders();
+    return meta;
+  }
+
   async function openProject(id: string): Promise<boolean> {
     const requestedTitle = projects.value.find((p) => p.id === id)?.title ?? id;
     try {
@@ -92,5 +107,5 @@ export const useProjectStore = defineStore('project', () => {
     await refreshProviders();
   }
 
-  return { projects, current, providers, loaded, projectId, refreshProjects, refreshCurrent, refreshProviders, createProject, openProject, saveConfig, bootstrap };
+  return { projects, current, providers, loaded, projectId, refreshProjects, refreshCurrent, refreshProviders, createProject, installDemo, openProject, saveConfig, bootstrap };
 });

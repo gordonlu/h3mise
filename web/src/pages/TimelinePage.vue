@@ -15,11 +15,20 @@ interface ShotWithTake {
   poster: string | null;
 }
 
+interface TimelineExport {
+  id: string;
+  relPath: string;
+  durationSeconds: number;
+  createdAt: string;
+  url: string;
+}
+
 const toasts = useToastStore();
 const clips = ref<TimelineClip[]>([]);
 const shotsWithTakes = ref<ShotWithTake[]>([]);
 const exportJob = ref<{ id: string; status: string; progress?: number | null; result?: { relPath?: string; url?: string }; error?: string | null } | null>(null);
 const playUrl = ref('');
+const exports = ref<TimelineExport[]>([]);
 const activeClipId = ref<string | null>(null);
 const trimPlayer = ref<InstanceType<typeof VideoPlayer> | null>(null);
 const dragId = ref<string | null>(null);
@@ -65,6 +74,8 @@ async function load() {
     }),
   );
   shotsWithTakes.value = takes.filter((t): t is ShotWithTake => t !== null);
+  exports.value = await get<TimelineExport[]>('/api/timeline/exports');
+  playUrl.value = exports.value[0]?.url ?? '';
 }
 
 async function addClip(shotId: string, takeId: string) {
@@ -150,6 +161,7 @@ async function pollExport(jobId: string) {
     exportJob.value = { id: jobId, ...job };
     if (job.status === 'done') {
       playUrl.value = job.result?.url ?? '';
+      await load();
       toasts.push({ kind: 'ok', text: `导出完成：${job.result?.relPath}` });
       return;
     }
@@ -283,7 +295,7 @@ onUnmounted(() => off?.());
     </div>
 
     <div v-if="playUrl" class="panel export-panel">
-      <div class="panel-title">导出预览</div>
+      <div class="panel-title">导出预览 <span v-if="exports[0]" class="muted mono">{{ exports[0].relPath }}</span></div>
       <div class="panel-body">
         <VideoPlayer :src="playUrl" :label="playUrl" :max-height="480" />
       </div>

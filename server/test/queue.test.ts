@@ -148,7 +148,8 @@ test('retry creates a NEW job and keeps the old failure record', async () => {
   // wait for the worker to persist its submission (job leaves SUBMITTING),
   // then fail it explicitly so retry is allowed
   await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status !== 'SUBMITTING', 5000);
-  cur.db.run("UPDATE render_jobs SET status = 'FAILED' WHERE id = ?", [job.id]);
+  cur.db.run("UPDATE render_jobs SET status = 'FAILED', provider_task_id = NULL WHERE id = ?", [job.id]);
+  await queue.cancel(job.id);
   queue.retry(job.id);
   await waitFor(() => cur.db.get<{ c: number }>('SELECT COUNT(*) as c FROM render_jobs')!.c >= 2, 2000);
   const jobs = cur.db.all<{ id: string; status: string }>('SELECT id, status FROM render_jobs ORDER BY created_at');
@@ -158,6 +159,46 @@ test('retry creates a NEW job and keeps the old failure record', async () => {
   assert.notEqual(jobs[1]!.status, 'FAILED'); // worker picked it up (no failure)
   queue.forgetProject(p.meta.id);
   cur.close();
+});
+
+test('retry with a provider task id reconciles the original paid task without creating another job', async () => {
+  const { root, store } = await makeStore('queue-reconcile');
+  roots.push(root);
+  const p = await makeProjectDetached(store, 'reconcile');
+  const cur = await store.open(p.meta.id);
+  const { shotId, promptVersionId } = makeShotWithPrompt(cur);
+  advanceTo(cur, shotId, 'PREFLIGHT_READY');
+  const clipPath = join(root, 'reconcile.mp4');
+  await new Ffmpeg().syntheticVideo(clipPath, 0.5, 'reconcile');
+  let remoteReady = false;
+  const provider: VideoProvider = {
+    id: 'recoverable', name: 'recoverable', configured: true,
+    async capabilities() { return { supportedModes: ['t2va'] }; },
+    async uploadAsset() { return { providerRef: 'unused' }; },
+    async submit() { return { providerTaskId: 'paid-task-1' }; },
+    async status() { return remoteReady ? { status: 'SUCCEEDED', resultUrl: `mock://${clipPath}` } : { status: 'RUNNING' }; },
+    async result() { return { url: `mock://${clipPath}`, cost: { coins: 113 } }; },
+    async cancel() {},
+  };
+  const registry = { get: () => provider } as unknown as ProviderRegistry;
+  const queue = new RenderQueue(() => store, registry, new Ffmpeg(), bus(), 20);
+  const job = queue.submit({ projectId: cur.meta.id, shotId, promptVersionId, provider: provider.id, request: REQUEST(promptVersionId), intentHash: 'reconcile-intent' });
+
+  await waitFor(() => Boolean(queue.get(job.id)?.providerTaskId), 5_000);
+  const remoteId = queue.get(job.id)!.providerTaskId!;
+  await queue.cancel(job.id);
+  assert.equal(queue.get(job.id)?.status, 'CANCELLED');
+  const before = cur.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM render_jobs')!.n;
+
+  remoteReady = true;
+  await queue.retry(job.id);
+  await waitFor(() => queue.get(job.id)?.status === 'LOCAL_READY', 5_000);
+  const recovered = queue.get(job.id)!;
+  assert.equal(recovered.id, job.id);
+  assert.equal(recovered.providerTaskId, remoteId);
+  assert.equal(cur.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM render_jobs')!.n, before);
+  assert.equal(cur.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM takes WHERE shot_id = ?', [shotId])!.n, 1);
+  queue.forgetProject(cur.meta.id);
 });
 
 test('end-to-end mock render: upload -> success -> take created once', async () => {
@@ -372,7 +413,8 @@ test('double retry cannot create two jobs; retry puts the shot back to RENDERING
 
   const job = queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request: REQUEST(promptVersionId), intentHash: 'same' });
   await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status !== 'SUBMITTING', 5000);
-  cur.db.run("UPDATE render_jobs SET status = 'FAILED' WHERE id = ?", [job.id]);
+  cur.db.run("UPDATE render_jobs SET status = 'FAILED', provider_task_id = NULL WHERE id = ?", [job.id]);
+  await queue.cancel(job.id);
 
   const results = await Promise.allSettled([queue.retry(job.id), queue.retry(job.id)]);
   assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);

@@ -42,7 +42,8 @@ export type NextAction =
   | { kind: 'select_take'; shotId: string; title: string; description: string; to: string }
   | { kind: 'continue_next_shot'; shotId: string; title: string; description: string; to: string }
   | { kind: 'open_timeline'; title: string; description: string; to: string }
-  | { kind: 'export'; title: string; description: string; to: string };
+  | { kind: 'export'; title: string; description: string; to: string }
+  | { kind: 'complete'; title: string; description: string; to: string };
 
 function activeStep(snapshot: GuideShotSnapshot): ShotGuideState['steps'][number]['key'] {
   if (snapshot.selectedTakeId || snapshot.takeCount > 0) return 'select';
@@ -128,10 +129,11 @@ export interface ProjectGuideSummary {
   missingReferencesCount: number;
   notStartedCount: number;
   timelineClipCount: number;
+  exportCount: number;
   attention: NextAction;
 }
 
-export function deriveProjectAttention(shots: GuideShotSnapshot[], timelineClipCount = 0): ProjectGuideSummary {
+export function deriveProjectAttention(shots: GuideShotSnapshot[], timelineClipCount = 0, exportCount = 0): ProjectGuideSummary {
   const ordered = [...shots].sort((a, b) => a.order - b.order);
   const unfinished = ordered.filter((shot) => !shot.selectedTakeId);
   const target =
@@ -143,7 +145,9 @@ export function deriveProjectAttention(shots: GuideShotSnapshot[], timelineClipC
     ? deriveNextAction(target, unfinished.find((shot) => shot.order > target.order)?.id ?? null)
     : timelineClipCount < ordered.length
       ? ({ kind: 'open_timeline', title: '进入成片编排', description: '所有 Shot 都已选片，可以加入 Timeline。', to: '/timeline' } as const)
-      : ({ kind: 'export', title: '导出成片', description: 'Timeline 已准备，可以检查并导出最终视频。', to: '/timeline' } as const);
+      : exportCount === 0
+        ? ({ kind: 'export', title: '导出成片', description: 'Timeline 已准备，可以检查并导出最终视频。', to: '/timeline' } as const)
+        : ({ kind: 'complete', title: '成片已导出', description: '项目已有可播放的导出成片，也可以继续调整并重新导出。', to: '/timeline' } as const);
 
   return {
     shotCount: ordered.length,
@@ -153,6 +157,7 @@ export function deriveProjectAttention(shots: GuideShotSnapshot[], timelineClipC
     missingReferencesCount: unfinished.filter((shot) => shot.missingReferences.length > 0).length,
     notStartedCount: unfinished.filter((shot) => !shot.hasDirectorPlan && !shot.hasPrompt && shot.takeCount === 0).length,
     timelineClipCount,
+    exportCount,
     attention,
   };
 }

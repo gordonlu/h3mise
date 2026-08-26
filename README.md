@@ -60,6 +60,8 @@ pnpm start        # 打开 http://127.0.0.1:4789
 
 环境变量一览（均为可选）：`PORT`（默认 4789）、`H3MISE_HOME`（数据目录，默认 `~/.h3mise`）、`H3MISE_PROVIDER=mock|runninghub`、`RUNNINGHUB_API_KEY`、`AI_BASE_URL / AI_API_KEY / AI_MODEL`、`H3MISE_SERVE_WEB=0`（禁用 :4789 托管已构建 UI，纯 API 模式）。
 
+首次打开“项目”页面，可点击“打开 Demo 项目”安装《最后一卷胶片》示例。Demo 包含完整故事、镜头设计、参考图、Prompt 和已生成 Take；安装后会复制到本地项目目录，可以自由修改，不会改动仓库内的原始示例。
+
 > 未配置 API Key 时渲染走内置 Mock Provider（离线合成），可完整体验全流程。
 
 ## 页面

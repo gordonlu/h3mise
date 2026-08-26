@@ -357,8 +357,10 @@ export class RenderQueue {
   }
 
   /**
-   * Retry a FAILED/CANCELLED job as a NEW job (traceability). Throws when the
-   * retry is not allowed so callers can surface a real error to the user.
+   * Retry a FAILED/CANCELLED job. If RunningHub already returned a task id,
+   * reconcile that paid remote task in place; otherwise create a NEW job for
+   * traceability. Throws when retry is not allowed so callers can surface a
+   * real error to the user.
    * P1 hardening over the old fire-and-forget version:
    *  - same-intent idempotency: a double-clicked retry cannot create two
    *    paid jobs;
@@ -381,6 +383,29 @@ export class RenderQueue {
         [job.shotId, job.renderIntentHash, ...ACTIVE_STATUSES],
       );
       if (active) throw new Error(`a render job for this exact intent is already active (${active.id}) 鈥?wait for it to finish`);
+    }
+    // A provider task id means RunningHub already accepted (and may already
+    // have charged for) this render. A local polling/network failure must be
+    // reconciled against that SAME remote task instead of submitting another
+    // paid job. This also recovers locally-cancelled tasks because RunningHub
+    // AI App tasks cannot be cancelled remotely.
+    if (job.providerTaskId) {
+      const now = new Date().toISOString();
+      p.db.run(
+        "UPDATE render_jobs SET status = 'QUEUED', error = NULL, finished_at = NULL, updated_at = ? WHERE id = ?",
+        [now, job.id],
+      );
+      this.handles.set(runKey(projectId, job.id), { providerTaskId: job.providerTaskId });
+      this.pending.add(runKey(projectId, job.id));
+      this.bus.emit({ type: 'render.job.queued', jobId: job.id, shotId: job.shotId });
+      try {
+        const shot = getShot(p, job.shotId);
+        if (shot.status !== 'RENDERING') advanceTo(p, job.shotId, 'RENDERING');
+      } catch (e) {
+        console.warn('[render-queue] could not advance shot while reconciling remote task:', e instanceof Error ? e.message : e);
+      }
+      this.pump();
+      return;
     }
     const prompt = getPrompt(p, job.promptVersionId);
     const newId = nextId(p.db, 'job');

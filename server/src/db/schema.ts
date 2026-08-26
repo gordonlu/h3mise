@@ -325,6 +325,21 @@ ALTER TABLE reference_bindings ADD COLUMN source_entity_id TEXT REFERENCES entit
 CREATE INDEX idx_refs_source_entity ON reference_bindings(source_entity_id);
 `,
   },
+  {
+    version: 10,
+    name: 'timeline-exports',
+    sql: `
+-- Export jobs are process-local, but completed films must survive refreshes
+-- and restarts as project artifacts.
+CREATE TABLE timeline_exports (
+  id TEXT PRIMARY KEY,
+  rel_path TEXT NOT NULL UNIQUE,
+  duration_seconds REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_timeline_exports_created ON timeline_exports(created_at);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

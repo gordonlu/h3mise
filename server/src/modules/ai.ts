@@ -9,11 +9,27 @@ import { fileURLToPath } from 'node:url';
 
 const SERVER_DIR = resolve(fileURLToPath(import.meta.url), '..', '..');
 
+export type DirectorContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } };
+
+export interface DirectorMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string | DirectorContentPart[];
+}
+
 export interface DirectorInput {
   system?: string;
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+  messages: DirectorMessage[];
   json?: boolean;
   temperature?: number;
+  /** Request-level transport feedback; intentionally not serialized to the provider. */
+  onVisionStatus?: (status: VisionStatus) => void;
+}
+
+export interface VisionStatus {
+  mode: 'multimodal' | 'text_fallback' | 'text_only';
+  imageCount: number;
 }
 
 export interface DirectorModel {
@@ -55,21 +71,69 @@ export class OpenAICompatModel implements DirectorModel {
   }
 
   private async chat(input: DirectorInput): Promise<string> {
+    const imageCount = this.imageCount(input);
     try {
-      return await this.chatOnce(input);
+      const content = await this.chatOnce(input);
+      input.onVisionStatus?.({ mode: imageCount > 0 ? 'multimodal' : 'text_only', imageCount });
+      return content;
     } catch (first) {
+      // OpenAI-compatible endpoints differ widely in multimodal support. If
+      // an endpoint/model rejects image blocks (or the vision request times
+      // out), retry transparently with the exact same text and no images.
+      // This keeps existing text-only providers fully usable.
+      if (this.hasImages(input)) {
+        console.warn(`[ai] multimodal request failed; falling back to text: ${first instanceof Error ? first.message : first}`);
+        const textInput = this.withoutImages(input);
+        try {
+          const content = await this.chatOnce(textInput);
+          input.onVisionStatus?.({ mode: 'text_fallback', imageCount });
+          return content;
+        } catch (fallbackError) {
+          if (!this.retryable(fallbackError)) throw fallbackError;
+          try {
+            const content = await this.chatOnce(textInput);
+            input.onVisionStatus?.({ mode: 'text_fallback', imageCount });
+            return content;
+          } catch (second) {
+            throw new Error(`${second instanceof Error ? second.message : second} (multimodal failed; text fallback retried once)`);
+          }
+        }
+      }
       // Transient failures (timeout / 5xx / network) get one retry — normal
       // requests finish in seconds, so this only masks hiccups.
-      const retryable =
-        first instanceof Error &&
-        (/aborted due to timeout|AI HTTP 5\d\d|fetch failed/i.test(first.message));
-      if (!retryable) throw first;
+      if (!this.retryable(first)) throw first;
       try {
         return await this.chatOnce(input);
       } catch (second) {
         throw new Error(`${second instanceof Error ? second.message : second} (retried once)`);
       }
     }
+  }
+
+  private retryable(error: unknown): boolean {
+    return error instanceof Error && /aborted due to timeout|AI HTTP 5\d\d|fetch failed/i.test(error.message);
+  }
+
+  private hasImages(input: DirectorInput): boolean {
+    return this.imageCount(input) > 0;
+  }
+
+  private imageCount(input: DirectorInput): number {
+    return input.messages.reduce((count, message) => count + (Array.isArray(message.content)
+      ? message.content.filter((part) => part.type === 'image_url').length
+      : 0), 0);
+  }
+
+  private withoutImages(input: DirectorInput): DirectorInput {
+    return {
+      ...input,
+      messages: input.messages.map((message) => ({
+        ...message,
+        content: Array.isArray(message.content)
+          ? message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n')
+          : message.content,
+      })),
+    };
   }
 
   async complete(input: DirectorInput): Promise<string> {
@@ -181,7 +245,7 @@ export class AIService {
     return out;
   }
 
-  async complete(messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>): Promise<string> {
+  async complete(messages: DirectorMessage[]): Promise<string> {
     if (!this.model) throw new Error('AI not configured');
     return this.model.complete({ messages });
   }

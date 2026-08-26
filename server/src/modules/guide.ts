@@ -37,7 +37,8 @@ export function shotGuideSnapshot(p: ProjectContext, shot: Shot): GuideShotSnaps
 export function projectGuideSummary(p: ProjectContext) {
   const snapshots = listShots(p).map((shot) => shotGuideSnapshot(p, shot));
   const timelineClipCount = p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM timeline_clips')?.n ?? 0;
-  return deriveProjectAttention(snapshots, timelineClipCount);
+  const exportCount = p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM timeline_exports')?.n ?? 0;
+  return deriveProjectAttention(snapshots, timelineClipCount, exportCount);
 }
 
 export function shotGuidePayload(p: ProjectContext, shot: Shot) {

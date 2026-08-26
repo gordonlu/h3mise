@@ -10,6 +10,7 @@ const project = useProjectStore();
 const router = useRouter();
 const toasts = useToastStore();
 const creating = ref(false);
+const installingDemo = ref(false);
 const form = ref({ title: '', format: 'single_shot', defaultAspectRatio: '16:9', defaultDurationSeconds: 5 });
 const error = ref('');
 
@@ -35,6 +36,20 @@ async function createProject() {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
     creating.value = false;
+  }
+}
+
+async function installDemo() {
+  installingDemo.value = true;
+  try {
+    const installed = await project.installDemo();
+    if (!installed) return;
+    toasts.push({ kind: 'ok', text: 'Demo 项目已安装为本地副本，可以自由修改' });
+    router.push(installed.format === 'story' ? '/story' : '/shots');
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    installingDemo.value = false;
   }
 }
 
@@ -102,6 +117,13 @@ onMounted(() => project.refreshProjects());
           </div>
           <p v-if="error" class="badge bad">{{ error }}</p>
           <button class="primary" :disabled="creating" @click="createProject">创建项目</button>
+          <div class="demo-entry">
+            <div>
+              <strong>第一次使用？</strong>
+              <div class="muted">安装《最后一卷胶片》完整示例，查看故事、镜头设计、参考图、Prompt 与成片。</div>
+            </div>
+            <button :disabled="installingDemo" @click="installDemo">{{ installingDemo ? '安装中…' : '打开 Demo 项目' }}</button>
+          </div>
         </div>
       </div>
 
@@ -121,7 +143,7 @@ onMounted(() => project.refreshProjects());
               </div>
               <div class="muted">{{ p.guide?.selectedTakeCount ?? p.selectedTakeCount ?? 0 }} / {{ p.guide?.shotCount ?? p.shotCount ?? 0 }} Shots 已选片 · {{ new Date(p.updatedAt).toLocaleString() }}</div>
               <div v-if="p.guide" class="resume-copy">
-                <span class="resume-label">当前需要</span>
+                <span class="resume-label">{{ p.guide.attention.kind === 'complete' ? '项目状态' : '当前需要' }}</span>
                 <span>{{ p.guide.attention.title }}</span>
               </div>
             </div>
@@ -149,6 +171,8 @@ h1 { font-size: 24px; margin: 0 0 4px; font-family: var(--serif); }
 }
 .format-opt.on { border-color: var(--accent); background: var(--accent-soft); }
 .format-label { font-weight: 600; font-size: 13px; }
+.demo-entry { display: grid; gap: 10px; margin-top: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-muted); }
+.demo-entry strong { display: block; margin-bottom: 3px; font-size: 13px; }
 .proj-row {
   display: flex;
   align-items: center;

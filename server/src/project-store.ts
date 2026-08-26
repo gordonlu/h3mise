@@ -1,8 +1,9 @@
 // Project store: global registry + current project lifecycle + storage layout.
 
-import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import type { ProjectConfig, ProjectFormat, ProjectMeta } from '@h3mise/shared';
 import { Db, jget } from './db/sqlite.js';
 import { migrate } from './db/migrate.js';
@@ -169,6 +170,44 @@ export class ProjectStore {
     return meta;
   }
 
+  /** Install the bundled read-only snapshot as a normal, independently
+   * editable local project. A fresh id/path keeps repeated installs isolated. */
+  async installDemo(sourceDir = join(resolve(fileURLToPath(import.meta.url), '..', '..', '..'), 'demo', 'last-film-reel.h3studio')): Promise<ProjectMeta> {
+    const config = await this.readConfig(sourceDir);
+    const id = 'proj-' + randomBytes(4).toString('hex');
+    const dir = join(this.projectsDir, `demo-${slugify(config.title)}-${id.slice(5)}${PROJECT_SUFFIX}`);
+    const now = new Date().toISOString();
+    try {
+      await cp(sourceDir, dir, { recursive: true, errorOnExist: true, force: false });
+      for (const sub of ['assets', 'cache', 'timeline', 'exports', 'shots']) {
+        await mkdir(join(dir, sub), { recursive: true });
+      }
+      const db = new Db(join(dir, 'project.db'));
+      try {
+        migrate(db, PROJECT_MIGRATIONS);
+        db.run('UPDATE render_jobs SET project_id = ?', [id]);
+      } finally {
+        db.close();
+      }
+      const meta: ProjectMeta = {
+        id,
+        title: config.title,
+        format: config.format,
+        dirPath: dir,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.registry.run(
+        'INSERT INTO projects (id, title, format, dir_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [meta.id, meta.title, meta.format, meta.dirPath, meta.createdAt, meta.updatedAt],
+      );
+      return meta;
+    } catch (error) {
+      await rm(dir, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
   async open(id: string): Promise<ProjectContext> {
     const meta = await this.get(id);
     if (!meta) throw new Error('project not found');
@@ -177,6 +216,7 @@ export class ProjectStore {
     migrate(db, PROJECT_MIGRATIONS);
     this.registry.run('UPDATE projects SET last_opened_at = ? WHERE id = ?', [new Date().toISOString(), id]);
     const ctx = new ProjectContext(db, meta, config);
+    await import('./modules/timeline.js').then((timeline) => timeline.recoverTimelineExports(ctx));
     this.current?.close();
     this.current = ctx;
     return ctx;
@@ -194,7 +234,9 @@ export class ProjectStore {
     const config = await this.readConfig(meta.dirPath);
     const db = new Db(join(meta.dirPath, 'project.db'));
     migrate(db, PROJECT_MIGRATIONS);
-    return new ProjectContext(db, meta, config);
+    const ctx = new ProjectContext(db, meta, config);
+    await import('./modules/timeline.js').then((timeline) => timeline.recoverTimelineExports(ctx));
+    return ctx;
   }
 
   async readConfig(dirPath: string): Promise<ProjectConfig> {

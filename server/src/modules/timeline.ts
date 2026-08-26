@@ -2,6 +2,7 @@
 // Clips reference shot+take; export trims and concats via ffmpeg.
 
 import { join } from 'node:path';
+import { readdir, stat } from 'node:fs/promises';
 import type { TimelineClip, TimelineDoc } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
@@ -120,9 +121,55 @@ export function invalidateShotClips(p: ProjectContext, shotId: string): number {
 }
 
 export interface TimelineExportResult {
+  id: string;
   path: string; // absolute
   relPath: string;
   durationSeconds: number;
+  createdAt: string;
+}
+
+export interface TimelineExportRecord {
+  id: string;
+  relPath: string;
+  durationSeconds: number;
+  createdAt: string;
+}
+
+interface TimelineExportRow {
+  id: string;
+  rel_path: string;
+  duration_seconds: number;
+  created_at: string;
+}
+
+function exportFromRow(row: TimelineExportRow): TimelineExportRecord {
+  return { id: row.id, relPath: row.rel_path, durationSeconds: row.duration_seconds, createdAt: row.created_at };
+}
+
+export function listTimelineExports(p: ProjectContext): TimelineExportRecord[] {
+  return p.db.all<TimelineExportRow>('SELECT * FROM timeline_exports ORDER BY created_at DESC').map(exportFromRow);
+}
+
+/** Recover exports created before persistent export records existed. */
+export async function recoverTimelineExports(p: ProjectContext): Promise<number> {
+  let names: string[];
+  try {
+    names = (await readdir(p.paths.exports)).filter((name) => name.toLowerCase().endsWith('.mp4'));
+  } catch {
+    return 0;
+  }
+  let recovered = 0;
+  for (const name of names) {
+    const relPath = join('exports', name);
+    if (p.db.get<{ id: string }>('SELECT id FROM timeline_exports WHERE rel_path = ?', [relPath])) continue;
+    const info = await stat(join(p.paths.exports, name));
+    p.db.run(
+      'INSERT OR IGNORE INTO timeline_exports (id, rel_path, duration_seconds, created_at) VALUES (?, ?, ?, ?)',
+      [nextId(p.db, 'export'), relPath, 0, info.mtime.toISOString()],
+    );
+    recovered++;
+  }
+  return recovered;
 }
 
 /** Trim + concat selected-take clips into one export. */
@@ -159,7 +206,15 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
   });
   await ffmpeg.concat(clips, outPath, { transitions });
   const overlap = transitions.reduce((sum, transition) => sum + transition.duration, 0);
-  return { path: outPath, relPath: outPath.slice(p.root.length + 1), durationSeconds: Math.max(0, total - overlap) };
+  const relPath = outPath.slice(p.root.length + 1);
+  const durationSeconds = Math.max(0, total - overlap);
+  const id = nextId(p.db, 'export');
+  const createdAt = new Date().toISOString();
+  p.db.run(
+    'INSERT INTO timeline_exports (id, rel_path, duration_seconds, created_at) VALUES (?, ?, ?, ?)',
+    [id, relPath, durationSeconds, createdAt],
+  );
+  return { id, path: outPath, relPath, durationSeconds, createdAt };
 }
 
 function validateTrim(trimIn: number, trimOut: number | null, duration: number): void {

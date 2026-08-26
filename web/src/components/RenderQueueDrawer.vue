@@ -151,7 +151,7 @@ onMounted(() => render.refresh());
             </div>
             <div v-if="job.error" class="error mono">{{ job.error.slice(0, 400) }}</div>
             <div v-if="['FAILED', 'CANCELLED'].includes(job.status)" class="job-actions">
-              <button v-if="job.status === 'FAILED'" class="sm" @click="retry(job)">重试</button>
+              <button v-if="job.providerTaskId" class="sm" title="重新查询原 RunningHub 任务，不会创建新的付费任务" @click="retry(job)">同步云端结果</button>
               <button v-else class="sm" @click="retry(job)">重新提交</button>
             </div>
             <div v-if="['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(job.status)" class="job-actions">

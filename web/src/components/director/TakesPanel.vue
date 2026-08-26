@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, toRaw } from 'vue';
 import type { Take, VisualContinuityState } from '@h3mise/shared';
 import { FAILURE_TAGS } from '@h3mise/shared';
 import { takeVideoUrl, fileUrl } from '../../api/client';
+import { confirmDialog } from '../../stores/confirm';
 import VideoPlayer from '../VideoPlayer.vue';
 
 interface EntityLite {
@@ -26,6 +27,7 @@ const props = defineProps<{
   characterStates: StateLite[];
   onSelect: (id: string) => Promise<void>;
   onReject: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
   onUpdate: (id: string, patch: Partial<Take>) => Promise<void>;
   onAiDiagnose: (takeId: string) => Promise<void>;
   onSelectCommit: (takeId: string, state: VisualContinuityState) => Promise<void>;
@@ -57,6 +59,20 @@ async function run(id: string, fn: () => Promise<void>) {
   } finally {
     busyId.value = null;
   }
+}
+
+async function removeRejectedTake(take: Take) {
+  const ok = await confirmDialog({
+    title: `删除 ${take.id}？`,
+    message: '将删除这个 Rejected Take 的本地视频、海报和未被引用的帧文件。渲染任务与费用记录会保留。',
+    confirmLabel: '删除 Take',
+    danger: true,
+  });
+  if (!ok) return;
+  await run(take.id, () => props.onDelete(take.id));
+  if (active.value === take.id) active.value = null;
+  if (slotA.value === take.id) slotA.value = null;
+  if (slotB.value === take.id) slotB.value = null;
 }
 
 // --- A/B sync ---------------------------------------------------------------
@@ -332,8 +348,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <button class="sm danger ghost" @click="run(t.id, () => onReject(t.id))">取消选择</button>
             </template>
             <template v-else>
-              <button class="sm" :disabled="busyId === t.id" @click="run(t.id, () => onUpdate(t.id, { status: 'candidate' }))">恢复为候选</button>
               <button class="sm primary" :disabled="busyId === t.id" @click="run(t.id, () => onSelect(t.id))">改选此条</button>
+              <button class="sm danger" :disabled="busyId === t.id" @click="removeRejectedTake(t)">删除</button>
             </template>
           </div>
 

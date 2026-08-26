@@ -1,7 +1,7 @@
 // Timeline module — PRD §33. Timeline accepts ONLY selected takes.
 // Clips reference shot+take; export trims and concats via ffmpeg.
 
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import type { TimelineClip, TimelineDoc } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
@@ -160,7 +160,8 @@ export async function recoverTimelineExports(p: ProjectContext): Promise<number>
   }
   let recovered = 0;
   for (const name of names) {
-    const relPath = join('exports', name);
+    // Forward slashes: stored rel paths must be OS-independent.
+    const relPath = `exports/${name}`;
     if (p.db.get<{ id: string }>('SELECT id FROM timeline_exports WHERE rel_path = ?', [relPath])) continue;
     const info = await stat(join(p.paths.exports, name));
     p.db.run(
@@ -206,7 +207,8 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
   });
   await ffmpeg.concat(clips, outPath, { transitions });
   const overlap = transitions.reduce((sum, transition) => sum + transition.duration, 0);
-  const relPath = outPath.slice(p.root.length + 1);
+  // Forward slashes: stored rel paths must be OS-independent.
+  const relPath = relative(p.root, outPath).split(sep).join('/');
   const durationSeconds = Math.max(0, total - overlap);
   const id = nextId(p.db, 'export');
   const createdAt = new Date().toISOString();

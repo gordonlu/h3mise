@@ -29,6 +29,9 @@ export class ProjectContext {
   readonly meta: ProjectMeta;
   config: ProjectConfig;
   readonly paths: ProjectPaths;
+  private leases = 0;
+  private closeRequested = false;
+  private closed = false;
 
   constructor(db: Db, meta: ProjectMeta, config: ProjectConfig) {
     this.db = db;
@@ -62,8 +65,29 @@ export class ProjectContext {
     return abs;
   }
 
+  retain(): void {
+    if (this.closed || this.closeRequested) throw new Error('project context is closing');
+    this.leases++;
+  }
+
+  release(): void {
+    if (this.leases > 0) this.leases--;
+    if (this.leases === 0 && this.closeRequested) this.closeNow();
+  }
+
   close(): void {
+    if (this.closed) return;
+    if (this.leases > 0) {
+      this.closeRequested = true;
+      return;
+    }
+    this.closeNow();
+  }
+
+  private closeNow(): void {
+    if (this.closed) return;
     this.db.close();
+    this.closed = true;
   }
 }
 
@@ -153,7 +177,7 @@ export class ProjectStore {
     migrate(db, PROJECT_MIGRATIONS);
     this.registry.run('UPDATE projects SET last_opened_at = ? WHERE id = ?', [new Date().toISOString(), id]);
     const ctx = new ProjectContext(db, meta, config);
-    this.current?.db.close();
+    this.current?.close();
     this.current = ctx;
     return ctx;
   }
@@ -202,8 +226,8 @@ export class ProjectStore {
     };
   }
 
-  async saveConfig(): Promise<void> {
-    const p = this.current;
+  async saveConfig(context?: ProjectContext): Promise<void> {
+    const p = context ?? this.current;
     if (!p) throw new Error('no project open');
     await writeFile(join(p.root, 'project.json'), JSON.stringify(p.config, null, 2), 'utf8');
     const now = new Date().toISOString();
@@ -219,7 +243,7 @@ export class ProjectStore {
     const meta = await this.get(id);
     if (!meta) return;
     if (this.current?.meta.id === id) {
-      this.current.db.close();
+      this.current.close();
       this.current = null;
     }
     this.registry.run('DELETE FROM projects WHERE id = ?', [id]);

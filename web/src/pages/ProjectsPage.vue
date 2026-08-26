@@ -27,7 +27,8 @@ async function createProject() {
   }
   creating.value = true;
   try {
-    await project.createProject({ ...form.value, format: form.value.format as never });
+    const created = await project.createProject({ ...form.value, format: form.value.format as never });
+    if (!created) return;
     toasts.push({ kind: 'ok', text: `项目「${form.value.title}」已创建` });
     router.push(form.value.format === 'story' ? '/story' : '/shots');
   } catch (e) {
@@ -38,12 +39,12 @@ async function createProject() {
 }
 
 async function openProject(id: string) {
-  await project.openProject(id);
+  if (!(await project.openProject(id))) return;
   router.push(project.current?.meta.format === 'story' ? '/story' : '/shots');
 }
 
 async function continueProject(id: string, to = '/shots') {
-  await project.openProject(id);
+  if (!(await project.openProject(id))) return;
   router.push(to);
 }
 

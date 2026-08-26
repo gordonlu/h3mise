@@ -28,6 +28,7 @@ H3Mise 是一个 **local-first、Shot-first、AI-optional** 的生成式视频�
 - **防浪费**：渲染前 Preflight 本地确定性检查，拦截明显错误再付费
 - **双模式渲染**：真实 RunningHub 渲染（需要 API Key 与积分）或离线 Mock 渲染（无网开发体验）
 - **多项目**：每个项目独立目录（`<项目>.h3studio/`），顶栏一键切换
+- **Story Bible 导入**：`POST /api/import/bible` 支持 `h3mise-bible@1`，格式见 `docs/bible-import-format.md`
 - **中文界面**，内置英文界面切换
 
 ## 快速开始

@@ -41,7 +41,7 @@ async function switchProject(id: string) {
   projectsOpen.value = false;
   if (id === project.projectId) return;
   try {
-    await project.openProject(id);
+    if (!(await project.openProject(id))) return;
     await project.refreshProjects();
     await render.refresh();
     await refreshProjectGuide();
@@ -200,7 +200,10 @@ watch(() => route.path, () => void scheduleGuideRefresh());
     <ProjectGuideBar v-if="project.current" :summary="projectGuide" />
 
     <main class="main">
-      <router-view :key="$route.path" />
+      <!-- Project data is server-scoped. Remount the active page whenever the
+           project changes so deterministic ids such as shot-001 from the old
+           project can never be submitted into the newly opened project. -->
+      <router-view :key="`${project.projectId ?? 'none'}:${$route.fullPath}`" />
     </main>
 
     <RenderQueueDrawer v-if="render.drawerOpen" @close="render.drawerOpen = false" />

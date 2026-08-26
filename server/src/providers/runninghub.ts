@@ -299,6 +299,8 @@ export class RunningHubAiAppProvider implements VideoProvider {
     if (audSecs > 15) throw new ProviderError('参考音频总时长不能超过 15 秒', 'submit');
     const tooLong = refs.find((r) => r.asset.kind === 'audio' && r.asset.durationSeconds != null && r.asset.durationSeconds > 15);
     if (tooLong) throw new ProviderError(`单个参考音频时长不能超过 15 秒（当前 ${tooLong.asset.durationSeconds}s）`, 'submit');
+    const tooShort = refs.find((r) => r.asset.kind === 'audio' && (r.asset.durationSeconds == null || r.asset.durationSeconds < 2));
+    if (tooShort) throw new ProviderError('每个参考音频必须可读取且时长不少于 2 秒', 'submit');
     if (audioCount > 0 && imageCount === 0) {
       throw new ProviderError('参考音频不能单独作为唯一参考，请至少同时提供一张参考图片', 'submit');
     }

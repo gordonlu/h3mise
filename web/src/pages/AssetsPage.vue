@@ -317,7 +317,7 @@ async function removeMedia(asset: MediaAsset) {
   const ok = await confirmDialog({
     title: `删除资产「${asset.label || asset.id}」？`,
     message: impacts.length
-      ? `同时会解除 ${impacts.join('、')}。状态覆盖图解除后会恢复继承实体主图；文件将从项目中删除。`
+      ? `当前仍被 ${impacts.join('、')} 使用，服务端会阻止删除。请先解除这些引用。`
       : '文件将从项目中删除，此操作不可恢复。',
     confirmLabel: '删除资产',
     danger: true,

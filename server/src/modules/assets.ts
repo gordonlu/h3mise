@@ -7,6 +7,13 @@ import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 
+const ENTITY_KINDS = new Set<EntityKind>(['character', 'scene', 'prop', 'vehicle', 'creature']);
+const REFERENCE_ROLES = new Set<ReferenceRole>(['identity', 'costume', 'environment', 'motion', 'body_motion', 'timing', 'camera_motion', 'lighting', 'style', 'audio', 'first_frame', 'last_frame']);
+
+function assertEntityKind(kind: unknown): asserts kind is EntityKind {
+  if (!ENTITY_KINDS.has(kind as EntityKind)) throw new Error('invalid entity kind');
+}
+
 // --- Entities --------------------------------------------------------------
 
 interface EntityRow {
@@ -56,6 +63,8 @@ function tryGetEntity(p: ProjectContext, id: string): Entity | null {
 }
 
 export function createEntity(p: ProjectContext, input: { kind: EntityKind; name: string; description?: string; notes?: string; traits?: Record<string, string>; imageAssetId?: string | null }): Entity {
+  assertEntityKind(input.kind);
+  if (typeof input.name !== 'string' || !input.name.trim()) throw new Error('entity name is required');
   assertImageAsset(p, input.imageAssetId);
   const id = nextId(p.db, 'ent');
   const now = new Date().toISOString();
@@ -67,13 +76,20 @@ export function createEntity(p: ProjectContext, input: { kind: EntityKind; name:
 }
 
 export function updateEntity(p: ProjectContext, id: string, patch: Partial<Pick<Entity, 'name' | 'description' | 'notes' | 'traits' | 'kind' | 'imageAssetId'>>): Entity {
+  if (patch.kind !== undefined) assertEntityKind(patch.kind);
+  if (patch.name !== undefined && !patch.name.trim()) throw new Error('entity name is required');
   assertImageAsset(p, patch.imageAssetId);
   const now = new Date().toISOString();
   const cols: string[] = [];
   const vals: unknown[] = [];
+  const map: Record<string, string> = {
+    name: 'name', description: 'description', notes: 'notes', traits: 'traits_json', kind: 'kind', imageAssetId: 'image_asset_id',
+  };
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(k === 'traits' ? 'traits_json = ?' : k === 'imageAssetId' ? 'image_asset_id = ?' : `${k} = ?`);
+    const col = map[k];
+    if (!col) continue;
+    cols.push(`${col} = ?`);
     vals.push(k === 'traits' ? j(v) : v);
   }
   if (cols.length === 0) return getEntity(p, id);
@@ -139,6 +155,9 @@ export function createCharacterState(
   p: ProjectContext,
   input: { characterId: string; name: string; costume?: string; hair?: string; injury?: string; heldItems?: string[]; extra?: Record<string, string>; imageAssetId?: string | null },
 ): CharacterState {
+  const character = getEntity(p, input.characterId);
+  if (character.kind !== 'character') throw new Error('character state owner must be a character entity');
+  if (typeof input.name !== 'string' || !input.name.trim()) throw new Error('character state name is required');
   assertImageAsset(p, input.imageAssetId);
   const id = nextId(p.db, 'cstate');
   const now = new Date().toISOString();
@@ -166,10 +185,20 @@ export function updateCharacterState(p: ProjectContext, id: string, patch: Parti
   const now = new Date().toISOString();
   const cols: string[] = [];
   const vals: unknown[] = [];
+  const map: Record<string, string> = {
+    name: 'name', costume: 'costume', hair: 'hair', injury: 'injury', heldItems: 'held_items_json', extra: 'extra_json', imageAssetId: 'image_asset_id',
+  };
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(k === 'heldItems' ? 'held_items_json = ?' : k === 'extra' ? 'extra_json = ?' : k === 'imageAssetId' ? 'image_asset_id = ?' : `${k} = ?`);
+    const col = map[k];
+    if (!col) continue;
+    cols.push(`${col} = ?`);
     vals.push(k === 'heldItems' || k === 'extra' ? j(v) : v);
+  }
+  if (cols.length === 0) {
+    const current = p.db.get<StateRow>('SELECT cs.*, e.image_asset_id AS entity_image_asset_id FROM character_states cs JOIN entities e ON e.id = cs.character_id WHERE cs.id = ?', [id]);
+    if (!current) throw new Error('character state not found');
+    return stateFromRow(current);
   }
   vals.push(now, id);
   p.db.run(`UPDATE character_states SET ${cols.join(', ')}, updated_at = ? WHERE id = ?`, vals);
@@ -358,6 +387,7 @@ export function createBinding(
   p: ProjectContext,
   input: { assetId: string; roles: ReferenceRole[]; preserve?: string[]; ignore?: string[]; label?: string; shotId?: string | null; sourceEntityId?: string | null },
 ): ReferenceBinding {
+  if (!Array.isArray(input.roles) || input.roles.some((role) => !REFERENCE_ROLES.has(role))) throw new Error('invalid reference role');
   const asset = getMedia(p, input.assetId);
   const id = nextId(p.db, 'ref');
   const now = new Date().toISOString();
@@ -369,6 +399,7 @@ export function createBinding(
 }
 
 export function updateBinding(p: ProjectContext, id: string, patch: Partial<Pick<ReferenceBinding, 'roles' | 'preserve' | 'ignore' | 'label' | 'shotId'>>): ReferenceBinding {
+  if (patch.roles !== undefined && (!Array.isArray(patch.roles) || patch.roles.some((role) => !REFERENCE_ROLES.has(role)))) throw new Error('invalid reference role');
   const colMap: Record<string, string> = {
     roles: 'roles_json',
     preserve: 'preserve_json',

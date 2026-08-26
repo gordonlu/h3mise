@@ -265,6 +265,22 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       if (caps.maxAudioRefs != null && nAudio > caps.maxAudioRefs) {
         sections[3]!.checks.push({ key: 'ref.count.audio', severity: 'error', message: `${nAudio} 个参考音频超过生成服务上限 ${caps.maxAudioRefs} 个` });
       }
+      for (const binding of bindings.filter((item) => item.kind === 'audio')) {
+        try {
+          const audio = getMedia(p, binding.assetId);
+          if (audio.durationSeconds == null || audio.durationSeconds < 2 || audio.durationSeconds > 15) {
+            sections[3]!.checks.push({ key: `ref.audio.duration.${binding.bindingId}`, severity: 'error', message: `参考音频 ${audio.label || audio.id} 必须可读取且时长在 2–15 秒之间` });
+          }
+        } catch {
+          // The general asset-integrity pass below reports the missing asset.
+        }
+      }
+      const totalAudioSeconds = bindings
+        .filter((item) => item.kind === 'audio')
+        .reduce((sum, item) => sum + (getMedia(p, item.assetId).durationSeconds ?? 0), 0);
+      if (totalAudioSeconds > 15) {
+        sections[3]!.checks.push({ key: 'ref.audio.duration.total', severity: 'error', message: `参考音频总时长 ${totalAudioSeconds.toFixed(1)} 秒，超过 15 秒上限` });
+      }
     }
   }
   for (const b of bindingRows) {

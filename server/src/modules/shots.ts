@@ -5,6 +5,19 @@ import type { H3Mode, Shot, ShotStatus } from '@h3mise/shared';
 import { SHOT_STATUS_ORDER } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
+import { unlink } from 'node:fs/promises';
+
+const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
+const H3_MODES = new Set(['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
+
+function validateShotPatch(input: CreateShotInput): void {
+  if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0)) {
+    throw new Error('shot durationSeconds must be a positive number');
+  }
+  if (input.shotFunction !== undefined && !SHOT_FUNCTIONS.has(input.shotFunction)) throw new Error('invalid shotFunction');
+  if (input.h3Mode !== undefined && input.h3Mode !== null && !H3_MODES.has(input.h3Mode)) throw new Error('invalid h3Mode');
+  if (input.aspectRatio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(input.aspectRatio)) throw new Error('invalid aspectRatio');
+}
 
 interface ShotRow {
   id: string;
@@ -69,6 +82,7 @@ export interface CreateShotInput {
 }
 
 export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot {
+  validateShotPatch(input);
   const id = nextId(p.db, 'shot');
   const now = new Date().toISOString();
   const ord = input.order ?? p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM shots')!.m;
@@ -175,6 +189,7 @@ export function advanceTo(p: ProjectContext, id: string, target: ShotStatus): Sh
 }
 
 export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Shot, 'id' | 'createdAt' | 'updatedAt' | 'status'>>): Shot {
+  validateShotPatch(patch);
   const now = new Date().toISOString();
   const map: Record<string, string> = {
     sequenceId: 'sequence_id',
@@ -206,6 +221,40 @@ export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Sh
 
 export function deleteShot(p: ProjectContext, id: string): void {
   p.db.run('DELETE FROM shots WHERE id = ?', [id]);
+}
+
+/** Delete a shot and clean files that are owned only by its Takes. Frame assets
+ * referenced by another shot are deliberately retained for Frame Bridge. */
+export async function deleteShotAndFiles(p: ProjectContext, id: string): Promise<void> {
+  getShot(p, id);
+  const takes = p.db.all<{ local_video_path: string; poster_path: string | null; first_frame_path: string | null; last_frame_path: string | null }>(
+    'SELECT local_video_path, poster_path, first_frame_path, last_frame_path FROM takes WHERE shot_id = ?',
+    [id],
+  );
+  const paths = new Set<string>();
+  for (const take of takes) {
+    paths.add(take.local_video_path);
+    if (take.poster_path) paths.add(take.poster_path);
+    for (const framePath of [take.first_frame_path, take.last_frame_path]) {
+      if (!framePath) continue;
+      const media = p.db.get<{ id: string }>('SELECT id FROM media_assets WHERE file_name = ?', [framePath]);
+      const externalRefs = media
+        ? (p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM reference_bindings WHERE asset_id = ? AND shot_id IS NOT ?', [media.id, id])?.n ?? 0)
+        : 0;
+      if (externalRefs === 0) {
+        paths.add(framePath);
+        if (media) p.db.run('DELETE FROM media_assets WHERE id = ?', [media.id]);
+      }
+    }
+  }
+  deleteShot(p, id);
+  await Promise.all([...paths].map(async (path) => {
+    try {
+      await unlink(p.resolveProjectPath(path));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn(`[shots] failed to remove ${path}:`, error);
+    }
+  }));
 }
 
 export function reorderShots(p: ProjectContext, ids: string[]): Shot[] {

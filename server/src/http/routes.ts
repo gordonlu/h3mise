@@ -32,6 +32,7 @@ import * as guideMod from '../modules/guide.js';
 import { serveMedia } from './media-route.js';
 import { createKeyedMutex } from '../modules/mutex.js';
 import { BibleFormatError, importBible } from '../modules/import-bible.js';
+import { parseByteRange } from './range.js';
 
 export interface AppServices {
   store: ProjectStore;
@@ -48,19 +49,42 @@ type App = Hono<{ Variables: { services: AppServices } }>;
 
 export function buildRoutes(services: AppServices): App {
   const app = new Hono<{ Variables: { services: AppServices } }>();
+  const requestProjects = new WeakMap<Context, import('../project-store.js').ProjectContext | null>();
   app.use('*', async (c, next) => {
     c.set('services', services);
-    await next();
+    const leased = c.req.path === '/api/events' ? null : services.store.current;
+    requestProjects.set(c, leased);
+    leased?.retain();
+    try {
+      await next();
+    } finally {
+      leased?.release();
+      requestProjects.delete(c);
+    }
   });
 
   const p = (c: Context) => {
-    const ctx = services.store.current;
+    const ctx = requestProjects.get(c) ?? services.store.current;
     if (!ctx) throw new HttpError(409, 'no project open');
     return ctx;
   };
 
   // Serializes preflight→submit per shot (see POST /api/render).
   const renderGate = createKeyedMutex();
+  // The desktop server has one process-wide interactive project. Serialize
+  // open/create decisions so two tabs cannot both observe an unlocked state
+  // and silently replace each other's project.
+  const projectSwitchGate = createKeyedMutex();
+
+  const projectLocked = (c: Context, requestedProjectId?: string) => {
+    const current = services.store.current;
+    return c.json({
+      error: '当前项目还在进行',
+      code: 'PROJECT_LOCKED',
+      currentProject: current ? { id: current.meta.id, title: current.config.title } : null,
+      requestedProjectId,
+    }, 409);
+  };
 
   // --- session / health ----------------------------------------------------
 
@@ -110,23 +134,37 @@ export function buildRoutes(services: AppServices): App {
 
   app.post('/api/projects', async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    const meta = await services.store.create({
-      title: String(body.title ?? 'Untitled Project'),
-      format: body.format ?? 'single_shot',
-      defaultAspectRatio: body.defaultAspectRatio,
-      visualStyle: body.visualStyle,
-      defaultDurationSeconds: body.defaultDurationSeconds,
+    if (body.format !== undefined && !['single_shot', 'sequence', 'story'].includes(String(body.format))) return c.json({ error: 'invalid project format' }, 400);
+    if (body.defaultAspectRatio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(String(body.defaultAspectRatio))) return c.json({ error: 'invalid defaultAspectRatio' }, 400);
+    const requestedDuration = body.defaultDurationSeconds === undefined ? undefined : Number(body.defaultDurationSeconds);
+    if (requestedDuration !== undefined && (!Number.isFinite(requestedDuration) || requestedDuration <= 0)) return c.json({ error: 'invalid defaultDurationSeconds' }, 400);
+    return projectSwitchGate('interactive-project', async () => {
+      if (services.store.current && body.force !== true) return projectLocked(c);
+      const meta = await services.store.create({
+        title: String(body.title ?? 'Untitled Project'),
+        format: body.format ?? 'single_shot',
+        defaultAspectRatio: body.defaultAspectRatio,
+        visualStyle: body.visualStyle,
+        defaultDurationSeconds: requestedDuration,
+      });
+      await services.store.open(meta.id);
+      services.providers.refresh();
+      return c.json(meta, 201);
     });
-    await services.store.open(meta.id);
-    services.providers.refresh();
-    return c.json(meta, 201);
   });
 
   app.post('/api/projects/:id/open', async (c) => {
-    const meta = await services.store.open(c.req.param('id'));
-    services.providers.refresh();
-    await services.queue.recover();
-    return c.json(meta);
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    return projectSwitchGate('interactive-project', async () => {
+      const current = services.store.current;
+      if (current?.meta.id === id) return c.json(current.meta);
+      if (current && body.force !== true) return projectLocked(c, id);
+      const opened = await services.store.open(id);
+      services.providers.refresh();
+      await services.queue.recover();
+      return c.json(opened.meta);
+    });
   });
 
   // --- import (h3mise-bible@1) ---------------------------------------------
@@ -140,14 +178,35 @@ export function buildRoutes(services: AppServices): App {
       return c.json(result, 201);
     } catch (e) {
       if (e instanceof BibleFormatError) return c.json({ error: e.message }, 400);
+      if (e instanceof Error && 'bibleProjectId' in e) {
+        const partial = e as Error & { bibleProjectId?: string; bibleWarnings?: string[] };
+        return c.json({ error: partial.message, partialProjectId: partial.bibleProjectId, warnings: partial.bibleWarnings ?? [] }, 500);
+      }
       throw e;
     }
   });
 
   app.post('/api/projects/:id/delete', async (c) => {
     const id = c.req.param('id');
-    await services.store.delete(id);
+    let ctx: import('../project-store.js').ProjectContext | null = null;
+    let ownsContext = false;
+    try {
+      if (services.store.current?.meta.id === id) ctx = services.store.current;
+      else {
+        ctx = await services.store.openDetached(id);
+        ownsContext = true;
+      }
+      const activeJobs = ctx.db.all<{ id: string }>(
+        "SELECT id FROM render_jobs WHERE status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
+      );
+      await Promise.all(activeJobs.map((job) => services.queue.cancel(job.id)));
+    } catch {
+      // Missing/unreadable projects are still safe to remove from the registry.
+    } finally {
+      if (ownsContext) ctx?.close();
+    }
     services.queue.forgetProject(id);
+    await services.store.delete(id);
     services.providers.refresh();
     return c.json({ ok: true });
   });
@@ -170,6 +229,12 @@ export function buildRoutes(services: AppServices): App {
       if (body[key] !== undefined) patch[key] = body[key];
     }
     if (typeof patch.title === 'string' && !patch.title.trim()) delete patch.title;
+    if (patch.format !== undefined && !['single_shot', 'sequence', 'story'].includes(String(patch.format))) {
+      return c.json({ error: 'invalid project format' }, 400);
+    }
+    if (patch.default_aspect_ratio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(String(patch.default_aspect_ratio))) {
+      return c.json({ error: 'invalid default_aspect_ratio' }, 400);
+    }
     const duration = Number(patch.default_duration_seconds);
     if (patch.default_duration_seconds !== undefined && (!Number.isFinite(duration) || duration <= 0)) delete patch.default_duration_seconds;
     // Propagate a changed project default only to shots still ON the old
@@ -317,8 +382,15 @@ export function buildRoutes(services: AppServices): App {
     assetsMod.ensureShotEntityImageBindings(ctx, shot);
     return c.json(shot);
   });
-  app.delete('/api/shots/:id', (c) => {
-    shotsMod.deleteShot(p(c), c.req.param('id'));
+  app.delete('/api/shots/:id', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const activeJobs = ctx.db.all<{ id: string }>(
+      "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
+      [shotId],
+    );
+    await Promise.all(activeJobs.map((job) => services.queue.cancel(job.id)));
+    await shotsMod.deleteShotAndFiles(ctx, shotId);
     return c.json({ ok: true });
   });
   app.post('/api/shots/:id/status', async (c) => {
@@ -570,6 +642,7 @@ export function buildRoutes(services: AppServices): App {
     const form = await c.req.formData();
     const file = form.get('file');
     if (!(file instanceof File)) return c.json({ error: 'missing file' }, 400);
+    if (file.size > 100 * 1024 * 1024) return c.json({ error: 'file too large (maximum 100 MB)' }, 413);
     const buf = Buffer.from(await file.arrayBuffer());
     const asset = await mediaMod.importUpload(ctx, services.ffmpeg, {
       fileName: file.name,
@@ -751,6 +824,10 @@ export function buildRoutes(services: AppServices): App {
   app.onError((err, c) => {
     if (err instanceof HttpError) return c.json({ error: err.message }, err.status as 400);
     const msg = err instanceof Error ? err.message : String(err);
+    if (/not found|missing$/i.test(msg)) return c.json({ error: msg }, 404);
+    if (/^(invalid|unsupported)|required|must be|accepts only|does not belong|absolute path/i.test(msg)) {
+      return c.json({ error: msg }, 400);
+    }
     return c.json({ error: msg }, 500);
   });
 
@@ -808,22 +885,15 @@ export function serveLocalFile(c: Context, abs: string): Response {
     'Accept-Ranges': 'bytes',
   };
   if (range) {
-    const m = /bytes=(\d*)-(\d*)/.exec(range);
-    if (m) {
-      let start = m[1] ? parseInt(m[1], 10) : 0;
-      let end = m[2] ? parseInt(m[2], 10) : st.size - 1;
-      if (isNaN(start)) {
-        const n = parseInt(m[2] ?? '0', 10);
-        start = Math.max(0, st.size - n);
-        end = st.size - 1;
-      }
-      end = Math.min(end, st.size - 1);
-      if (start > end || start >= st.size) {
-        return new Response(null, {
-          status: 416,
-          headers: { ...baseHeaders, 'Content-Range': `bytes */${st.size}` },
-        });
-      }
+    const parsed = parseByteRange(range, st.size);
+    if (parsed === 'unsatisfiable') {
+      return new Response(null, {
+        status: 416,
+        headers: { ...baseHeaders, 'Content-Range': `bytes */${st.size}` },
+      });
+    }
+    if (parsed) {
+      const { start, end } = parsed;
       return new Response(Readable.toWeb(createReadStream(abs, { start, end })), {
         status: 206,
         headers: {

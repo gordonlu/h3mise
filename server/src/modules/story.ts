@@ -6,6 +6,8 @@ import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 
+const BEAT_CATEGORIES = new Set(['setup', 'inciting_incident', 'rising_action', 'climax', 'falling_action', 'resolution', 'transition', 'other']);
+
 interface BeatRow {
   id: string;
   sequence_id: string | null;
@@ -61,15 +63,23 @@ export function getStory(p: ProjectContext): StoryDoc {
 }
 
 export function updateStory(p: ProjectContext, patch: Partial<Pick<StoryDoc, 'title' | 'synopsis' | 'body' | 'plannedDurationSeconds'>>): StoryDoc {
+  if (patch.plannedDurationSeconds !== undefined && (!Number.isFinite(patch.plannedDurationSeconds) || patch.plannedDurationSeconds < 0)) {
+    throw new Error('plannedDurationSeconds must be a non-negative number');
+  }
   const now = new Date().toISOString();
   const map: Record<string, string> = {
+    title: 'title',
+    synopsis: 'synopsis',
+    body: 'body',
     plannedDurationSeconds: 'planned_duration_seconds',
   };
   const cols: string[] = [];
   const vals: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(`${map[k] ?? k} = ?`);
+    const col = map[k];
+    if (!col) continue;
+    cols.push(`${col} = ?`);
     vals.push(v);
   }
   if (cols.length === 0) return getStory(p);
@@ -87,6 +97,7 @@ export function listSequences(p: ProjectContext): Sequence[] {
 }
 
 export function createSequence(p: ProjectContext, input: { title: string; summary?: string }): Sequence {
+  if (typeof input.title !== 'string' || !input.title.trim()) throw new Error('sequence title is required');
   const id = nextId(p.db, 'seq');
   const now = new Date().toISOString();
   const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM sequences')!.m;
@@ -102,13 +113,22 @@ export function createSequence(p: ProjectContext, input: { title: string; summar
 }
 
 export function updateSequence(p: ProjectContext, id: string, patch: Partial<Pick<Sequence, 'title' | 'summary' | 'order'>>): Sequence {
+  if (patch.title !== undefined && !patch.title.trim()) throw new Error('sequence title is required');
   const now = new Date().toISOString();
   const cols: string[] = [];
   const vals: unknown[] = [];
+  const map: Record<string, string> = { title: 'title', summary: 'summary', order: 'ord' };
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    cols.push(k === 'order' ? 'ord = ?' : `${k} = ?`);
+    const col = map[k];
+    if (!col) continue;
+    cols.push(`${col} = ?`);
     vals.push(v);
+  }
+  if (cols.length === 0) {
+    const current = listSequences(p).find((s) => s.id === id);
+    if (!current) throw new Error('sequence not found');
+    return current;
   }
   vals.push(now, id);
   p.db.run(`UPDATE sequences SET ${cols.join(', ')}, updated_at = ? WHERE id = ?`, vals);
@@ -135,6 +155,8 @@ export function createBeat(
   p: ProjectContext,
   input: Partial<Pick<StoryBeat, 'title' | 'category' | 'summary' | 'location' | 'timeOfDay' | 'weather' | 'characters' | 'stateChange' | 'notes' | 'durationSeconds' | 'sequenceId'>>,
 ): StoryBeat {
+  if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0)) throw new Error('beat durationSeconds must be positive');
+  if (input.category !== undefined && !BEAT_CATEGORIES.has(input.category)) throw new Error('invalid beat category');
   const id = nextId(p.db, 'beat');
   const now = new Date().toISOString();
   const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM story_beats')!.m;
@@ -163,6 +185,8 @@ export function createBeat(
 }
 
 export function updateBeat(p: ProjectContext, id: string, patch: Partial<Omit<StoryBeat, 'id' | 'createdAt' | 'updatedAt'>>): StoryBeat {
+  if (patch.durationSeconds !== undefined && (!Number.isFinite(patch.durationSeconds) || patch.durationSeconds <= 0)) throw new Error('beat durationSeconds must be positive');
+  if (patch.category !== undefined && !BEAT_CATEGORIES.has(patch.category)) throw new Error('invalid beat category');
   const now = new Date().toISOString();
   const map: Record<string, string> = {
     sequenceId: 'sequence_id',

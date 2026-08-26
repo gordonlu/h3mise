@@ -53,6 +53,7 @@ export function addClip(p: ProjectContext, input: { shotId: string; takeId: stri
     throw new Error('timeline accepts only selected takes');
   }
   if (take.shotId !== input.shotId) throw new Error('take does not belong to shot');
+  validateTrim(input.trimIn ?? 0, input.trimOut ?? null, take.duration);
   const id = nextId(p.db, 'clip');
   const now = new Date().toISOString();
   const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM timeline_clips')!.m;
@@ -66,6 +67,12 @@ export function addClip(p: ProjectContext, input: { shotId: string; takeId: stri
 }
 
 export function updateClip(p: ProjectContext, id: string, patch: Partial<Pick<TimelineClip, 'trimIn' | 'trimOut' | 'transition' | 'transitionDuration' | 'audio'>>): TimelineClip {
+  const current = getTimeline(p).clips.find((c) => c.id === id);
+  if (!current) throw new Error('timeline clip not found');
+  const take = getTake(p, current.takeId);
+  validateTrim(patch.trimIn ?? current.trimIn, patch.trimOut === undefined ? current.trimOut : patch.trimOut, take.duration);
+  if (patch.transition !== undefined && !['cut', 'fade', 'dissolve', 'none'].includes(patch.transition)) throw new Error('invalid transition');
+  if (patch.transitionDuration !== undefined && (!Number.isFinite(patch.transitionDuration) || patch.transitionDuration < 0)) throw new Error('invalid transitionDuration');
   const colMap: Record<string, string> = {
     trimIn: 'trim_in',
     trimOut: 'trim_out',
@@ -83,20 +90,24 @@ export function updateClip(p: ProjectContext, id: string, patch: Partial<Pick<Ti
     vals.push(k === 'audio' ? j(v) : v);
   }
   if (cols.length) {
-    vals.push(new Date().toISOString(), id);
+    const now = new Date().toISOString();
+    vals.push(now, id);
     p.db.run(`UPDATE timeline_clips SET ${cols.join(', ')}, updated_at = ? WHERE id = ?`, vals);
+    p.db.run('UPDATE timeline SET updated_at = ?', [now]);
   }
   return getTimeline(p).clips.find((c) => c.id === id)!;
 }
 
 export function removeClip(p: ProjectContext, id: string): void {
   p.db.run('DELETE FROM timeline_clips WHERE id = ?', [id]);
+  p.db.run('UPDATE timeline SET updated_at = ?', [new Date().toISOString()]);
 }
 
 export function reorderClips(p: ProjectContext, ids: string[]): TimelineClip[] {
   p.db.tx(() => {
     ids.forEach((id, i) => p.db.run('UPDATE timeline_clips SET ord = ? WHERE id = ?', [i, id]));
   });
+  p.db.run('UPDATE timeline SET updated_at = ?', [new Date().toISOString()]);
   return getTimeline(p).clips;
 }
 
@@ -104,6 +115,7 @@ export function reorderClips(p: ProjectContext, ids: string[]): TimelineClip[] {
  * longer selected, so the timeline must never export them). */
 export function invalidateShotClips(p: ProjectContext, shotId: string): number {
   const r = p.db.run('DELETE FROM timeline_clips WHERE shot_id = ?', [shotId]);
+  if (Number(r.changes ?? 0) > 0) p.db.run('UPDATE timeline SET updated_at = ?', [new Date().toISOString()]);
   return Number(r.changes ?? 0);
 }
 
@@ -137,8 +149,22 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
     total += trimOut - clip.trimIn;
     onProgress?.(clips.length, tl.clips.length);
   }
-  await ffmpeg.concat(clips, outPath, { crossfade: Math.max(0, ...tl.clips.map((c) => (c.transition === 'dissolve' ? c.transitionDuration : 0))) });
-  return { path: outPath, relPath: outPath.slice(p.root.length + 1), durationSeconds: total };
+  const transitions = tl.clips.slice(1).map((clip, index) => {
+    const previousDuration = (tl.clips[index]!.trimOut ?? getTake(p, tl.clips[index]!.takeId).duration) - tl.clips[index]!.trimIn;
+    const nextDuration = (clip.trimOut ?? getTake(p, clip.takeId).duration) - clip.trimIn;
+    const duration = clip.transition === 'cut' || clip.transition === 'none'
+      ? 0
+      : Math.min(Math.max(0, clip.transitionDuration), previousDuration / 2, nextDuration / 2);
+    return { type: clip.transition, duration };
+  });
+  await ffmpeg.concat(clips, outPath, { transitions });
+  const overlap = transitions.reduce((sum, transition) => sum + transition.duration, 0);
+  return { path: outPath, relPath: outPath.slice(p.root.length + 1), durationSeconds: Math.max(0, total - overlap) };
+}
+
+function validateTrim(trimIn: number, trimOut: number | null, duration: number): void {
+  if (!Number.isFinite(trimIn) || trimIn < 0 || trimIn >= duration) throw new Error('invalid trimIn');
+  if (trimOut !== null && (!Number.isFinite(trimOut) || trimOut > duration || trimOut - trimIn < 0.1)) throw new Error('invalid trimOut');
 }
 
 function sanitize(s: string): string {

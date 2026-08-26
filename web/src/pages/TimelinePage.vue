@@ -82,6 +82,13 @@ async function updateClip(id: string, patchData: Partial<TimelineClip>) {
   await load();
 }
 
+function changeTransition(c: TimelineClip, transition: TimelineClip['transition']) {
+  const transitionDuration = transition === 'cut' || transition === 'none'
+    ? 0
+    : (c.transitionDuration > 0 ? c.transitionDuration : 0.5);
+  void updateClip(c.id, { transition, transitionDuration });
+}
+
 async function removeClip(id: string) {
   await del(`/api/timeline/clips/${id}`);
   if (activeClipId.value === id) activeClipId.value = null;
@@ -235,12 +242,23 @@ onUnmounted(() => off?.());
           </div>
           <div class="row">
             <label class="muted">转场</label>
-            <select :value="activeClip.transition" @change="updateClip(activeClip.id, { transition: ($event.target as HTMLSelectElement).value as never })">
+            <select :value="activeClip.transition" @change="changeTransition(activeClip, ($event.target as HTMLSelectElement).value as TimelineClip['transition'])">
               <option value="cut">cut（硬切）</option>
               <option value="fade">fade（淡入淡出）</option>
               <option value="dissolve">dissolve（叠化）</option>
             </select>
           </div>
+          <label v-if="activeClip.transition === 'fade' || activeClip.transition === 'dissolve'" class="row muted">
+            转场时长
+            <input
+              type="number"
+              class="trim-input"
+              min="0.1"
+              step="0.1"
+              :value="activeClip.transitionDuration"
+              @change="updateClip(activeClip.id, { transitionDuration: Number(($event.target as HTMLInputElement).value) })"
+            /> 秒
+          </label>
           <div class="muted">片段时长 {{ clipDuration(activeClip).toFixed(1) }}s · 原始 {{ (takeDuration.get(activeClip.takeId) ?? 0).toFixed(1) }}s</div>
           <button class="sm danger" @click="removeClip(activeClip.id)">从时间线移除</button>
         </div>

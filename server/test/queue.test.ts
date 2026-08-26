@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { makeStore, makeProject, makeProjectDetached, makeShotWithPrompt, fakeTake, cleanupTempRoot, bus } from './helpers.js';
 import { advanceTo, getShot } from '../src/modules/shots.js';
+import { deleteShotAndFiles } from '../src/modules/shots.js';
 import { RenderQueue } from '../src/modules/render.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { Ffmpeg } from '../src/ffmpeg.js';
@@ -222,6 +223,7 @@ test('recover() scans ALL projects and does not touch store.current', async () =
      VALUES ('job-a', ?, ?, ?, NULL, 'mock', 'SUBMITTING', '{}', NULL, datetime('now'), datetime('now'))`,
     [pA.meta.id, shotId, promptVersionId],
   );
+  advanceTo(curA, shotId, 'RENDERING');
   // simulate a job mid-flight in pB as well (real FK targets)
   pB.db.run(
     `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, director_plan_version_id, provider, status, request_snapshot_json, render_intent_hash, created_at, updated_at)
@@ -243,6 +245,9 @@ test('recover() scans ALL projects and does not touch store.current', async () =
   assert.equal(afterRow.status, 'FAILED');
   assert.match(afterRow.error ?? '', /retry/);
   assert.ok(before !== afterRow.status); // state actually changed
+  const recoveredShot = await store.openDetached(pA.meta.id);
+  assert.equal(getShot(recoveredShot, shotId).status, 'PREFLIGHT_READY');
+  recoveredShot.close();
   // job-b (with a taskId) is re-enqueued and picked up by the worker 鈥?its
   // mock task file does not exist, so it fails with a provider error
   await waitFor(() => pB.db.get<{ status: string }>("SELECT status FROM render_jobs WHERE id = 'job-b'")?.status !== 'QUEUED', 3000);
@@ -405,4 +410,34 @@ test('mock render survives switching projects + provider refresh (global task di
   }, 30_000);
   assert.equal(pA.db.get<{ c: number }>('SELECT COUNT(*) AS c FROM takes')!.c, 1);
   queue.forgetProject(pA.meta.id);
+});
+
+test('deleting a shot with an active job releases the single worker for the next shot', async () => {
+  const { root, store } = await makeStore('queue-delete-active');
+  roots.push(root);
+  const p = await makeProjectDetached(store, 'delete-active');
+  const first = makeShotWithPrompt(p, 't2va');
+  const second = makeShotWithPrompt(p, 't2va');
+  advanceTo(p, first.shotId, 'PREFLIGHT_READY');
+  advanceTo(p, second.shotId, 'PREFLIGHT_READY');
+  const registry = makeRegistry(store.registry, join(root, 'global-mock'));
+  const queue = makeQueue(store, registry, 100);
+  const cur = await store.open(p.meta.id);
+  p.close();
+
+  const firstJob = queue.submit({
+    projectId: cur.meta.id, shotId: first.shotId, promptVersionId: first.promptVersionId, provider: 'mock',
+    request: REQUEST(first.promptVersionId, 1), intentHash: 'delete-first',
+  });
+  await waitFor(() => ['QUEUED', 'RUNNING'].includes(cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [firstJob.id])?.status ?? ''), 5000);
+  await deleteShotAndFiles(cur, first.shotId);
+
+  const secondJob = queue.submit({
+    projectId: cur.meta.id, shotId: second.shotId, promptVersionId: second.promptVersionId, provider: 'mock',
+    request: REQUEST(second.promptVersionId, 1), intentHash: 'delete-second',
+  });
+  await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [secondJob.id])?.status === 'LOCAL_READY', 15_000);
+  assert.equal(getShot(cur, second.shotId).status, 'HAS_TAKES');
+  queue.forgetProject(cur.meta.id);
+  cur.close();
 });

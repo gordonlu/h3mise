@@ -2,7 +2,7 @@
 // "story bible" JSON (story structure / character cards / worldview /
 // visual direction / reference material fields).
 //
-// Format spec: .doc/bible-import-format.md. Contract highlights:
+// Format spec: docs/bible-import-format.md. Contract highlights:
 //  - always creates a NEW project (re-import ⇒ new project, no upsert);
 //  - never hard-fails on per-item problems — collect warnings instead;
 //  - media is COPIED into the project assets dir (local-first), v1 accepts
@@ -104,6 +104,7 @@ async function createBibleEntities(
   defaultKind: EntityKind,
   warnings: string[],
   stats: BibleImportResult['stats'],
+  existingKeys: Set<string> = new Set(),
 ): Promise<CreatedEntities> {
   const out: CreatedEntities = { byKey: new Map(), byName: new Map(), count: 0 };
   for (const [index, entry] of entries.entries()) {
@@ -120,7 +121,7 @@ async function createBibleEntities(
       continue;
     }
     const key = `${kind}/${name}`;
-    if (out.byKey.has(key)) {
+    if (out.byKey.has(key) || existingKeys.has(key)) {
       warnings.push(`${where}: 实体重复（${kind}/${name}），后者已跳过`);
       continue;
     }
@@ -132,6 +133,7 @@ async function createBibleEntities(
       traits: stringRecord(entry.traits),
     });
     out.byKey.set(key, entity.id);
+    existingKeys.add(key);
     if (!out.byName.has(name)) out.byName.set(name, entity.id);
     out.count++;
     stats.entities++;
@@ -217,6 +219,7 @@ export async function importBible(store: ProjectStore, ffmpeg: Ffmpeg, raw: unkn
   // it carries the full narrative plus beats.
   const meta = await store.create({ title, format: 'story' });
   const p = await store.open(meta.id);
+  p.retain();
 
   try {
     // 2) Visual direction → project defaults BEFORE anything that reads them.
@@ -224,15 +227,20 @@ export async function importBible(store: ProjectStore, ffmpeg: Ffmpeg, raw: unkn
     const aspectRatio = str(visual?.aspectRatio);
     const durationRaw = Number(visual?.defaultDurationSeconds);
     if (visual?.style !== undefined) p.config.visual_style = typeof visual.style === 'string' ? visual.style.trim() : '';
-    if (aspectRatio) p.config.default_aspect_ratio = aspectRatio;
-    if (Number.isFinite(durationRaw) && durationRaw > 0) p.config.default_duration_seconds = Math.round(durationRaw);
+    if (aspectRatio) {
+      if (/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(aspectRatio)) p.config.default_aspect_ratio = aspectRatio;
+      else warnings.push(`visualDirection.aspectRatio 无效（${aspectRatio}），已保留默认值`);
+    }
+    if (Number.isFinite(durationRaw) && durationRaw >= 1 && durationRaw <= 60) p.config.default_duration_seconds = Math.round(durationRaw);
+    else if (visual?.defaultDurationSeconds !== undefined) warnings.push('visualDirection.defaultDurationSeconds 必须在 1–60 秒之间，已保留默认值');
 
     // 3) Entities (characters/scenes/props…) + optional worldview locations.
-    const created = await createBibleEntities(p, ffmpeg, arrOfObj(raw.entities), 'prop', warnings, stats);
+    const entityKeys = new Set<string>();
+    const created = await createBibleEntities(p, ffmpeg, arrOfObj(raw.entities), 'prop', warnings, stats, entityKeys);
 
     const sceneEntries = arrOfObj(objOf(raw, 'worldview')?.locations).map((loc) => ({ ...loc, kind: 'scene' }));
     if (sceneEntries.length) {
-      const createdScenes = await createBibleEntities(p, ffmpeg, sceneEntries, 'scene', warnings, stats);
+      const createdScenes = await createBibleEntities(p, ffmpeg, sceneEntries, 'scene', warnings, stats, entityKeys);
       for (const [k, v] of createdScenes.byKey) created.byKey.set(k, v);
       for (const [k, v] of createdScenes.byName) if (!created.byName.has(k)) created.byName.set(k, v);
     }
@@ -303,11 +311,13 @@ export async function importBible(store: ProjectStore, ffmpeg: Ffmpeg, raw: unkn
     }
 
     // 6) Persist visual-direction defaults.
-    await store.saveConfig();
+    await store.saveConfig(p);
   } catch (e) {
     // Never leave a half-open project dangling on unexpected failures.
     warnings.push(`导入过程异常中断: ${e instanceof Error ? e.message : e}`);
     throw Object.assign(e instanceof Error ? e : new Error(String(e)), { bibleProjectId: meta.id, bibleWarnings: warnings });
+  } finally {
+    p.release();
   }
 
   return { projectId: meta.id, title, stats, warnings };

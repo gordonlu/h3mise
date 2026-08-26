@@ -59,7 +59,7 @@ export function cleanupTempRoot(dir?: string): void {
     // store.current is replaced on every open(); its newest handle is the one
     // tests most often leave behind.
     try {
-      store.current?.db.close();
+      store.current?.close();
     } catch {
       /* already closed */
     }

@@ -4,7 +4,7 @@
 
 import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import type { FailureTag, Take } from '@h3mise/shared';
+import { FAILURE_TAGS, type FailureTag, type Take } from '@h3mise/shared';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import type { ProjectContext } from '../project-store.js';
@@ -134,6 +134,12 @@ export function updateTake(
   id: string,
   patch: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes'>>,
 ): Take {
+  if (patch.rating !== undefined && patch.rating !== null && (!Number.isInteger(patch.rating) || patch.rating < 1 || patch.rating > 5)) {
+    throw new Error('take rating must be an integer from 1 to 5');
+  }
+  if (patch.failureTags !== undefined && patch.failureTags.some((tag) => !FAILURE_TAGS.includes(tag))) {
+    throw new Error('invalid failure tag');
+  }
   const cols: string[] = [];
   const vals: unknown[] = [];
   if (patch.rating !== undefined) {

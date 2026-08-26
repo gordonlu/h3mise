@@ -130,3 +130,23 @@ test('minimal bible and format validation', async () => {
   assert.deepEqual(ok.stats.entities, 0);
   assert.deepEqual(ok.warnings, []);
 });
+
+test('deduplicates scenes across entities and worldview locations and validates visual defaults', async () => {
+  const { store } = await makeStore('bible-dedup');
+  const ffmpeg = new (await import('../src/ffmpeg.js')).Ffmpeg();
+  const result = await importBible(store, ffmpeg, {
+    format: BIBLE_FORMAT,
+    story: { title: 'Dedup' },
+    visualDirection: { aspectRatio: 'wide', defaultDurationSeconds: 99 },
+    entities: [{ kind: 'scene', name: '同一场景' }],
+    worldview: { locations: [{ name: '同一场景' }] },
+  });
+  const ctx = store.current!;
+  assert.equal(listEntities(ctx).filter((entity) => entity.kind === 'scene' && entity.name === '同一场景').length, 1);
+  assert.equal(result.stats.entities, 1);
+  assert.equal(ctx.config.default_aspect_ratio, '16:9');
+  assert.equal(ctx.config.default_duration_seconds, 5);
+  assert.ok(result.warnings.some((warning) => warning.includes('重复')));
+  assert.ok(result.warnings.some((warning) => warning.includes('aspectRatio')));
+  assert.ok(result.warnings.some((warning) => warning.includes('1–60')));
+});

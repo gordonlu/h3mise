@@ -9,6 +9,9 @@
 // Job ids are per-project counters, so runtime keys are `projectId/jobId`.
 
 import { join } from 'node:path';
+import { createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { RenderJob, RenderJobStatus, RenderRequest } from '@h3mise/shared';
 import type { ProjectContext, ProjectStore } from '../project-store.js';
 import { j, jget, jgetOrNull } from '../db/sqlite.js';
@@ -78,6 +81,10 @@ export class RenderQueue {
   private pending = new Set<string>();
   private handles = new Map<string, RenderJobHandle>();
   private running = false;
+  private activeKey: string | null = null;
+  private readonly deferredClose = new Set<string>();
+  private readonly stoppedProjects = new Set<string>();
+  private readonly waiters = new Map<string, Set<() => void>>();
   private readonly pollMs: number;
   /** Detached contexts for projects with active jobs (never `store.current`). */
   private readonly detached = new Map<string, ProjectContext>();
@@ -99,6 +106,7 @@ export class RenderQueue {
    * matches, otherwise a cached detached one. Never switches `store.current`.
    */
   private ctxFor(projectId: string): ProjectContext | null {
+    if (this.stoppedProjects.has(projectId)) return null;
     const cur = this.getStore().current;
     if (cur && cur.meta.id === projectId) return cur;
     let ctx = this.detached.get(projectId);
@@ -107,6 +115,7 @@ export class RenderQueue {
   }
 
   private async ensureDetached(projectId: string): Promise<ProjectContext | null> {
+    if (this.stoppedProjects.has(projectId)) return null;
     const cur = this.getStore().current;
     if (cur && cur.meta.id === projectId) return cur;
     let ctx = this.detached.get(projectId);
@@ -128,6 +137,7 @@ export class RenderQueue {
    * dedicated connections are safe for long-lived work.
    */
   private async pipelineCtx(projectId: string): Promise<ProjectContext | null> {
+    if (this.stoppedProjects.has(projectId)) return null;
     const cached = this.detached.get(projectId);
     if (cached) return cached;
     try {
@@ -141,8 +151,15 @@ export class RenderQueue {
 
   /** Drop a detached context (e.g. project deleted while jobs were pending). */
   forgetProject(projectId: string): void {
+    this.stoppedProjects.add(projectId);
+    for (const wake of this.waiters.get(projectId) ?? []) wake();
+    this.waiters.delete(projectId);
     const ctx = this.detached.get(projectId);
-    if (ctx) {
+    if (ctx && this.activeKey?.startsWith(`${projectId}/`)) {
+      // The worker may currently be awaiting provider I/O while holding this
+      // context in a local variable. Closing it here creates a use-after-close.
+      this.deferredClose.add(projectId);
+    } else if (ctx) {
       ctx.close();
       this.detached.delete(projectId);
     }
@@ -157,6 +174,7 @@ export class RenderQueue {
   // --- persistence ---------------------------------------------------------
 
   private saveStatus(projectId: string, jobId: string, status: RenderJobStatus, patch: Partial<Omit<RenderJob, 'id'>> = {}): void {
+    if (this.stoppedProjects.has(projectId)) return;
     const p = this.ctxFor(projectId);
     if (!p) return;
     // Terminal states are final: a worker racing a cancel()/fail() must not
@@ -326,6 +344,7 @@ export class RenderQueue {
         const provider = this.registry.get(job.provider);
         if (provider) provider.cancel(handle).catch(() => undefined);
       }
+      this.handles.delete(key);
       if (ACTIVE_STATUSES.includes(job.status)) {
         this.saveStatus(projectId, jobId, 'CANCELLED', { finishedAt: new Date().toISOString() });
         this.bus.emit({ type: 'render.job.updated', jobId, shotId: job.shotId, status: 'CANCELLED' });
@@ -414,6 +433,10 @@ export class RenderQueue {
               'UPDATE render_jobs SET status = ?, error = ?, finished_at = ?, updated_at = ? WHERE id = ?',
               ['FAILED', 'interrupted before provider taskId was returned; retry to render', now, now, job.id],
             );
+            const shot = getShot(p, job.shotId);
+            if (shot.status === 'RENDERING') {
+              advanceShotStatus(p, job.shotId, 'PREFLIGHT_READY');
+            }
             this.bus.emit({ type: 'render.job.failed', jobId: job.id, shotId: job.shotId, error: 'interrupted before provider taskId was returned; retry to render' });
           }
           recovered++;
@@ -444,11 +467,21 @@ export class RenderQueue {
         const sep = key.indexOf('/');
         const projectId = key.slice(0, sep);
         const jobId = key.slice(sep + 1);
-        const ctx = await this.pipelineCtx(projectId);
-        if (!ctx) continue;
-        const job = this.getJob(projectId, jobId);
-        if (!job) continue;
-        await this.process(job);
+        this.activeKey = key;
+        try {
+          const ctx = await this.pipelineCtx(projectId);
+          if (!ctx) continue;
+          const job = this.getJob(projectId, jobId);
+          if (!job) continue;
+          await this.process(job);
+        } finally {
+          this.activeKey = null;
+          if (this.deferredClose.delete(projectId)) {
+            const ctx = this.detached.get(projectId);
+            ctx?.close();
+            this.detached.delete(projectId);
+          }
+        }
       }
     } catch (e) {
       console.error('[render-queue] worker error:', e);
@@ -469,6 +502,7 @@ export class RenderQueue {
       return;
     }
     try {
+      if (this.stoppedProjects.has(job.projectId)) return;
       // 1) Upload references if we have a fresh job (no handle yet).
       if (!this.handles.has(runKey(job.projectId, job.id)) && job.requestSnapshot) {
         this.saveStatus(job.projectId, job.id, 'UPLOADING');
@@ -546,12 +580,16 @@ export class RenderQueue {
     const maxTransient = Math.min(60, Math.max(3, Math.round(300_000 / this.pollMs)));
     let transientStreak = 0;
     for (let i = 0; i < 600; i++) {
+      if (this.stoppedProjects.has(job.projectId)) return;
       // CANCELLED/FAILED while polling? Re-read through pipelineCtx — a UI
       // project switch must not end the poll silently.
       const cur = await this.getJobEnsured(job.projectId, job.id);
+      // The row disappearing means its Shot/project was deliberately deleted.
+      // Do not hold the single worker for the remainder of the 100-minute poll
+      // budget; stop tracking the now-orphaned remote task immediately.
       if (!cur) {
-        await sleep(this.pollMs);
-        continue;
+        this.handles.delete(runKey(job.projectId, job.id));
+        return;
       }
       if (cur.status === 'CANCELLED' || cur.status === 'FAILED') return;
       let st;
@@ -563,14 +601,14 @@ export class RenderQueue {
             await this.fail(cur, `provider unusable for ${transientStreak} consecutive polls: ${st.error ?? 'unknown'}`);
             return;
           }
-          await sleep(this.pollMs);
+          await this.wait(job.projectId, this.pollMs);
           continue;
         }
         transientStreak = 0;
       } catch (e) {
         transientStreak += 1;
         if (transientStreak >= maxTransient) throw e instanceof Error ? e : new Error(String(e));
-        await sleep(this.pollMs);
+        await this.wait(job.projectId, this.pollMs);
         continue;
       }
       const mapped: RenderJobStatus = st.status === 'SUCCEEDED' ? 'SUCCEEDED' : st.status === 'FAILED' ? 'FAILED' : st.status === 'EXPIRED' ? 'EXPIRED' : 'RUNNING';
@@ -579,6 +617,7 @@ export class RenderQueue {
         this.bus.emit({ type: 'render.job.updated', jobId: job.id, shotId: cur.shotId, status: 'DOWNLOADING' });
         const res = await provider.result(handle);
         await this.downloadAndCreateTake(cur, res.url, res.cost);
+        this.handles.delete(runKey(job.projectId, job.id));
         return;
       }
       if (mapped === 'FAILED' || mapped === 'EXPIRED') {
@@ -590,7 +629,7 @@ export class RenderQueue {
         this.saveStatus(job.projectId, job.id, mapped, { startedAt: cur.startedAt ?? new Date().toISOString() });
         this.bus.emit({ type: 'render.job.running', jobId: job.id, shotId: cur.shotId });
       }
-      await sleep(this.pollMs);
+      await this.wait(job.projectId, this.pollMs);
     }
     await this.fail(job, 'poll timeout (100 minutes)');
   }
@@ -622,10 +661,15 @@ export class RenderQueue {
     } else {
       const res = await fetch(url, { signal: AbortSignal.timeout(600_000) });
       if (!res.ok) throw new ProviderError(`download failed HTTP ${res.status}`, 'download');
-      const buf = Buffer.from(await res.arrayBuffer());
-      // Atomic-ish: write .part, then rename into place (P0-3).
+      if (!res.body) throw new ProviderError('download failed: empty response body', 'download');
+      // Stream potentially large render files to disk, then atomically rename.
       const fs = await import('node:fs/promises');
-      await fs.writeFile(partPath, buf);
+      try {
+        await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(partPath));
+      } catch (error) {
+        await fs.rm(partPath, { force: true });
+        throw error;
+      }
       await fs.rename(partPath, filePath);
     }
     const info = await this.ffmpeg.probe(filePath);
@@ -655,8 +699,23 @@ export class RenderQueue {
       if (shot.status === 'RENDERING') advanceShotStatus(p, job.shotId, 'PREFLIGHT_READY');
     }
   }
-}
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  private wait(projectId: string, ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const waiters = this.waiters.get(projectId) ?? new Set<() => void>();
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        waiters.delete(done);
+        if (waiters.size === 0) this.waiters.delete(projectId);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      waiters.add(done);
+      this.waiters.set(projectId, waiters);
+      if (this.stoppedProjects.has(projectId)) done();
+    });
+  }
 }

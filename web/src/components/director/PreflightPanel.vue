@@ -9,14 +9,17 @@ const props = defineProps<{
   provider: ProviderStatus | null;
   durationSeconds: number;
   aspectRatio: string;
+  megapixels?: number;
   aiEnabled: boolean;
-  onBasic: (promptId: string) => Promise<PreflightReport>;
+  onBasic: (promptId: string, megapixels: number) => Promise<PreflightReport>;
   onAiCheck: (promptId: string) => Promise<PreflightReport | null>;
   onRefreshPrompt: () => Promise<void>;
   onRender: (promptId: string) => Promise<void>;
 }>();
 
 const busy = ref('');
+const effectiveMegapixels = computed(() => props.megapixels ?? 1);
+const megapixelsLabel = computed(() => effectiveMegapixels.value === 1 ? '1.0 MP' : `${effectiveMegapixels.value} MP`);
 const latestMatchingReport = computed(() => props.prompt
   ? props.reports.find((report) => report.promptVersionId === props.prompt?.id) ?? null
   : null);
@@ -38,7 +41,7 @@ async function run(kind: 'basic' | 'ai') {
   if (!props.prompt) return;
   busy.value = kind;
   try {
-    if (kind === 'basic') await props.onBasic(props.prompt.id);
+    if (kind === 'basic') await props.onBasic(props.prompt.id, effectiveMegapixels.value);
     else await props.onAiCheck(props.prompt.id);
   } finally {
     busy.value = '';
@@ -133,10 +136,8 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
         <span class="badge no-dot">{{ prompt ? H3_MODE_LABEL[prompt.h3Mode] : '—' }}</span>
         <span class="badge no-dot">{{ durationSeconds }}s</span>
         <span class="badge no-dot">{{ aspectRatio }}</span>
-        <span v-if="provider?.capabilities?.supportedResolutions?.length" class="badge no-dot">
-          {{ provider.capabilities.supportedResolutions[0] }}
-        </span>
-        <span class="muted">×1 Take</span>
+        <span v-if="provider?.id === 'runninghub'" class="badge no-dot">{{ megapixelsLabel }}</span>
+        <span class="muted take-count">1 个 Take</span>
       </div>
     </div>
 
@@ -167,6 +168,7 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
 .cost-preview { min-width: 0; overflow: hidden; border-style: dashed; }
 .cost-row { min-width: 0; gap: 6px; }
 .provider-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.take-count { white-space: nowrap; }
 .pending-check { padding: 12px; }
 .pending-check p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
 .repair-prompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 12px; border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); }

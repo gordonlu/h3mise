@@ -25,5 +25,6 @@ demo/**/*.db-shm
 .DS_Store
 *.log
 coverage/
+output/
 .rh-research/
 .h3mise-cookie.txt

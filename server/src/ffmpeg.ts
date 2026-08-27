@@ -207,7 +207,7 @@ export class Ffmpeg {
       let filter = '';
       clips.forEach((c, i) => {
         inputs.push('-i', c);
-        filter += `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS[v${i}];`;
+        filter += `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,settb=AVTB,setpts=PTS-STARTPTS[v${i}];`;
         filter += `[${i}:a]aresample=44100,asetpts=PTS-STARTPTS[a${i}];`;
       });
       filter += clips.map((_, i) => `[v${i}][a${i}]`).join('') + `concat=n=${clips.length}:v=1:a=1[vout][aout]`;
@@ -224,7 +224,11 @@ export class Ffmpeg {
     const inputs: string[] = [];
     clips.forEach((c, i) => {
       inputs.push('-i', c);
-      filter += `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS[v${i}];`;
+      // concat emits AVTB (1/1,000,000), while a raw input commonly keeps its
+      // container time base (for example 1/12,288). A later xfade requires
+      // both inputs to match, so normalize every branch before chaining cuts
+      // and transitions.
+      filter += `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,settb=AVTB,setpts=PTS-STARTPTS[v${i}];`;
       filter += `[${i}:a]aresample=44100,asetpts=PTS-STARTPTS[a${i}];`;
     });
     let prevV = 'v0';

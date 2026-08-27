@@ -45,6 +45,7 @@ export function defaultAiAppProfile(): AiAppProfile {
       refAudios: [],
       duration: { nodeId: 'node_1', fieldName: 'duration' },
       resolution: { nodeId: 'node_1', fieldName: 'resolution' },
+      megapixels: { nodeId: '', fieldName: 'megapixels' },
       steps: { nodeId: 'node_1', fieldName: 'steps' },
     },
     verification: { status: 'unconfigured', checkedAt: null, note: 'run "detect nodes" in Settings, then confirm with a real render' },
@@ -84,6 +85,7 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
     refAudios: collect(isAudioRef),
     duration: pick(has(/duration|时长/i), inputs.duration),
     resolution: pick(has(/resolution|分辨率|比例/i), inputs.resolution),
+    megapixels: pick(has(/^megapixels$|megapixel|百万像素/i), inputs.megapixels),
     steps: pick(has(/^steps$|steps|采样/i), inputs.steps),
   };
 }

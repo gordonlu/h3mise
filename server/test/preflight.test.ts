@@ -40,8 +40,25 @@ test('renderIntentHash is deterministic and input-sensitive', () => {
   assert.match(h1, /^[0-9a-f]{16}$/);
   // duration override MUST change the hash (that is the paid-gate invariant)
   assert.notEqual(h1, renderIntentHash({ ...base, durationSeconds: 6 }, ref));
+  assert.notEqual(h1, renderIntentHash({ ...base, megapixels: 1 }, ref));
   // provider profile ref must participate
   assert.notEqual(h1, renderIntentHash(base, { appId: 'app2', checkedAt: ref.checkedAt }));
+});
+
+test('gate accepts only the workflow-safe megapixel presets', async () => {
+  const { root, store } = await makeStore('preflight-megapixels');
+  roots.push(root);
+  const p = await makeProject(store, 'megapixels');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  const registry = makeRegistry(store.registry);
+
+  const accepted = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 1.2 });
+  assert.equal((await runBasicPreflightIntent(p, registry, accepted)).blocked, false);
+
+  const rejected = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 1.24 });
+  const report = await runBasicPreflightIntent(p, registry, rejected);
+  assert.equal(report.blocked, true);
+  assert.ok(report.basic.find((section) => section.key === 'provider')?.checks.some((check) => check.key === 'provider.megapixels' && check.severity === 'error'));
 });
 
 test('gate blocks duration overrides that bypass shot defaults', async () => {

@@ -1,18 +1,16 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref } from 'vue';
 
-const props = withDefaults(defineProps<{ src: string; poster?: string | null; label?: string; maxHeight?: number }>(), { maxHeight: 340 });
+const props = withDefaults(defineProps<{
+  src: string;
+  poster?: string | null;
+  label?: string;
+  maxHeight?: number;
+  preload?: 'none' | 'metadata' | 'auto';
+}>(), { maxHeight: 340, preload: 'metadata' });
 const emit = defineEmits<{ play: []; pause: []; seeked: []; timeupdate: [t: number] }>();
 
 const video = ref<HTMLVideoElement | null>(null);
-
-watch(
-  () => props.src,
-  () => {
-    // Force reload when the source changes (A/B compare).
-    video.value?.load();
-  },
-);
 
 function currentTime(): number {
   return video.value?.currentTime ?? 0;
@@ -40,7 +38,7 @@ defineExpose({ currentTime, seek, play, pause });
       :src="src"
       :poster="poster ?? undefined"
       controls
-      preload="metadata"
+      :preload="preload"
       playsinline
       :style="{ maxHeight: `${maxHeight}px` }"
       @play="emit('play')"

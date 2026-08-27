@@ -16,6 +16,7 @@ import {
   listBindings,
   listCharacterStates,
   mediaUsage,
+  shotAssetRequirements,
   updateCharacterState,
   updateEntity,
 } from '../src/modules/assets.js';
@@ -123,4 +124,21 @@ test('Ref2VA automatically binds selected character and scene images without dup
   const replaced = ensureShotEntityImageBindings(project, shot);
   assert.deepEqual(replaced.bindings.map((binding) => binding.assetId), [characterImage.id, replacementSceneImage.id]);
   assert.equal(replaced.bindings.some((binding) => binding.assetId === sceneImage.id), false);
+});
+
+test('a creature can own and require CharacterState as the primary subject', async () => {
+  const { root, store } = await makeStore('asset-creature-primary');
+  roots.push(root);
+  const project = await makeProject(store, 'creature primary subject');
+  const creature = createEntity(project, { kind: 'creature', name: 'Newton' });
+  const shot = createShot(project, { title: 'Newton sits', primaryCharacterId: creature.id });
+
+  const missingRequirements = shotAssetRequirements(project, shot);
+  assert.equal(missingRequirements.some((item) => item.label === 'Creature' && item.detail === 'Newton'), true);
+  assert.equal(missingRequirements.some((item) => item.kind === 'character_state' && item.level === 'required'), true);
+
+  createCharacterState(project, { characterId: creature.id, name: 'Training class', hair: 'clean black-and-white coat' });
+  const requirements = shotAssetRequirements(project, shot);
+  assert.equal(requirements.some((item) => item.label === 'Creature' && item.detail === 'Newton'), true);
+  assert.equal(requirements.some((item) => item.kind === 'character_state' && item.level === 'ok'), true);
 });

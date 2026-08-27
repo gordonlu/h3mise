@@ -53,7 +53,10 @@ export function getStory(p: ProjectContext): StoryDoc {
   if (!r) throw new Error('story missing');
   return {
     id: r.id,
-    title: r.title,
+    // Older projects were initialized with an empty story title. Preserve an
+    // explicitly edited story title, otherwise inherit the project title so
+    // users never have to type the same title twice.
+    title: r.title.trim() || p.config.title,
     synopsis: r.synopsis,
     body: r.body,
     plannedDurationSeconds: r.planned_duration_seconds,

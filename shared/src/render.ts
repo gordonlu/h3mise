@@ -24,6 +24,7 @@ export interface RenderRequest {
   durationSeconds: number;
   aspectRatio: string;
   resolution?: string;
+  megapixels?: number;
   references: { bindingId: string; assetId: string; kind: MediaKind }[];
   providerParams: Record<string, unknown>;
 }

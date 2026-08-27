@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, toRaw } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, toRaw } from 'vue';
 import type { Take, VisualContinuityState } from '@h3mise/shared';
 import { FAILURE_TAGS } from '@h3mise/shared';
 import { takeVideoUrl, fileUrl } from '../../api/client';
@@ -23,6 +23,7 @@ const props = defineProps<{
   aiEnabled: boolean;
   /** Latest committed actual visual continuity (prefill for select+commit). */
   actualState: VisualContinuityState | null;
+  committedTakeId: string | null;
   entities: EntityLite[];
   characterStates: StateLite[];
   onSelect: (id: string) => Promise<void>;
@@ -30,6 +31,7 @@ const props = defineProps<{
   onDelete: (id: string) => Promise<void>;
   onUpdate: (id: string, patch: Partial<Take>) => Promise<void>;
   onAiDiagnose: (takeId: string) => Promise<void>;
+  onAiContinuity: (takeId: string) => Promise<{ state: VisualContinuityState }>;
   onSelectCommit: (takeId: string, state: VisualContinuityState) => Promise<void>;
   onUseLastFrame: (takeId: string) => Promise<void>;
   onUseFirstFrame: (takeId: string) => Promise<void>;
@@ -124,24 +126,57 @@ const emptyState = (): VisualContinuityState => ({
 });
 
 const commitTarget = ref<string | null>(null);
+const commitPanel = ref<HTMLElement | null>(null);
 const commitBusy = ref(false);
+const aiContinuityBusy = ref(false);
 const commitForm = ref<VisualContinuityState>(emptyState());
 const heldItemsText = ref<Record<string, string>>({});
 
-const characters = computed(() => props.entities.filter((e) => e.kind === 'character'));
+const characters = computed(() => props.entities.filter((e) => e.kind === 'character' || e.kind === 'creature'));
 const vehicles = computed(() => props.entities.filter((e) => e.kind === 'vehicle'));
+const needsContinuity = computed(() => Boolean(props.selectedTakeId && props.committedTakeId !== props.selectedTakeId));
 
 function statesOf(characterId: string): StateLite[] {
   return props.characterStates.filter((s) => s.characterId === characterId);
 }
 
-function openCommit(takeId: string) {
+function appearanceLabel(character: EntityLite, field: 'costume' | 'hair'): string {
+  if (character.kind !== 'creature') return field === 'costume' ? '服装' : '发型';
+  return field === 'costume' ? '穿戴 / 外观变化' : '毛发 / 表面变化';
+}
+
+async function openCommit(takeId: string) {
   commitTarget.value = takeId;
   commitForm.value = structuredClone(toRaw(props.actualState ?? emptyState()));
   // heldItems edited as comma-separated text per character.
   const ht: Record<string, string> = {};
   for (const [k, v] of Object.entries(commitForm.value.heldItems ?? {})) ht[k] = v.join(', ');
   heldItemsText.value = ht;
+  await nextTick();
+  commitPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function selectAndOpenCommit(takeId: string) {
+  await run(takeId, () => props.onSelect(takeId));
+  await openCommit(takeId);
+}
+
+function syncHeldItems(state: VisualContinuityState) {
+  const text: Record<string, string> = {};
+  for (const [entityId, items] of Object.entries(state.heldItems ?? {})) text[entityId] = items.join(', ');
+  heldItemsText.value = text;
+}
+
+async function fillContinuityFromLastFrame() {
+  if (!commitTarget.value) return;
+  aiContinuityBusy.value = true;
+  try {
+    const result = await props.onAiContinuity(commitTarget.value);
+    commitForm.value = structuredClone(result.state);
+    syncHeldItems(commitForm.value);
+  } finally {
+    aiContinuityBusy.value = false;
+  }
 }
 
 async function doSelectCommit() {
@@ -172,13 +207,16 @@ function onKey(e: KeyboardEvent) {
   const t = activeTake.value;
   if (!t) return;
   const k = e.key.toLowerCase();
-  if (k === 's' && t.status !== 'selected') { e.preventDefault(); void run(t.id, () => props.onSelect(t.id)); }
+  if (k === 's' && t.status !== 'selected') { e.preventDefault(); void selectAndOpenCommit(t.id); }
   else if (k === 'r' && t.status !== 'rejected') { e.preventDefault(); void run(t.id, () => props.onReject(t.id)); }
   else if (k === 'a') { e.preventDefault(); assignSlot(t.id, 'A'); }
   else if (k === 'b') { e.preventDefault(); assignSlot(t.id, 'B'); }
 }
 
-onMounted(() => window.addEventListener('keydown', onKey));
+onMounted(() => {
+  window.addEventListener('keydown', onKey);
+  if (needsContinuity.value && props.selectedTakeId) void openCommit(props.selectedTakeId);
+});
 onUnmounted(() => window.removeEventListener('keydown', onKey));
 </script>
 
@@ -255,10 +293,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 
     <div v-if="!takes.length" class="muted takes-empty">还没有 Take。渲染完成后会出现在这里。</div>
 
+    <div v-if="needsContinuity && !commitTarget" class="panel continuity-next-step">
+      <div>
+        <strong>下一步：记录 Selected Take 的最后一帧</strong>
+        <span>下一镜头会用这里的角色外观、位置和环境状态保持衔接。</span>
+      </div>
+      <button class="primary sm" @click="selectedTakeId && openCommit(selectedTakeId)">填写连续性</button>
+    </div>
+
     <!-- Select + Commit continuity form -->
-    <div v-if="commitTarget" class="panel commit-panel">
-      <div class="panel-title">选片 <span class="mono">{{ commitTarget }}</span> 并提交 Actual Visual Continuity</div>
+    <div v-if="commitTarget" ref="commitPanel" class="panel commit-panel">
+      <div class="panel-title">记录最后一帧状态 <span class="mono">{{ commitTarget }}</span></div>
       <div class="panel-body col">
+        <p class="commit-intro">把这条视频结束时实际看到的内容记下来，下一镜头才能接得上。不确定时先让 AI 读取尾帧，再检查结果。</p>
         <div class="grid commit-grid">
           <label class="field">地点<input v-model="commitForm.location" placeholder="如：窄巷 / 天台 / 车内" /></label>
           <label class="field">时间<input v-model="commitForm.timeOfDay" placeholder="如 dusk / 03:00" /></label>
@@ -266,6 +313,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <label class="field">风<input v-model="commitForm.wind" placeholder="如：3 级 / 无" /></label>
           <label class="field">银幕方向<input v-model="commitForm.screenDirection" placeholder="left-to-right" /></label>
           <label class="field">朝向<input v-model="commitForm.facing" placeholder="如：profile right" /></label>
+        </div>
+
+        <div v-if="aiEnabled" class="ai-continuity-assist">
+          <div>
+            <strong>推荐：让 AI 先填写</strong>
+            <span>AI 读取真实尾帧生成草稿，你检查后才会保存。</span>
+          </div>
+          <button class="sm" :disabled="aiContinuityBusy || commitBusy" @click="fillContinuityFromLastFrame">
+            {{ aiContinuityBusy ? '正在识别尾帧…' : 'AI 读取尾帧并填写' }}
+          </button>
         </div>
 
         <template v-if="characters.length">
@@ -283,8 +340,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               </select>
             </div>
             <div class="grid commit-grid">
-              <label class="field">服装<input :value="commitForm.costume[ch.id] ?? ''" placeholder="wet_white_shirt" @input="commitForm.costume[ch.id] = ($event.target as HTMLInputElement).value" /></label>
-              <label class="field">发型<input :value="commitForm.hair[ch.id] ?? ''" placeholder="wet" @input="commitForm.hair[ch.id] = ($event.target as HTMLInputElement).value" /></label>
+              <label class="field">{{ appearanceLabel(ch, 'costume') }}<input :value="commitForm.costume[ch.id] ?? ''" :placeholder="ch.kind === 'creature' ? '仅填写新增服饰、泥污等变化' : 'wet_white_shirt'" @input="commitForm.costume[ch.id] = ($event.target as HTMLInputElement).value" /></label>
+              <label class="field">{{ appearanceLabel(ch, 'hair') }}<input :value="commitForm.hair[ch.id] ?? ''" :placeholder="ch.kind === 'creature' ? '仅填写湿毛、破损等变化' : 'wet'" @input="commitForm.hair[ch.id] = ($event.target as HTMLInputElement).value" /></label>
               <label class="field">伤势<input :value="commitForm.injury[ch.id] ?? ''" placeholder="forehead_cut" @input="commitForm.injury[ch.id] = ($event.target as HTMLInputElement).value" /></label>
               <label class="field">手持物（逗号分隔）<input :value="heldItemsText[ch.id] ?? ''" placeholder="umbrella, phone" @input="heldItemsText[ch.id] = ($event.target as HTMLInputElement).value" /></label>
             </div>
@@ -304,10 +361,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
         <label class="field">备注<textarea v-model="commitForm.notes" rows="2" placeholder="连续性备注：本 Take 实际结束状态与计划的偏差…"></textarea></label>
 
         <div class="row">
-          <button class="primary sm" :disabled="commitBusy" @click="doSelectCommit">{{ commitBusy ? '提交中…' : 'Select + Commit（选片并提交连续性）' }}</button>
+          <button class="primary sm" :disabled="commitBusy || aiContinuityBusy" @click="doSelectCommit">{{ commitBusy ? '保存中…' : '确认并保存连续性' }}</button>
           <button class="sm" @click="commitTarget = null">取消</button>
         </div>
-        <p class="muted">只有 Selected Take 才能提交 Actual Continuity；NarrativeState 不受影响。</p>
+        <p class="muted">这里只记录画面结束状态，不会改动故事内容。</p>
       </div>
     </div>
 
@@ -339,12 +396,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <!-- contextual primary actions -->
           <div class="row wrap">
             <template v-if="t.status === 'candidate'">
-              <button class="sm primary" :disabled="busyId === t.id" title="快捷键 S" @click="run(t.id, () => onSelect(t.id))">Select</button>
-              <button class="sm" @click="openCommit(t.id)">选片+提交</button>
+              <button class="sm primary" :disabled="busyId === t.id" title="选中后继续填写尾帧连续性；快捷键 S" @click="selectAndOpenCommit(t.id)">选用此条</button>
+              <button class="sm" @click="openCommit(t.id)">选用并填写连续性</button>
               <button class="sm danger ghost" title="快捷键 R" @click="run(t.id, () => onReject(t.id))">Reject</button>
             </template>
             <template v-else-if="t.status === 'selected'">
-              <button class="sm" @click="openCommit(t.id)">提交连续性</button>
+              <button class="sm primary" @click="openCommit(t.id)">{{ committedTakeId === t.id ? '查看 / 更新连续性' : '下一步：填写连续性' }}</button>
               <button class="sm danger ghost" @click="run(t.id, () => onReject(t.id))">取消选择</button>
             </template>
             <template v-else>
@@ -439,7 +496,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 .sync-toggle { gap: 5px; cursor: pointer; font-size: 12px; }
 .sync-toggle input { width: auto; }
 .commit-panel { border-color: var(--accent); }
+.commit-intro { margin: 0; padding: 9px 11px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--text-2); font-size: 12px; line-height: 1.55; }
+.continuity-next-step { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border-color: var(--accent); background: var(--accent-soft); }
+.continuity-next-step div { display: grid; gap: 3px; min-width: 0; }
+.continuity-next-step span { color: var(--text-2); font-size: 12px; }
+.continuity-next-step button { flex: none; }
 .commit-grid { grid-template-columns: 1fr 1fr 1fr; }
+.ai-continuity-assist { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--info); border-radius: var(--radius-sm); background: var(--info-soft); }
+.ai-continuity-assist div { display: grid; gap: 2px; min-width: 0; }
+.ai-continuity-assist strong { font-size: 12.5px; }
+.ai-continuity-assist span { color: var(--text-2); font-size: 11.5px; }
+.ai-continuity-assist button { flex: none; }
 .sec-caption { font-weight: 600; color: var(--text-2); margin-top: 4px; }
 .char-block { border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .char-head select { width: auto; }

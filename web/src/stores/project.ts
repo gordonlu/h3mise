@@ -67,14 +67,14 @@ export const useProjectStore = defineStore('project', () => {
     return meta;
   }
 
-  async function installDemo(): Promise<ProjectMeta | null> {
-    const title = '最后一卷胶片（Demo）';
+  async function installDemo(demoId = 'last-film-reel'): Promise<ProjectMeta | null> {
+    const title = demoId === 'good-boy' ? 'Good Boy' : '最后一卷胶片（Demo）';
     let meta: ProjectMeta;
     try {
-      meta = await post<ProjectMeta>('/api/projects/demo', {});
+      meta = await post<ProjectMeta>('/api/projects/demo', { demoId });
     } catch (error) {
       if (!(await confirmProjectSwitch(error, title))) return null;
-      meta = await post<ProjectMeta>('/api/projects/demo', { force: true });
+      meta = await post<ProjectMeta>('/api/projects/demo', { demoId, force: true });
     }
     await refreshProjects();
     await refreshCurrent();

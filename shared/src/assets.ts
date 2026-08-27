@@ -18,7 +18,7 @@ export interface Entity {
   updatedAt: string;
 }
 
-/** CharacterState = "what this person looks like in the current story state". */
+/** CharacterState = "what this character or creature looks like in the current story state". */
 export interface CharacterState {
   id: string;
   characterId: string;

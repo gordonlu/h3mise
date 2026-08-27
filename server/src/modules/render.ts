@@ -547,6 +547,7 @@ export class RenderQueue {
           durationSeconds: job.requestSnapshot.durationSeconds,
           aspectRatio: job.requestSnapshot.aspectRatio,
           resolution: job.requestSnapshot.resolution,
+          megapixels: job.requestSnapshot.megapixels,
           references: job.requestSnapshot.references.map((r) => {
             const binding = p.db.get<{ roles_json: string | null }>('SELECT roles_json FROM reference_bindings WHERE id = ?', [r.bindingId]);
             return {

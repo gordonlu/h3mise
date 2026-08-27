@@ -156,7 +156,9 @@ export function createCharacterState(
   input: { characterId: string; name: string; costume?: string; hair?: string; injury?: string; heldItems?: string[]; extra?: Record<string, string>; imageAssetId?: string | null },
 ): CharacterState {
   const character = getEntity(p, input.characterId);
-  if (character.kind !== 'character') throw new Error('character state owner must be a character entity');
+  if (character.kind !== 'character' && character.kind !== 'creature') {
+    throw new Error('character state owner must be a character or creature entity');
+  }
   if (typeof input.name !== 'string' || !input.name.trim()) throw new Error('character state name is required');
   assertImageAsset(p, input.imageAssetId);
   const id = nextId(p.db, 'cstate');
@@ -518,13 +520,15 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
     if (!character) {
       out.push({ level: 'optional', kind: 'character', label: 'Character', detail: 'referenced character no longer exists' });
     } else {
-      out.push({ level: 'ok', kind: 'character', label: 'Character', detail: character.name });
-      const hasState = states.some((s) => s.characterId === shot.primaryCharacterId);
-      out.push(
-        hasState
-          ? { level: 'ok', kind: 'character_state', label: 'CharacterState', detail: 'exists' }
-          : { level: 'required', kind: 'character_state', label: 'CharacterState missing', detail: 'create a CharacterState for continuity' },
-      );
+      out.push({ level: 'ok', kind: 'character', label: character.kind === 'creature' ? 'Creature' : 'Character', detail: character.name });
+      if (character.kind === 'character' || character.kind === 'creature') {
+        const hasState = states.some((s) => s.characterId === shot.primaryCharacterId);
+        out.push(
+          hasState
+            ? { level: 'ok', kind: 'character_state', label: 'CharacterState', detail: 'exists' }
+            : { level: 'required', kind: 'character_state', label: 'CharacterState missing', detail: 'create a CharacterState for continuity' },
+        );
+      }
     }
   } else {
     out.push({ level: 'optional', kind: 'character', label: 'Character', detail: 'no primary character set' });

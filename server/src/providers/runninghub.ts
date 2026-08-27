@@ -260,6 +260,13 @@ export class RunningHubAiAppProvider implements VideoProvider {
     // on request.aspectRatio — resolution is only a legacy fallback.
     // Sending neither left the node at its workflow default (9:16).
     push(inputs.resolution, request.aspectRatio || request.resolution);
+    // Older saved profiles predate the explicit megapixels mapping. Resolve
+    // it from the discovered nodes as a compatibility fallback so users do
+    // not need to re-detect an otherwise verified workflow.
+    const megapixelsSlot = inputs.megapixels?.nodeId
+      ? inputs.megapixels
+      : this.profile.nodes.find((node) => /^megapixels$/i.test(node.fieldName));
+    push(megapixelsSlot, request.megapixels !== undefined ? String(request.megapixels) : undefined);
     // Sampling steps: default 10 for t2va / frame modes, 20 for ref2va.
     push(inputs.steps, request.mode === 'ref2va' ? '20' : '10');
     // P0-4: providerParams are ONLY written through explicit per-key bindings

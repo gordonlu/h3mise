@@ -15,6 +15,7 @@ import type {
   VisualContinuityState,
   ShotGuideState,
   NextAction,
+  ContinuityEntry,
 } from '@h3mise/shared';
 
 export interface ShotDetail {
@@ -26,7 +27,7 @@ export interface ShotDetail {
   preflights: PreflightReport[];
   bindings: ReferenceBinding[];
   requirements: Array<{ level: string; kind: string; label: string; detail: string }>;
-  continuity: unknown[];
+  continuity: ContinuityEntry[];
   allBindings: ReferenceBinding[];
   entities: Array<{ id: string; name: string; kind: string; imageAssetId: string | null }>;
   characterStates: Array<{ id: string; characterId: string; name: string; costume: string; imageAssetId: string | null; effectiveImageAssetId: string | null }>;
@@ -79,8 +80,8 @@ export function useShot(shotId: string) {
     return pv;
   }
 
-  async function runPreflight(promptVersionId: string, providerId = 'runninghub'): Promise<PreflightReport> {
-    const report = await post<PreflightReport>(`/api/shots/${shotId}/preflight`, { promptVersionId, providerId });
+  async function runPreflight(promptVersionId: string, providerId = 'runninghub', megapixels?: number): Promise<PreflightReport> {
+    const report = await post<PreflightReport>(`/api/shots/${shotId}/preflight`, { promptVersionId, providerId, megapixels });
     await load();
     return report;
   }
@@ -91,9 +92,9 @@ export function useShot(shotId: string) {
     return report;
   }
 
-  async function render(promptVersionId: string, providerId = 'runninghub', durationSeconds?: number): Promise<RenderJob> {
+  async function render(promptVersionId: string, providerId = 'runninghub', durationSeconds?: number, megapixels?: number): Promise<RenderJob> {
     try {
-      const job = await post<RenderJob>('/api/render', { shotId, promptVersionId, providerId, durationSeconds });
+      const job = await post<RenderJob>('/api/render', { shotId, promptVersionId, providerId, durationSeconds, megapixels });
       await load();
       return job;
     } catch (error) {

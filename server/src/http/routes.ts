@@ -154,10 +154,10 @@ export function buildRoutes(services: AppServices): App {
   });
 
   app.post('/api/projects/demo', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean; demoId?: string };
     return projectSwitchGate('interactive-project', async () => {
       if (services.store.current && body.force !== true) return projectLocked(c);
-      const meta = await services.store.installDemo();
+      const meta = await services.store.installBundledDemo(body.demoId ?? 'last-film-reel');
       await services.store.open(meta.id);
       services.providers.refresh();
       return c.json(meta, 201);
@@ -466,6 +466,7 @@ export function buildRoutes(services: AppServices): App {
       shotId,
       promptVersionId: String(body.promptVersionId ?? promptMod.listPrompts(ctx, shotId).at(-1)?.id ?? ''),
       providerId: String(body.providerId ?? 'runninghub'),
+      megapixels: body.megapixels !== undefined ? Number(body.megapixels) : undefined,
     });
     return c.json(report, 201);
   });
@@ -497,6 +498,7 @@ export function buildRoutes(services: AppServices): App {
         durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
         aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
         resolution: body.resolution,
+        megapixels: body.megapixels !== undefined ? Number(body.megapixels) : undefined,
         providerParams: body.providerParams ?? {},
       });
       const preflight = await preflightMod.runBasicPreflightIntent(ctx, services.providers, intent);
@@ -520,6 +522,7 @@ export function buildRoutes(services: AppServices): App {
         durationSeconds: intent.durationSeconds,
         aspectRatio: intent.aspectRatio,
         resolution: intent.resolution,
+        megapixels: intent.megapixels,
         references: intent.references,
         providerParams: intent.providerParams,
       };
@@ -610,6 +613,11 @@ export function buildRoutes(services: AppServices): App {
   // --- timeline ------------------------------------------------------------
 
   app.get('/api/timeline', (c) => c.json(timelineMod.getTimeline(p(c))));
+  app.post('/api/timeline/quick-build', (c) => {
+    const result = timelineMod.addMissingSelectedTakes(p(c));
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result);
+  });
   app.post('/api/timeline/clips', async (c) => c.json(timelineMod.addClip(p(c), await c.req.json()), 201));
   app.patch('/api/timeline/clips/:id', async (c) => c.json(timelineMod.updateClip(p(c), c.req.param('id'), await c.req.json())));
   app.delete('/api/timeline/clips/:id', (c) => {

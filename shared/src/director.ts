@@ -12,7 +12,7 @@ export const H3_MODE_LABEL: Record<H3Mode, string> = {
   i2va: '首帧生视频（I2VA）',
   fl2va: '首尾帧生视频（FL2VA）',
   l2va: '尾帧生视频（L2VA）',
-  ref2va: '参考图生视频（Ref2VA）',
+  ref2va: '参考图生视频',
 };
 
 export type RealityMode = 'strict_realism' | 'plausible_stylized' | 'deliberate_fantasy';

@@ -2,7 +2,7 @@
   "name": "h3mise",
   "private": true,
   "version": "0.1.0",
-  "description": "H3Mise — A local director workstation for MiniMax H3",
+  "description": "A local-first AI video directing workstation for story, shots, assets, continuity, takes, and timeline editing",
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": ">=22.13.0"

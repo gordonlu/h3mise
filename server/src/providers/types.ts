@@ -16,6 +16,7 @@ export interface RenderRequestInput {
   durationSeconds: number;
   aspectRatio: string;
   resolution?: string;
+  megapixels?: number;
   /** Business references: local asset + its binding roles + upload ref. */
   references: { asset: MediaAsset; roles: ReferenceRole[]; label: string; providerRef: string }[];
   /** Extra provider params from the AiAppProfile. */

@@ -8,8 +8,8 @@ import { makeStore, makeProject, makeShotWithPrompt, fakeTake, cleanupTempRoot, 
 import { listTakes, selectTake, getTake, rejectTake, updateTake, createTake, deleteRejectedTake } from '../src/modules/takes.js';
 import { getShot, advanceTo, advanceShotStatus, createShot } from '../src/modules/shots.js';
 import { commitContinuity, selectTakeAndCommit, emptyVisualState } from '../src/modules/continuity.js';
-import { getTimeline, addClip, invalidateShotClips, listTimelineExports, recoverTimelineExports } from '../src/modules/timeline.js';
-import { getPrompt } from '../src/modules/prompt.js';
+import { getTimeline, addClip, addMissingSelectedTakes, invalidateShotClips, listTimelineExports, recoverTimelineExports, updateClip } from '../src/modules/timeline.js';
+import { getPrompt, importRawPrompt } from '../src/modules/prompt.js';
 import { insertMedia, createBinding } from '../src/modules/assets.js';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -142,6 +142,27 @@ test('existing exported videos are recovered as persistent project artifacts', a
   const exports = listTimelineExports(p);
   assert.equal(exports.length, 1);
   assert.equal(exports[0]?.relPath, 'exports/legacy-export.mp4');
+});
+
+test('quick edit appends missing selected takes without changing professional edits', async () => {
+  const { p, shotId, promptVersionId } = await fixture();
+  const first = await fakeTake(p, shotId, promptVersionId, 'quick-a');
+  selectTake(p, first.id, bus());
+  const existing = addClip(p, { shotId, takeId: first.id });
+  updateClip(p, existing.id, { trimIn: 0.5, transition: 'fade', transitionDuration: 0.4 });
+
+  const secondShot = createShot(p, { title: 'Second', durationSeconds: 3 });
+  const secondPrompt = importRawPrompt(p, secondShot.id, 'Second prompt', 't2va').id;
+  const second = await fakeTake(p, secondShot.id, secondPrompt, 'quick-b');
+  selectTake(p, second.id, bus());
+
+  const result = addMissingSelectedTakes(p);
+  assert.equal(result.added, 1);
+  assert.equal(result.clips.length, 2);
+  assert.equal(result.clips[0]?.id, existing.id);
+  assert.equal(result.clips[0]?.trimIn, 0.5);
+  assert.equal(result.clips[0]?.transition, 'fade');
+  assert.equal(addMissingSelectedTakes(p).added, 0);
 });
 
 test('selectTakeAndCommit advances shot to CONTINUITY_COMMITTED', async () => {

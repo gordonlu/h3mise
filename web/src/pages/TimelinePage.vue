@@ -61,6 +61,7 @@ function clipWidth(c: TimelineClip): number {
 
 const totalSeconds = computed(() => clips.value.reduce((acc, c) => acc + clipDuration(c), 0));
 const activeClip = computed(() => clips.value.find((c) => c.id === activeClipId.value) ?? null);
+const activeClipIndex = computed(() => clips.value.findIndex((c) => c.id === activeClipId.value));
 
 async function load() {
   const tl = await get<{ id: string; clips: TimelineClip[] }>('/api/timeline');
@@ -175,6 +176,9 @@ async function pollExport(jobId: string) {
 let off: (() => void) | null = null;
 onMounted(async () => {
   await load();
+  // Make the editing controls discoverable on first visit. Previously they
+  // only appeared after clicking an unlabeled thumbnail in the filmstrip.
+  if (clips.value.length) activeClipId.value = clips.value[0]!.id;
   off = subscribeEvents((e) => {
     if (e.type === 'take.selected' || e.type === 'project.updated') void load();
   });
@@ -200,6 +204,13 @@ onUnmounted(() => off?.());
 
     <!-- visual strip -->
     <div class="panel strip-panel filmstrip">
+      <div v-if="clips.length" class="strip-guide">
+        <div>
+          <strong>选择片段进行裁切和转场</strong>
+          <span>也可以拖动片段调整顺序</span>
+        </div>
+        <span class="muted">当前选中：第 {{ activeClipIndex + 1 }} 个片段</span>
+      </div>
       <div class="strip" v-if="clips.length">
         <div
           v-for="(c, i) in clips"
@@ -220,6 +231,17 @@ onUnmounted(() => off?.());
             <span class="strip-dur mono">{{ clipDuration(c).toFixed(1) }}s</span>
           </div>
           <div v-if="c.transition !== 'cut' && c.transition !== 'none' && i > 0" class="strip-trans" :title="`转场：${c.transition}`">◧</div>
+          <button
+            type="button"
+            class="strip-edit"
+            :class="{ current: activeClipId === c.id }"
+            :aria-label="`裁切与转场：第 ${i + 1} 个片段`"
+            title="打开裁切与转场"
+            @click.stop="activeClipId = c.id"
+          >
+            <span aria-hidden="true">✂</span>
+            {{ activeClipId === c.id ? '编辑中' : '编辑' }}
+          </button>
         </div>
         <div class="strip-end mono muted">{{ totalSeconds.toFixed(1) }}s</div>
       </div>
@@ -234,14 +256,23 @@ onUnmounted(() => off?.());
     <!-- trim editor for active clip -->
     <div v-if="activeClip" class="panel trim-panel">
       <div class="panel-title spread">
-        <span>修剪 Clip <span class="mono">{{ activeClip.takeId }}</span>（shot {{ activeClip.shotId }}）</span>
+        <span>裁切与转场 · 第 {{ activeClipIndex + 1 }} 个片段</span>
         <button class="sm ghost" @click="activeClipId = null">关闭</button>
       </div>
       <div class="panel-body trim-body">
         <div class="trim-player">
-          <VideoPlayer ref="trimPlayer" :src="takeVideoUrl(activeClip.takeId)" :max-height="300" />
+          <VideoPlayer
+            ref="trimPlayer"
+            :src="takeVideoUrl(activeClip.takeId)"
+            :poster="takePoster.get(activeClip.takeId) ? fileUrl(takePoster.get(activeClip.takeId)!) : undefined"
+            preload="auto"
+            :max-height="300"
+          />
         </div>
         <div class="col trim-controls">
+          <div class="control-help">
+            播放视频，在想要的位置点击“设为入点”或“设为出点”。导出时只保留两点之间的内容。
+          </div>
           <div class="row">
             <button class="sm" title="把当前播放位置设为入点" @click="markTrim('in')">⇤ 设为入点</button>
             <button class="sm" title="把当前播放位置设为出点" @click="markTrim('out')">设为出点 ⇥</button>
@@ -252,15 +283,16 @@ onUnmounted(() => off?.());
             <label class="muted">out</label>
             <input type="number" step="0.1" min="0" :value="activeClip.trimOut ?? undefined" class="trim-input" placeholder="尾" @change="updateClip(activeClip.id, { trimOut: Number(($event.target as HTMLInputElement).value) || null })" />
           </div>
-          <div class="row">
-            <label class="muted">转场</label>
+          <div v-if="activeClipIndex > 0" class="row">
+            <label class="muted">与上一个片段的转场</label>
             <select :value="activeClip.transition" @change="changeTransition(activeClip, ($event.target as HTMLSelectElement).value as TimelineClip['transition'])">
               <option value="cut">cut（硬切）</option>
               <option value="fade">fade（淡入淡出）</option>
               <option value="dissolve">dissolve（叠化）</option>
             </select>
           </div>
-          <label v-if="activeClip.transition === 'fade' || activeClip.transition === 'dissolve'" class="row muted">
+          <div v-else class="first-clip-note">这是第一个片段，前面没有片段，因此不需要设置转场。</div>
+          <label v-if="activeClipIndex > 0 && (activeClip.transition === 'fade' || activeClip.transition === 'dissolve')" class="row muted">
             转场时长
             <input
               type="number"
@@ -307,6 +339,10 @@ onUnmounted(() => off?.());
 .page { padding: 24px 32px; max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .strip-panel { overflow-x: auto; }
+.strip-guide { position: sticky; left: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px 0; }
+.strip-guide > div { display: grid; gap: 2px; }
+.strip-guide strong { font-size: 13px; }
+.strip-guide span { color: var(--text-3); font-size: 11.5px; }
 .strip { display: flex; align-items: stretch; gap: 3px; padding: 20px 16px; min-height: 110px; }
 .strip-clip {
   position: relative;
@@ -325,11 +361,16 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .strip-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.55)); }
 .strip-meta { position: absolute; left: 6px; right: 6px; bottom: 5px; display: flex; justify-content: space-between; color: #fff; font-size: 10.5px; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
 .strip-trans { position: absolute; top: 5px; left: 5px; color: #fff; font-size: 11px; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
+.strip-edit { position: absolute; top: 7px; right: 7px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid rgba(255,255,255,.38); border-radius: 999px; background: rgba(25,22,20,.62); color: rgba(255,255,255,.92); box-shadow: 0 2px 8px rgba(0,0,0,.18); backdrop-filter: blur(6px); font-size: 10.5px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.strip-edit:hover, .strip-edit:focus-visible { background: rgba(25,22,20,.88); border-color: rgba(255,255,255,.72); transform: translateY(-1px); }
+.strip-edit.current { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 3px 10px rgba(209,89,45,.3); }
 .strip-end { align-self: center; padding-left: 8px; }
 .trim-panel { border-color: var(--accent); }
 .trim-body { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
 @media (max-width: 900px) { .trim-body { grid-template-columns: 1fr; } }
 .trim-controls { gap: 10px; align-content: start; }
+.control-help, .first-clip-note { padding: 9px 11px; border-radius: 6px; background: var(--bg-subtle); color: var(--text-2); font-size: 12px; line-height: 1.55; }
+.first-clip-note { color: var(--text-3); }
 .trim-io { gap: 6px; }
 .trim-input { width: 72px; }
 .add-row { padding: 5px 0; border-bottom: 1px dashed var(--line); }

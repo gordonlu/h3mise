@@ -28,6 +28,7 @@ export interface RenderIntent {
   durationSeconds: number;
   aspectRatio: string;
   resolution?: string;
+  megapixels?: number;
   references: Array<{ bindingId: string; assetId: string; kind: 'image' | 'video' | 'audio' }>;
   providerParams: Record<string, unknown>;
 }
@@ -44,6 +45,7 @@ export function renderIntentHash(intent: RenderIntent, profileRef: { appId: stri
     durationSeconds: intent.durationSeconds,
     aspectRatio: intent.aspectRatio,
     resolution: intent.resolution ?? null,
+    megapixels: intent.megapixels ?? null,
     references: [...intent.references].sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
     providerParams: Object.keys(intent.providerParams)
       .sort()
@@ -58,6 +60,7 @@ export interface BasicPreflightInput {
   shotId: string;
   promptVersionId: string;
   providerId: string;
+  megapixels?: number;
 }
 
 export async function runBasicPreflight(p: ProjectContext, registry: ProviderRegistry, input: BasicPreflightInput): Promise<PreflightReport> {
@@ -68,7 +71,7 @@ export async function runBasicPreflight(p: ProjectContext, registry: ProviderReg
 export async function intentFromInput(
   p: ProjectContext,
   registry: ProviderRegistry,
-  input: BasicPreflightInput & Partial<Pick<RenderIntent, 'mode' | 'durationSeconds' | 'aspectRatio' | 'resolution' | 'providerParams'>>,
+  input: BasicPreflightInput & Partial<Pick<RenderIntent, 'mode' | 'durationSeconds' | 'aspectRatio' | 'resolution' | 'megapixels' | 'providerParams'>>,
 ): Promise<RenderIntent> {
   const shot = getShot(p, input.shotId);
   const prompt = getPrompt(p, input.promptVersionId);
@@ -98,6 +101,7 @@ export async function intentFromInput(
     durationSeconds: input.durationSeconds ?? shot.durationSeconds,
     aspectRatio: input.aspectRatio ?? shot.aspectRatio,
     resolution: input.resolution,
+    megapixels: input.megapixels,
     references: referenceRows.map((r) => ({ bindingId: r.id, assetId: r.asset_id, kind: r.type as 'image' | 'video' | 'audio' })),
     providerParams: input.providerParams ?? {},
   };
@@ -187,6 +191,18 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
         severity: 'error',
         message: `生成服务不支持 ${intent.aspectRatio} 画幅；支持：${caps.supportedAspectRatios.join('、')}`,
       });
+    }
+    if (intent.megapixels !== undefined) {
+      const allowedMegapixels = [0.6, 0.8, 1, 1.2];
+      if (!Number.isFinite(intent.megapixels) || !allowedMegapixels.includes(intent.megapixels)) {
+        sections[2]!.checks.push({
+          key: 'provider.megapixels',
+          severity: 'error',
+          message: `像素档位 ${intent.megapixels} MP 不受支持；可选：${allowedMegapixels.join('、')} MP`,
+        });
+      } else {
+        sections[2]!.checks.push({ key: 'provider.megapixels.ok', severity: 'info', message: `输出像素：${intent.megapixels} MP` });
+      }
     }
     if (provider.configured === false) {
       sections[2]!.checks.push({ key: 'provider.not_configured', severity: 'error', message: '尚未配置 RunningHub API Key' });

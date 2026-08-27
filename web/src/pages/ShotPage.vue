@@ -56,6 +56,9 @@ const {
 // a freshly-created fallback from the template resets the editor on every
 // dirty-state emission and makes typed text appear to vanish.
 const editorPlan = computed(() => sPlan.value?.plan ?? emptyPlan());
+const currentActualContinuity = computed(() => [...(sDetail.value?.continuity ?? [])]
+  .reverse()
+  .find((entry) => entry.scope === 'visual' && entry.kind === 'actual') ?? null);
 
 const tab = ref<'workspace' | 'plan' | 'references' | 'prompt' | 'preflight' | 'external'>('workspace');
 const media = ref<MediaAsset[]>([]);
@@ -66,6 +69,7 @@ const pasteText = ref('');
 const parseResult = ref<{ ok: boolean; plan?: DirectorPlan; error?: string } | null>(null);
 const planDirty = ref(false);
 const takesSection = ref<HTMLElement | null>(null);
+const megapixels = ref(1);
 
 // P1: AI availability comes from /api/ai/status, NOT from whether a render
 // provider is configured — the two are independent features.
@@ -345,13 +349,20 @@ async function aiDiagnose(takeId: string) {
   });
 }
 
+async function aiContinuity(takeId: string): Promise<{ state: import('@h3mise/shared').VisualContinuityState }> {
+  const result = await runAi('analyze_take_continuity', { takeId }) as { state?: import('@h3mise/shared').VisualContinuityState };
+  if (!result.state) throw new Error('AI 未返回可用的连续性状态');
+  toasts.push({ kind: 'ok', text: 'AI 已根据尾帧填写连续性草稿，请确认后提交' });
+  return { state: result.state };
+}
+
 async function aiPreflight(promptId: string) {
   const prompt = latestPrompt();
   if (!prompt) return null;
   let report: Awaited<ReturnType<typeof s.runPreflight>> | null = null;
   await guarded(async () => {
     report = sDetail.value?.preflights.find((item) => item.promptVersionId === promptId) ?? null;
-    if (!report) report = await s.runPreflight(prompt.id);
+    if (!report) report = await s.runPreflight(prompt.id, providerId.value, megapixels.value);
     const result = await runAi('continuity_check', { shotId });
     report = await s.attachSemanticReview(report.id, aiText(result));
     toasts.push({ kind: 'ok', text: 'AI 连续性检查已加入当前生成检查记录' });
@@ -376,11 +387,11 @@ async function doRender(promptId: string) {
       : '\n当前模式不提交参考素材。';
     const confirmed = await confirmDialog({
       title: '确认生成 1 个新 Take？',
-      message: `${activeProvider.value?.name ?? '当前生成服务'} · ${H3_MODE_LABEL[mode]} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'}。${referenceSummary}\n提交后将创建一次生成任务。`,
+      message: `${activeProvider.value?.name ?? '当前生成服务'} · ${H3_MODE_LABEL[mode]} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'} · ${megapixels.value} MP。${referenceSummary}\n提交后将创建一次生成任务。`,
       confirmLabel: '确认生成',
     });
     if (!confirmed) return;
-    const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds);
+    const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds, megapixels.value);
     toasts.push({ kind: 'ok', text: `渲染任务 ${job.id} 已提交 — 状态实时推送` });
   });
 }
@@ -388,7 +399,7 @@ async function doRender(promptId: string) {
 async function refreshPromptReferences() {
   await guarded(async () => {
     const prompt = await s.compilePrompt(sShot.value?.h3Mode ?? 't2va');
-    await s.runPreflight(prompt.id);
+    await s.runPreflight(prompt.id, providerId.value, megapixels.value);
     toasts.push({ kind: 'ok', text: '提示词已纳入最新参考素材，生成检查已通过' });
   });
 }
@@ -637,6 +648,15 @@ const TABS = [
           <span class="ctl-label">时长</span>
           <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" title="时长（秒，1–15）" placeholder="5" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
         </label>
+        <label v-if="activeProvider?.id === 'runninghub'" class="ctl">
+          <span class="ctl-label">输出像素</span>
+          <select v-model.number="megapixels" title="工作流总像素；更高画质会占用更多显存">
+            <option :value="0.6">0.6 MP</option>
+            <option :value="0.8">0.8 MP</option>
+            <option :value="1">1.0 MP</option>
+            <option :value="1.2">1.2 MP</option>
+          </select>
+        </label>
         <label class="ctl">
           <span class="ctl-label">StoryBeat</span>
           <select v-model="sShot.storyBeatId" @change="s.updateShot({ storyBeatId: sShot?.storyBeatId })">
@@ -645,10 +665,10 @@ const TABS = [
           </select>
         </label>
         <label class="ctl">
-          <span class="ctl-label">主角色</span>
+          <span class="ctl-label">主角色 / 生物</span>
           <select v-model="sShot.primaryCharacterId" @change="s.updateShot({ primaryCharacterId: sShot?.primaryCharacterId })">
             <option :value="null">— 未设定 —</option>
-            <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'character') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
+            <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'character' || x.kind === 'creature') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
           </select>
         </label>
         <label class="ctl">
@@ -834,13 +854,14 @@ const TABS = [
 
         <div v-show="tab === 'preflight'" class="tab-body">
           <PreflightPanel
+            :megapixels="megapixels"
             :reports="sDetail?.preflights ?? []"
             :prompt="latestPrompt()"
             :provider="activeProvider"
             :duration-seconds="sShot.durationSeconds"
             :aspect-ratio="sShot.aspectRatio"
             :ai-enabled="aiEnabled"
-            :on-basic="(pid: string) => guarded(() => s.runPreflight(pid), '生成检查完成') as never"
+            :on-basic="(pid: string, mp: number) => guarded(() => s.runPreflight(pid, providerId, mp), '生成检查完成') as never"
             :on-ai-check="aiPreflight"
             :on-refresh-prompt="refreshPromptReferences"
             :on-render="doRender"
@@ -918,7 +939,8 @@ const TABS = [
         :takes="sDetail?.takes ?? []"
         :selected-take-id="sSelected?.id ?? null"
         :ai-enabled="aiEnabled"
-        :actual-state="sDetail?.continuityLatest?.visualActual?.state ?? null"
+        :actual-state="currentActualContinuity?.state ?? null"
+        :committed-take-id="currentActualContinuity?.sourceTakeId ?? null"
         :entities="sDetail?.entities ?? []"
         :character-states="sDetail?.characterStates ?? []"
         :on-select="s.selectTake"
@@ -926,6 +948,7 @@ const TABS = [
         :on-delete="s.deleteTake"
         :on-update="s.updateTake"
         :on-ai-diagnose="aiDiagnose"
+        :on-ai-continuity="aiContinuity"
         :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"
         :on-use-last-frame="(tid: string) => useTakeFrame(tid, 'last')"
         :on-use-first-frame="(tid: string) => useTakeFrame(tid, 'first')"

@@ -118,8 +118,8 @@ async function load() {
   states.value = await get<CharacterState[]>('/api/assets/character-states');
   media.value = await get<MediaAsset[]>('/api/assets/media');
   bindings.value = await get<ReferenceBinding[]>('/api/assets/bindings?shotId=null');
-  if (!newState.value.characterId && entities.value.some((e) => e.kind === 'character')) {
-    newState.value.characterId = entities.value.find((e) => e.kind === 'character')!.id;
+  if (!newState.value.characterId && entities.value.some((e) => e.kind === 'character' || e.kind === 'creature')) {
+    newState.value.characterId = entities.value.find((e) => e.kind === 'character' || e.kind === 'creature')!.id;
   }
 }
 
@@ -419,21 +419,21 @@ onMounted(load);
 
     <!-- CharacterStates -->
     <section v-if="tab === 'states'" class="panel">
-      <div class="panel-title">角色状态 <span class="panel-note">这个人在当前剧情状态下的外观（与实体严格分开）</span></div>
+      <div class="panel-title">角色状态 <span class="panel-note">人物或生物在当前剧情状态下的外观（与实体严格分开）</span></div>
       <div class="panel-body">
         <form class="toolbar wrap-toolbar" @submit.prevent="createState">
           <label class="field">
             <span>角色</span>
             <select v-model="newState.characterId">
-              <option v-for="e in entities.filter((x) => x.kind === 'character')" :key="e.id" :value="e.id">{{ e.name }}</option>
+              <option v-for="e in entities.filter((x) => x.kind === 'character' || x.kind === 'creature')" :key="e.id" :value="e.id">{{ e.name }}</option>
             </select>
           </label>
           <label class="field"><span>名称</span><input v-model="newState.name" placeholder="如：雨夜湿衣状态" /></label>
-          <label class="field"><span>服装</span><input v-model="newState.costume" placeholder="wet_white_shirt" /></label>
-          <label class="field"><span>发型</span><input v-model="newState.hair" placeholder="wet" /></label>
+          <label class="field"><span>服装 / 外观</span><input v-model="newState.costume" placeholder="服装、装甲或皮毛状态" /></label>
+          <label class="field"><span>发型 / 毛发</span><input v-model="newState.hair" placeholder="发型或毛发状态" /></label>
           <label class="field"><span>伤势</span><input v-model="newState.injury" placeholder="forehead_cut" /></label>
           <label class="field"><span>手持物</span><input v-model="newState.heldItems" placeholder="umbrella, phone" /></label>
-          <button class="primary" :disabled="!newState.name || !entities.some((e) => e.kind === 'character')">创建状态</button>
+          <button class="primary" :disabled="!newState.name || !entities.some((e) => e.kind === 'character' || e.kind === 'creature')">创建状态</button>
         </form>
         <EmptyState v-if="!states.length" icon="❑" title="还没有角色状态" desc="CharacterState 记录服装 / 发型 / 伤势 / 手持物，是连续性提交与继承的基本单元。" />
         <div v-else class="grid list">
@@ -625,7 +625,7 @@ onMounted(load);
 }
 .card:hover { border-color: var(--line-2); box-shadow: var(--shadow-2); }
 .visual-card { overflow: hidden; }
-.linked-image { width: calc(100% + 28px); height: 168px; margin: -14px -14px 6px; object-fit: cover; border-bottom: 1px solid var(--line); }
+.linked-image { width: calc(100% + 28px); height: 168px; margin: -14px -14px 6px; object-fit: contain; object-position: center; background: var(--inset); border-bottom: 1px solid var(--line); }
 .image-link-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 7px; border-top: 1px dashed var(--line); }
 .card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-name {
@@ -675,7 +675,7 @@ onMounted(load);
   background: var(--inset); border: 1px solid var(--line);
   display: flex; align-items: center; justify-content: center;
 }
-.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.thumb img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .media-card:hover .thumb img { opacity: 0.92; }
 .thumb-glyph { font-size: 22px; color: var(--text-3); }
 .kind-chip {

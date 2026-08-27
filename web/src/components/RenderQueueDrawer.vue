@@ -58,11 +58,19 @@ onMounted(() => {
 });
 onUnmounted(() => window.clearInterval(ticker));
 
-function elapsedText(job: { startedAt: string | null; createdAt: string }): string {
-  const start = job.startedAt ?? job.createdAt;
-  const sec = Math.max(0, Math.floor((nowTick.value - new Date(start).getTime()) / 1000));
+function formatSeconds(sec: number): string {
   const m = Math.floor(sec / 60);
   return m > 0 ? `${m}分${String(sec % 60).padStart(2, '0')}秒` : `${sec}秒`;
+}
+
+function elapsedText(job: RenderJob): string {
+  const start = job.startedAt ?? job.submittedAt ?? job.createdAt;
+  const end = active.value.includes(job)
+    ? nowTick.value
+    : new Date(job.finishedAt ?? job.updatedAt).getTime();
+  const startMs = new Date(start).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(end)) return '—';
+  return formatSeconds(Math.max(0, Math.floor((end - startMs) / 1000)));
 }
 
 const CANCELLABLE = ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'];
@@ -142,7 +150,7 @@ onMounted(() => render.refresh());
             <div class="job-meta muted">
               <button class="shot-link" @click="router.push(`/shots/${job.shotId}`)">镜头 {{ job.shotId }}</button>
               <span class="badge no-dot mode-badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
-              <span v-if="active.includes(job)" class="badge no-dot elapsed">⏱ {{ elapsedText(job) }}</span>
+              <span class="badge no-dot elapsed">{{ active.includes(job) ? '已运行' : '耗时' }} {{ elapsedText(job) }}</span>
               <span v-if="costText(job)" class="cost-text">{{ costText(job) }}</span>
             </div>
             <div v-if="job.providerTaskId" class="task-ref">

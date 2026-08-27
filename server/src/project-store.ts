@@ -11,6 +11,11 @@ import { PROJECT_MIGRATIONS, REGISTRY_MIGRATIONS } from './db/schema.js';
 
 export const PROJECT_SUFFIX = '.h3studio';
 
+const BUNDLED_DEMO_DIRS: Record<string, string> = {
+  'last-film-reel': 'last-film-reel.h3studio',
+  'good-boy': 'good-boy.h3studio',
+};
+
 export interface ProjectPaths {
   root: string;
   assets: string;
@@ -160,7 +165,10 @@ export class ProjectStore {
     await writeFile(join(dir, 'project.json'), JSON.stringify(config, null, 2), 'utf8');
     const db = new Db(join(dir, 'project.db'));
     migrate(db, PROJECT_MIGRATIONS);
-    db.exec(`INSERT INTO story (id, title, created_at, updated_at) VALUES ('story-001', '', '${now}', '${now}')`);
+    db.run(
+      'INSERT INTO story (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)',
+      ['story-001', input.title, now, now],
+    );
     db.exec(`INSERT INTO timeline (id, title, updated_at) VALUES ('timeline-001', 'Timeline', '${now}')`);
     db.close();
     this.registry.run(
@@ -206,6 +214,13 @@ export class ProjectStore {
       await rm(dir, { recursive: true, force: true });
       throw error;
     }
+  }
+
+  async installBundledDemo(demoId = 'last-film-reel'): Promise<ProjectMeta> {
+    const dirName = BUNDLED_DEMO_DIRS[demoId];
+    if (!dirName) throw new Error('unknown bundled demo');
+    const sourceDir = join(resolve(fileURLToPath(import.meta.url), '..', '..', '..'), 'demo', dirName);
+    return this.installDemo(sourceDir);
   }
 
   async open(id: string): Promise<ProjectContext> {

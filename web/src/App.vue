@@ -25,7 +25,7 @@ const projectGuide = ref<ProjectGuideSummary | null>(null);
 const projectsRef = ref<HTMLElement | null>(null);
 let off: (() => void) | null = null;
 
-// Top-level IA: Story / Shots / Assets / Timeline.
+// Professional IA. Quick Edit is a parallel view over the same project data.
 const nav = [
   { to: '/story', label: () => t('nav.story') },
   { to: '/shots', label: () => t('nav.shots') },
@@ -142,9 +142,13 @@ watch(() => route.path, () => void scheduleGuideRefresh());
       </router-link>
 
       <nav v-if="project.current" class="nav">
-        <router-link v-for="n in nav" :key="n.to" :to="n.to" class="nav-item" active-class="active">
-          {{ n.label() }}
-        </router-link>
+        <router-link to="/quick" class="nav-item quick-nav" active-class="active">快速剪辑</router-link>
+        <template v-if="route.path !== '/quick'">
+          <router-link v-for="n in nav" :key="n.to" :to="n.to" class="nav-item" active-class="active">
+            {{ n.label() }}
+          </router-link>
+        </template>
+        <router-link v-else to="/timeline" class="nav-item">专业制作</router-link>
       </nav>
 
       <div class="spacer" />
@@ -169,20 +173,22 @@ watch(() => route.path, () => void scheduleGuideRefresh());
             <router-link to="/projects" class="project-menu-link" @click="projectsOpen = false">项目列表…</router-link>
           </div>
         </div>
-        <span v-if="!health?.ffmpeg.available" class="badge bad">ffmpeg missing</span>
+        <span v-if="route.path !== '/quick' && !health?.ffmpeg.available" class="badge bad">ffmpeg missing</span>
         <span
+          v-if="route.path !== '/quick'"
           :class="['badge', health?.runningHubConfigured ? 'ok' : 'warn']"
           :title="health?.runningHubConfigured ? 'RUNNINGHUB_API_KEY set' : 'RUNNINGHUB_API_KEY not set'"
         >
           RH {{ health?.runningHubConfigured ? '✓' : '—' }}
         </span>
         <span
+          v-if="route.path !== '/quick'"
           :class="['badge', health?.aiConfigured ? 'ok' : 'no-dot muted']"
           :title="health?.aiConfigured ? 'built-in AI configured' : 'built-in AI not configured (AI-optional)'"
         >
           AI {{ health?.aiConfigured ? '✓' : '—' }}
         </span>
-        <button class="ghost" @click="render.drawerOpen = true">
+        <button v-if="route.path !== '/quick'" class="ghost" @click="render.drawerOpen = true">
           {{ t('common.renderQueue') }}
           <span v-if="activeJobCount()" class="badge accent no-dot">{{ activeJobCount() }}</span>
         </button>
@@ -197,7 +203,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
       </button>
     </header>
 
-    <ProjectGuideBar v-if="project.current" :summary="projectGuide" />
+    <ProjectGuideBar v-if="project.current && route.path !== '/quick'" :summary="projectGuide" />
 
     <main class="main">
       <!-- Project data is server-scoped. Remount the active page whenever the

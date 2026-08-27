@@ -2,9 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import type { AiAppProfile, ReferenceBinding, Shot } from '@h3mise/shared';
+import type { RenderRequestInput } from '../src/providers/types.js';
 import { importableKindForMime } from '../src/modules/media.js';
 import { compileDeterministic } from '../src/modules/prompt-templates.js';
-import { inferSupportedModes, mapDiscoveredNodes } from '../src/providers/registry.js';
+import { defaultAiAppProfile, inferSupportedModes, mapDiscoveredNodes } from '../src/providers/registry.js';
+import { RunningHubAiAppProvider } from '../src/providers/runninghub.js';
 
 function node(nodeId: string, fieldName: string, description: string): AiAppProfile['nodes'][number] {
   return { nodeId, nodeName: fieldName, fieldName, fieldType: 'file', fieldData: null, description };
@@ -40,6 +42,43 @@ test('frame slots exclusively enable their matching frame modes', () => {
   const inputs = mapDiscoveredNodes(nodes);
 
   assert.deepEqual(inferSupportedModes(inputs, nodes), ['t2va', 'i2va', 'l2va', 'fl2va']);
+});
+
+test('node discovery maps aspect ratio and megapixels to different workflow fields', () => {
+  const nodes = [
+    node('shape', 'aspect_ratio', '视频比例'),
+    node('shape', 'megapixels', 'megapixels'),
+  ];
+  const inputs = mapDiscoveredNodes(nodes);
+
+  assert.deepEqual(inputs.resolution, { nodeId: 'shape', fieldName: 'aspect_ratio' });
+  assert.deepEqual(inputs.megapixels, { nodeId: 'shape', fieldName: 'megapixels' });
+});
+
+test('RunningHub submission payload sends the selected megapixels value to its workflow node', () => {
+  const profile = defaultAiAppProfile();
+  profile.nodes = [
+    node('shape', 'aspect_ratio', '视频比例'),
+    node('shape', 'megapixels', 'megapixels'),
+  ];
+  profile.inputs.resolution = { nodeId: 'shape', fieldName: 'aspect_ratio' };
+  profile.inputs.megapixels = { nodeId: 'shape', fieldName: 'megapixels' };
+  const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile });
+  const request: RenderRequestInput = {
+    mode: 't2va',
+    prompt: 'test',
+    durationSeconds: 5,
+    aspectRatio: '16:9',
+    megapixels: 1.2,
+    references: [],
+    providerParams: {},
+  };
+
+  const nodeInfoList = (provider as unknown as {
+    buildNodeInfoList(input: RenderRequestInput): Array<{ nodeId: string; fieldName: string; fieldValue: string }>;
+  }).buildNodeInfoList(request);
+
+  assert.ok(nodeInfoList.some((item) => item.nodeId === 'shape' && item.fieldName === 'megapixels' && item.fieldValue === '1.2'));
 });
 
 test('project media import accepts images and audio but rejects video', () => {

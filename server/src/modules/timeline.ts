@@ -67,6 +67,27 @@ export function addClip(p: ProjectContext, input: { shotId: string; takeId: stri
   return getTimeline(p).clips.find((c) => c.id === id)!;
 }
 
+/** Beginner-path helper: append selected takes that are not on the timeline.
+ * Existing clips, order, trims, transitions and audio settings are untouched,
+ * so switching between Quick Edit and the professional Timeline is lossless. */
+export function addMissingSelectedTakes(p: ProjectContext): { clips: TimelineClip[]; added: number } {
+  const selected = p.db.all<{ shot_id: string; take_id: string }>(`
+    SELECT s.id AS shot_id, t.id AS take_id
+    FROM shots s
+    JOIN takes t ON t.shot_id = s.id AND t.status = 'selected'
+    ORDER BY s.ord
+  `);
+  const existingShotIds = new Set(getTimeline(p).clips.map((clip) => clip.shotId));
+  let added = 0;
+  for (const item of selected) {
+    if (existingShotIds.has(item.shot_id)) continue;
+    addClip(p, { shotId: item.shot_id, takeId: item.take_id });
+    existingShotIds.add(item.shot_id);
+    added++;
+  }
+  return { clips: getTimeline(p).clips, added };
+}
+
 export function updateClip(p: ProjectContext, id: string, patch: Partial<Pick<TimelineClip, 'trimIn' | 'trimOut' | 'transition' | 'transitionDuration' | 'audio'>>): TimelineClip {
   const current = getTimeline(p).clips.find((c) => c.id === id);
   if (!current) throw new Error('timeline clip not found');

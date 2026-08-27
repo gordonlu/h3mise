@@ -19,7 +19,11 @@ test('update modules ignore unknown keys and accept empty patches safely', async
   assert.equal(updateSequence(p, sequence.id, { injected: 'x' } as never).title, 'A');
 
   updateStory(p, { injected: 'x' } as never);
-  assert.equal(getStory(p).title, '');
+  assert.equal(getStory(p).title, 'patches');
+
+  // Projects created by older versions may still have a blank story title.
+  p.db.run("UPDATE story SET title = ''");
+  assert.equal(getStory(p).title, 'patches');
 
   const entity = createEntity(p, { kind: 'character', name: 'Hero' });
   assert.equal(updateEntity(p, entity.id, { injected: 'x' } as never).name, 'Hero');
@@ -33,7 +37,7 @@ test('domain validation rejects invalid entities, shots, and timeline trims', as
   const p = await makeProject(store, 'domain');
   assert.throws(() => createEntity(p, { kind: 'alien' as never, name: 'X' }), /kind/);
   const prop = createEntity(p, { kind: 'prop', name: 'Key' });
-  assert.throws(() => createCharacterState(p, { characterId: prop.id, name: 'Wrong' }), /character entity/);
+  assert.throws(() => createCharacterState(p, { characterId: prop.id, name: 'Wrong' }), /character or creature entity/);
   assert.throws(() => createShot(p, { durationSeconds: -1 }), /duration/);
   assert.throws(() => createShot(p, { aspectRatio: 'wide' }), /aspectRatio/);
 

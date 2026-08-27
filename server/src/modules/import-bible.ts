@@ -167,13 +167,13 @@ async function createBibleEntities(
       if (await importLocalAsset(p, ffmpeg, path, label, tags, warnings)) stats.media++;
     }
 
-    // Character states (only meaningful for characters).
+    // Character states apply to people as well as animal / non-human roles.
     const states = arrOfObj(entry.states);
-    if (states.length && kind !== 'character') {
+    if (states.length && kind !== 'character' && kind !== 'creature') {
       warnings.push(`${where}: 类型 ${kind} 不支持 states，已忽略`);
     }
     for (const [stateIndex, state] of states.entries()) {
-      if (kind !== 'character') break;
+      if (kind !== 'character' && kind !== 'creature') break;
       const stateName = str(state.name) ?? `状态 ${stateIndex + 1}`;
       let stateImageId: string | null = null;
       const stateImagePath = str(state.image);

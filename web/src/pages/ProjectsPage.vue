@@ -10,7 +10,7 @@ const project = useProjectStore();
 const router = useRouter();
 const toasts = useToastStore();
 const creating = ref(false);
-const installingDemo = ref(false);
+const installingDemo = ref('');
 const form = ref({ title: '', format: 'single_shot', defaultAspectRatio: '16:9', defaultDurationSeconds: 5 });
 const error = ref('');
 
@@ -18,6 +18,11 @@ const FORMATS = [
   { value: 'single_shot', label: 'Single Shot', desc: '单镜头项目，不需要 Story' },
   { value: 'sequence', label: 'Short Sequence', desc: '短片序列，可拆多个 Shot' },
   { value: 'story', label: 'Story / Episode', desc: '完整故事 / 剧集' },
+];
+
+const DEMOS = [
+  { id: 'last-film-reel', title: '最后一卷胶片', desc: '完整长视频示例：故事、镜头设计、参考图、Prompt、Take 与成片。', start: '/quick' },
+  { id: 'good-boy', title: 'Good Boy', desc: '30 秒情景喜剧示例：完整剧本、人物、生物、场景和角色状态。', start: '/story' },
 ];
 
 async function createProject() {
@@ -39,17 +44,17 @@ async function createProject() {
   }
 }
 
-async function installDemo() {
-  installingDemo.value = true;
+async function installDemo(demo: typeof DEMOS[number]) {
+  installingDemo.value = demo.id;
   try {
-    const installed = await project.installDemo();
+    const installed = await project.installDemo(demo.id);
     if (!installed) return;
-    toasts.push({ kind: 'ok', text: 'Demo 项目已安装为本地副本，可以自由修改' });
-    router.push(installed.format === 'story' ? '/story' : '/shots');
+    toasts.push({ kind: 'ok', text: `Demo「${demo.title}」已安装为本地副本，可以自由修改` });
+    router.push(demo.start);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    installingDemo.value = false;
+    installingDemo.value = '';
   }
 }
 
@@ -61,6 +66,11 @@ async function openProject(id: string) {
 async function continueProject(id: string, to = '/shots') {
   if (!(await project.openProject(id))) return;
   router.push(to);
+}
+
+async function quickEditProject(id: string) {
+  if (!(await project.openProject(id))) return;
+  router.push('/quick');
 }
 
 async function removeProject(id: string, title: string) {
@@ -120,9 +130,12 @@ onMounted(() => project.refreshProjects());
           <div class="demo-entry">
             <div>
               <strong>第一次使用？</strong>
-              <div class="muted">安装《最后一卷胶片》完整示例，查看故事、镜头设计、参考图、Prompt 与成片。</div>
+              <div class="muted">安装一个可自由修改的完整示例。</div>
             </div>
-            <button :disabled="installingDemo" @click="installDemo">{{ installingDemo ? '安装中…' : '打开 Demo 项目' }}</button>
+            <div v-for="demo in DEMOS" :key="demo.id" class="demo-option">
+              <div><strong>{{ demo.title }}</strong><span class="muted">{{ demo.desc }}</span></div>
+              <button :disabled="Boolean(installingDemo)" @click="installDemo(demo)">{{ installingDemo === demo.id ? '安装中…' : '安装 Demo' }}</button>
+            </div>
           </div>
         </div>
       </div>
@@ -147,6 +160,7 @@ onMounted(() => project.refreshProjects());
                 <span>{{ p.guide.attention.title }}</span>
               </div>
             </div>
+            <button class="sm" @click="quickEditProject(p.id)">快速剪辑</button>
             <button class="primary sm" @click="continueProject(p.id, p.guide?.attention.to)">继续制作</button>
             <button class="danger sm" title="删除项目" @click="removeProject(p.id, p.title)">删除</button>
           </div>
@@ -173,6 +187,10 @@ h1 { font-size: 24px; margin: 0 0 4px; font-family: var(--serif); }
 .format-label { font-weight: 600; font-size: 13px; }
 .demo-entry { display: grid; gap: 10px; margin-top: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-muted); }
 .demo-entry strong { display: block; margin-bottom: 3px; font-size: 13px; }
+.demo-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 9px; border-top: 1px dashed var(--line); }
+.demo-option > div { min-width: 0; }
+.demo-option span { display: block; line-height: 1.45; }
+.demo-option button { flex: none; }
 .proj-row {
   display: flex;
   align-items: center;

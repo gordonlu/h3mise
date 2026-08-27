@@ -1,0 +1,9 @@
+{
+  "title": "Good Boy",
+  "format": "story",
+  "default_aspect_ratio": "16:9",
+  "visual_style": "",
+  "default_provider": "runninghub",
+  "default_video_model": "minimax_h3",
+  "default_duration_seconds": 10
+}

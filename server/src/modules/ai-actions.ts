@@ -13,7 +13,7 @@ import * as storyMod from './story.js';
 import * as assetsMod from './assets.js';
 import * as continuityMod from './continuity.js';
 import * as takesMod from './takes.js';
-import { emptyDirectorPlan, type DirectorPlan, type StoryBeat } from '@h3mise/shared';
+import { emptyDirectorPlan, type DirectorPlan, type StoryBeat, type VisualContinuityState } from '@h3mise/shared';
 
 type ActionName =
   | 'plan_shot'
@@ -23,6 +23,7 @@ type ActionName =
   | 'continuity_check'
   | 'compile_prompt'
   | 'diagnose_take'
+  | 'analyze_take_continuity'
   | 'repair_prompt'
   | 'story_to_beats'
   | 'beats_to_shots'
@@ -96,6 +97,70 @@ export async function shotMultimodalContent(
     }
   }
   return parts.some((part) => part.type === 'image_url') ? parts : text;
+}
+
+async function takeLastFrameContent(
+  ctx: ProjectContext,
+  take: ReturnType<typeof takesMod.getTake>,
+  text: string,
+): Promise<string | DirectorContentPart[]> {
+  if (!take.lastFramePath) return `${text}\n\n该 Take 没有可读取的尾帧，只能依据文字上下文填写；无法确认的字段必须留空。`;
+  try {
+    const bytes = await readFile(ctx.resolveProjectPath(take.lastFramePath));
+    if (bytes.byteLength > MAX_VISION_IMAGE_BYTES) {
+      return `${text}\n\n尾帧超过识图大小限制，只能依据文字上下文填写；无法确认的字段必须留空。`;
+    }
+    return [
+      { type: 'text', text: `${text}\n\n下方图片是 ${take.id} 的真实最后一帧。优先依据图片填写可见事实；单帧无法确认的内容不要猜测。` },
+      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${bytes.toString('base64')}`, detail: 'high' } },
+    ];
+  } catch (error) {
+    console.warn(`[ai] failed to read take last frame ${take.id}: ${error instanceof Error ? error.message : error}`);
+    return `${text}\n\n尾帧读取失败，只能依据文字上下文填写；无法确认的字段必须留空。`;
+  }
+}
+
+function visualContinuitySuggestion(raw: unknown, entities: ReturnType<typeof assetsMod.listEntities>, states: ReturnType<typeof assetsMod.listCharacterStates>): VisualContinuityState {
+  const value = raw && typeof raw === 'object' && 'state' in raw
+    ? (raw as { state?: unknown }).state
+    : raw;
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const entityIds = new Set(entities.map((entity) => entity.id));
+  const stateOwner = new Map(states.map((state) => [state.id, state.characterId]));
+  const stringMap = (input: unknown): Record<string, string> => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+    return Object.fromEntries(Object.entries(input as Record<string, unknown>)
+      .filter(([id, text]) => entityIds.has(id) && typeof text === 'string' && text.trim())
+      .map(([id, text]) => [id, String(text).trim()]));
+  };
+  const characterStates = stringMap(source.characterStates);
+  for (const [entityId, stateId] of Object.entries(characterStates)) {
+    if (stateOwner.get(stateId) !== entityId) delete characterStates[entityId];
+  }
+  const heldItems: Record<string, string[]> = {};
+  if (source.heldItems && typeof source.heldItems === 'object' && !Array.isArray(source.heldItems)) {
+    for (const [entityId, items] of Object.entries(source.heldItems as Record<string, unknown>)) {
+      if (!entityIds.has(entityId) || !Array.isArray(items)) continue;
+      const clean = items.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim());
+      if (clean.length) heldItems[entityId] = clean;
+    }
+  }
+  const text = (key: string) => typeof source[key] === 'string' ? String(source[key]).trim() : '';
+  return {
+    characterStates,
+    costume: stringMap(source.costume),
+    hair: stringMap(source.hair),
+    injury: stringMap(source.injury),
+    heldItems,
+    location: text('location'),
+    timeOfDay: text('timeOfDay'),
+    weather: text('weather'),
+    wind: text('wind'),
+    screenDirection: text('screenDirection'),
+    facing: text('facing'),
+    vehicleState: stringMap(source.vehicleState),
+    notes: text('notes'),
+  };
 }
 
 function requireAiDirectorPlan(raw: unknown, base: DirectorPlan): DirectorPlan {
@@ -347,6 +412,36 @@ Ref2VA 专项规则：
         onVisionStatus: trackVision,
       });
       return withVision({ kind: 'diagnosis', text });
+    }
+    case 'analyze_take_continuity': {
+      const takeId = body.takeId ? String(body.takeId) : null;
+      if (!takeId) throw new Error('takeId required');
+      const take = takesMod.getTake(ctx, takeId);
+      const takeShot = shotsMod.getShot(ctx, take.shotId);
+      const takePlan = directorMod.latestPlan(ctx, take.shotId)?.plan ?? null;
+      const entities = assetsMod.listEntities(ctx);
+      const states = assetsMod.listCharacterStates(ctx);
+      const empty = continuityMod.emptyVisualState();
+      const raw = await ai.model.structured<unknown>({
+        system: `你是影视场记员。读取生成视频的真实最后一帧，提取下一镜头必须延续的 Actual Visual Continuity。
+只返回一个完整 JSON 对象，字段严格为：characterStates、costume、hair、injury、heldItems、location、timeOfDay、weather、wind、screenDirection、facing、vehicleState、notes。
+characterStates/costume/hair/injury/heldItems/vehicleState 的 key 必须使用给定实体 id，不能使用人物名字。characterStates 的 value 只能从给定 CharacterState id 中选择，不能新造 id。
+只记录最后一帧实际可见或文字上下文明确给出的、会影响下一镜衔接的状态。单帧无法判断运动方向、风力、伤势或手持物时留空；不要把剧情推测写成事实。
+对 creature（动物、机器人或非人类角色）：优先关联给定 CharacterState。固定身份特征（犬种、固有毛色、脸部花纹、常驻项圈、机器人固有外壳）不得重复填写到 costume/hair；只有相对默认状态发生了变化（如新增服饰、湿毛、泥污、破损）才填写 costume/hair。没有变化就保持空对象。
+如果图片不可见或请求降级为纯文字，只能采用镜头计划明确声明的结束状态和给定资产状态；其余字段留空，并在 notes 说明“AI 未读取尾帧，建议人工确认”。`,
+        messages: [{
+          role: 'user',
+          content: await takeLastFrameContent(ctx, take, `Take: ${JSON.stringify({ id: take.id, shotId: take.shotId })}
+Shot: ${JSON.stringify(takeShot)}
+DirectorPlan end state: ${JSON.stringify({ intent: takePlan?.intent.endState, blocking: takePlan?.blocking.endPosition, endPose: takePlan?.performance.endPose, continuity: takePlan?.continuity.plannedEndState })}
+Entities: ${JSON.stringify(entities)}
+Allowed CharacterStates: ${JSON.stringify(states)}
+Empty output shape: ${JSON.stringify(empty)}`),
+        }],
+        temperature: 0.1,
+        onVisionStatus: trackVision,
+      });
+      return withVision({ kind: 'continuity_suggestion', state: visualContinuitySuggestion(raw, entities, states) });
     }
     case 'repair_prompt': {
       const promptId = body.promptId ? String(body.promptId) : null;

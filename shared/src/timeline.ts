@@ -12,7 +12,9 @@ export interface TimelineClip {
   trimOut: number | null;
   transition: 'cut' | 'fade' | 'dissolve' | 'none';
   transitionDuration: number;
-  audio: { volume: number; mute: boolean };
+  /** Per-clip export audio. Loudness normalization is enabled by default so
+   * generated Takes from different jobs do not jump in perceived volume. */
+  audio: { volume: number; mute: boolean; normalize: boolean };
   createdAt: string;
   updatedAt: string;
 }

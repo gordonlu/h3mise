@@ -26,6 +26,7 @@ interface ClipRow {
 }
 
 function clipFromRow(r: ClipRow): TimelineClip {
+  const storedAudio = jget<Partial<TimelineClip['audio']>>(r.audio_json, {});
   return {
     id: r.id,
     order: r.ord,
@@ -35,7 +36,13 @@ function clipFromRow(r: ClipRow): TimelineClip {
     trimOut: r.trim_out,
     transition: r.transition as TimelineClip['transition'],
     transitionDuration: r.transition_duration,
-    audio: jget<TimelineClip['audio']>(r.audio_json, { volume: 1, mute: false }),
+    audio: {
+      volume: typeof storedAudio.volume === 'number' && Number.isFinite(storedAudio.volume) ? storedAudio.volume : 1,
+      mute: storedAudio.mute === true,
+      // Backward compatible: timelines created before this field existed get
+      // the safe dialogue-oriented export default.
+      normalize: storedAudio.normalize !== false,
+    },
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -61,7 +68,7 @@ export function addClip(p: ProjectContext, input: { shotId: string; takeId: stri
   const trimOut = input.trimOut ?? null;
   p.db.run(
     'INSERT INTO timeline_clips (id, ord, shot_id, take_id, trim_in, trim_out, transition, transition_duration, audio_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, ord, input.shotId, input.takeId, input.trimIn ?? 0, trimOut, 'cut', 0, j({ volume: 1, mute: false }), now, now],
+    [id, ord, input.shotId, input.takeId, input.trimIn ?? 0, trimOut, 'cut', 0, j({ volume: 1, mute: false, normalize: true }), now, now],
   );
   p.db.run('UPDATE timeline SET updated_at = ?', [now]);
   return getTimeline(p).clips.find((c) => c.id === id)!;
@@ -95,6 +102,10 @@ export function updateClip(p: ProjectContext, id: string, patch: Partial<Pick<Ti
   validateTrim(patch.trimIn ?? current.trimIn, patch.trimOut === undefined ? current.trimOut : patch.trimOut, take.duration);
   if (patch.transition !== undefined && !['cut', 'fade', 'dissolve', 'none'].includes(patch.transition)) throw new Error('invalid transition');
   if (patch.transitionDuration !== undefined && (!Number.isFinite(patch.transitionDuration) || patch.transitionDuration < 0)) throw new Error('invalid transitionDuration');
+  if (patch.audio !== undefined) {
+    if (!Number.isFinite(patch.audio.volume) || patch.audio.volume < 0 || patch.audio.volume > 2) throw new Error('invalid audio volume');
+    if (typeof patch.audio.mute !== 'boolean' || typeof patch.audio.normalize !== 'boolean') throw new Error('invalid audio settings');
+  }
   const colMap: Record<string, string> = {
     trimIn: 'trim_in',
     trimOut: 'trim_out',

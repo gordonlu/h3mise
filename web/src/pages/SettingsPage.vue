@@ -3,10 +3,10 @@ import { onMounted, ref } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
-import type { AiAppProfile } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiWorkflowProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
-const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; aiConfigured: boolean } | null>(null);
+const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; comfyUiConfigured: boolean; aiConfigured: boolean } | null>(null);
 const healthError = ref('');
 const profile = ref<AiAppProfile | null>(null);
 const verifying = ref(false);
@@ -16,6 +16,10 @@ const editingProfile = ref(false);
 const apiKeyInfo = ref<{ source: 'settings' | 'env' | 'none'; configured: boolean } | null>(null);
 const apiKeyInput = ref('');
 const savingKey = ref(false);
+const comfyProfile = ref<ComfyUiWorkflowProfile | null>(null);
+const comfyProfileJson = ref('');
+const editingComfyProfile = ref(false);
+const verifyingComfy = ref(false);
 
 // P0-6 semantics: only a successful real submit marks the profile verified;
 // discovery alone only ever reaches "nodes_detected".
@@ -49,6 +53,12 @@ async function load() {
   }
   try {
     apiKeyInfo.value = await get<{ source: 'settings' | 'env' | 'none'; configured: boolean }>('/api/providers/runninghub/apikey');
+  } catch {
+    /* keep null */
+  }
+  try {
+    comfyProfile.value = await get<ComfyUiWorkflowProfile>('/api/providers/comfyui/profile');
+    comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
   } catch {
     /* keep null */
   }
@@ -111,6 +121,49 @@ async function saveApiKey() {
     savingKey.value = false;
   }
 }
+
+async function importComfyWorkflow(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    comfyProfile.value = await post<ComfyUiWorkflowProfile>('/api/providers/comfyui/import', parsed);
+    comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
+    notice.value = `已导入 ${Object.keys(comfyProfile.value.workflow).length} 个节点。请检查自动映射，然后检测连接。`;
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = `ComfyUI 工作流导入失败：${e instanceof Error ? e.message : e}`;
+  }
+}
+
+async function saveComfyProfile() {
+  try {
+    const parsed = JSON.parse(comfyProfileJson.value);
+    comfyProfile.value = await put<ComfyUiWorkflowProfile>('/api/providers/comfyui/profile', parsed);
+    comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
+    editingComfyProfile.value = false;
+    notice.value = 'ComfyUI Profile 已保存，请重新检测连接与映射';
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = `ComfyUI Profile 保存失败：${e instanceof Error ? e.message : e}`;
+  }
+}
+
+async function verifyComfyProfile() {
+  verifyingComfy.value = true;
+  try {
+    comfyProfile.value = await post<ComfyUiWorkflowProfile>('/api/providers/comfyui/verify', {});
+    comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
+    notice.value = `ComfyUI 检测完成：${comfyProfile.value.verification.note}`;
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = `ComfyUI 检测失败：${e instanceof Error ? e.message : e}`;
+  } finally {
+    verifyingComfy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -123,6 +176,15 @@ async function saveApiKey() {
         <div class="panel-body col" v-if="project.current">
           <p class="muted">每个项目独立保存这些配置；切换项目请在顶栏下拉或 Projects 页操作。</p>
           <label class="field">标题<input :value="project.current.config.title" placeholder="项目名称" @change="saveProjectConfig({ title: ($event.target as HTMLInputElement).value })" /></label>
+          <label class="field">
+            默认生成服务
+            <select :value="project.current.config.default_provider" @change="saveProjectConfig({ default_provider: ($event.target as HTMLSelectElement).value })">
+              <option v-for="provider in project.providers" :key="provider.id" :value="provider.id">
+                {{ provider.name }}{{ provider.configured ? '' : '（未配置）' }}
+              </option>
+            </select>
+            <span class="muted">镜头会严格使用这里选择的 Provider；未配置时不会静默切换到其他服务。</span>
+          </label>
           <label class="field">
             项目画幅
             <select :value="project.current.config.default_aspect_ratio" @change="saveProjectConfig({ default_aspect_ratio: ($event.target as HTMLSelectElement).value })">
@@ -193,6 +255,33 @@ async function saveApiKey() {
       </div>
 
       <div class="panel">
+        <div class="panel-title">Provider — ComfyUI Local</div>
+        <div class="panel-body col">
+          <div class="row">
+            <span class="badge" :class="verifClass(comfyProfile?.verification.status)">{{ verifLabel(comfyProfile?.verification.status) }}</span>
+            <span class="mono muted">{{ comfyProfile?.baseUrl }}{{ comfyProfile?.apiPrefix }}</span>
+          </div>
+          <p class="muted">
+            导入 ComfyUI 的 <strong>API Format</strong> 工作流。H3Mise 会推断 Prompt、首尾帧、参考图、时长、画幅和像素输入；推断结果必须检查并检测后才可生成。
+          </p>
+          <div class="row wrap">
+            <label class="sm file-button">
+              导入 workflow_api.json
+              <input type="file" accept="application/json,.json" hidden @change="importComfyWorkflow" />
+            </label>
+            <button class="sm" :disabled="verifyingComfy || !comfyProfile || !Object.keys(comfyProfile.workflow).length" @click="verifyComfyProfile">
+              {{ verifyingComfy ? '检测中…' : '检测连接与映射' }}
+            </button>
+            <button class="sm" @click="editingComfyProfile = !editingComfyProfile">编辑 Profile（JSON）</button>
+            <a class="sm button-link" href="https://github.com/gordonlu/h3mise/blob/master/ComfyUI.md" target="_blank" rel="noreferrer">Agent 接入指引</a>
+          </div>
+          <div v-if="comfyProfile?.verification.note" class="muted">状态：{{ comfyProfile.verification.note }}</div>
+          <textarea v-if="editingComfyProfile" v-model="comfyProfileJson" rows="14" class="mono" placeholder="ComfyUI Profile JSON"></textarea>
+          <button v-if="editingComfyProfile" class="primary sm" @click="saveComfyProfile">保存 ComfyUI Profile</button>
+        </div>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">Environment</div>
         <div class="panel-body col">
           <div class="row">
@@ -214,5 +303,18 @@ async function saveApiKey() {
 .page { padding: 24px 32px; max-width: 1000px; margin: 0 auto; }
 h1 { font-size: 21px; margin: 0 0 16px; }
 .grid { grid-template-columns: 1fr 1fr; }
+.file-button, .button-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: none;
+}
+.file-button:hover, .button-link:hover { background: var(--accent-soft); border-color: var(--accent-line); text-decoration: none; }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 </style>

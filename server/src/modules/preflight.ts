@@ -174,7 +174,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       sections[2]!.checks.push({
         key: 'provider.unverified',
         severity: 'error',
-        message: '生成服务能力尚未验证，请先在设置中检测并验证 AI App',
+        message: '生成服务能力尚未验证，请先在设置中检测连接与输入映射',
       });
     } else if (!caps.supportedModes.includes(intent.mode)) {
       sections[2]!.checks.push({
@@ -205,7 +205,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       }
     }
     if (provider.configured === false) {
-      sections[2]!.checks.push({ key: 'provider.not_configured', severity: 'error', message: '尚未配置 RunningHub API Key' });
+      sections[2]!.checks.push({ key: 'provider.not_configured', severity: 'error', message: `生成服务“${provider.name}”尚未配置或验证` });
     }
   }
 
@@ -340,9 +340,9 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
 
   // Credential
   if (provider?.configured === false) {
-    sections[5]!.checks.push({ key: 'credential.key', severity: 'error', message: '缺少 RunningHub API Key，请先在设置中配置' });
+    sections[5]!.checks.push({ key: 'credential.key', severity: 'error', message: `生成服务“${provider.name}”尚未配置或验证，请先在设置中完成连接和字段映射` });
   } else {
-    sections[5]!.checks.push({ key: 'credential.ok', severity: 'info', message: '访问凭证可用' });
+    sections[5]!.checks.push({ key: 'credential.ok', severity: 'info', message: `生成服务“${provider?.name ?? intent.providerId}”配置可用` });
   }
 
   // Duplicate: an active render is a hard error (PRD: no duplicate paid submit)

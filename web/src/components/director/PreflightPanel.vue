@@ -136,7 +136,7 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
         <span class="badge no-dot">{{ prompt ? H3_MODE_LABEL[prompt.h3Mode] : '—' }}</span>
         <span class="badge no-dot">{{ durationSeconds }}s</span>
         <span class="badge no-dot">{{ aspectRatio }}</span>
-        <span v-if="provider?.id === 'runninghub'" class="badge no-dot">{{ megapixelsLabel }}</span>
+        <span v-if="provider?.id !== 'mock'" class="badge no-dot">{{ megapixelsLabel }}</span>
         <span class="muted take-count">1 个 Take</span>
       </div>
     </div>

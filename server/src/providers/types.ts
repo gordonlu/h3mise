@@ -1,5 +1,5 @@
-// VideoProvider abstraction — PRD §25. v0.1 ships one real backend
-// (RunningHubAiAppProvider) plus a mock provider for offline development.
+// VideoProvider abstraction — PRD §25. Real backends include RunningHub AI App
+// and ComfyUI Local; Mock remains available for offline development.
 // RenderRequest carries business intent only; provider internals stay here.
 
 import type { H3Mode, MediaAsset, ProviderCapabilities, RenderJobStatus, ReferenceRole } from '@h3mise/shared';

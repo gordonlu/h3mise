@@ -23,7 +23,7 @@ export class FfmpegError extends Error {
   }
 }
 
-function run(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<string> {
+function runResult(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
@@ -40,10 +40,22 @@ function run(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string, tim
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) resolve(stdout);
+      if (code === 0) resolve({ stdout, stderr });
       else reject(new FfmpegError(`${bin} ${inputLabel ? `(${inputLabel}) ` : ''}exited with code ${code}`, stderr));
     });
   });
+}
+
+async function run(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<string> {
+  return (await runResult(bin, args, inputLabel, timeoutMs)).stdout;
+}
+
+export interface LoudnessMeasurement {
+  integratedLufs: number;
+  truePeakDb: number;
+  rangeLu: number;
+  thresholdDb: number;
+  targetOffset: number;
 }
 
 export interface FfmpegCapabilities {
@@ -104,6 +116,27 @@ export class Ffmpeg {
     };
   }
 
+  /** Measure a file or trimmed region for a second-pass EBU R128 loudnorm. */
+  async measureLoudness(path: string, start = 0, durationSeconds?: number): Promise<LoudnessMeasurement | null> {
+    const args = ['-hide_banner', '-nostats'];
+    if (start > 0) args.push('-ss', String(start));
+    args.push('-i', path);
+    if (durationSeconds !== undefined) args.push('-t', String(Math.max(0.1, durationSeconds)));
+    args.push('-map', '0:a:0', '-af', 'loudnorm=I=-16:LRA=11:TP=-1.5:print_format=json', '-f', 'null', '-');
+    const { stderr } = await runResult('ffmpeg', args, path);
+    const matches = stderr.match(/\{[\s\S]*?"target_offset"\s*:\s*"[^"]+"[\s\S]*?\}/g);
+    if (!matches?.length) return null;
+    const raw = JSON.parse(matches[matches.length - 1]!) as Record<string, string>;
+    const values = {
+      integratedLufs: Number(raw.input_i),
+      truePeakDb: Number(raw.input_tp),
+      rangeLu: Number(raw.input_lra),
+      thresholdDb: Number(raw.input_thresh),
+      targetOffset: Number(raw.target_offset),
+    };
+    return Object.values(values).every(Number.isFinite) ? values : null;
+  }
+
   /** Extract one frame at `at` seconds into `outPath` (jpg). */
   async extractFrame(input: string, outPath: string, at = 0, size?: string): Promise<void> {
     await mkdir(dirname(outPath), { recursive: true });
@@ -132,48 +165,56 @@ export class Ffmpeg {
     outPath: string,
     start: number,
     end: number,
-    options?: { audio?: { volume?: number; mute?: boolean }; ensureAudio?: boolean },
+    options?: { audio?: { volume?: number; mute?: boolean; normalize?: boolean }; ensureAudio?: boolean },
   ): Promise<void> {
     await mkdir(dirname(outPath), { recursive: true });
     const audio = options?.audio;
+    const clipDuration = Math.max(0.1, end - start);
     const args = ['-y', '-ss', String(start), '-i', input];
-    const mapAudio = !audio?.mute;
-    if (audio?.mute) {
-      args.push('-an');
-    }
+    const keepSourceAudio = !audio?.mute;
     // P0 fix: anullsrc is a FILL-IN for silent sources, never a replacement.
     // Mapping it unconditionally (-map 1:a) discarded the source audio on
     // every timeline export. Only inject when a track must exist but the
     // source has none.
     let sourceHasAudio = false;
-    if (mapAudio && options?.ensureAudio) {
+    if (keepSourceAudio || options?.ensureAudio) {
       try {
         sourceHasAudio = (await this.probe(input)).hasAudio;
       } catch {
         sourceHasAudio = false;
       }
-      if (!sourceHasAudio) {
+      if (!keepSourceAudio || !sourceHasAudio) {
         // Guarantee a mono/stereo audio track for later amix/xfade (P1): a clip
         // without any audio stream would otherwise break the export graph.
         args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
       }
     }
-    args.push('-t', String(Math.max(0.1, end - start)));
-    const volumeFilter =
-      audio?.volume !== undefined && audio.volume !== 1 ? `volume=${Number(audio.volume).toFixed(3)}` : null;
-    if (volumeFilter && mapAudio) {
-      args.push('-af', volumeFilter);
+    args.push('-t', String(clipDuration));
+    const audioFilters: string[] = [];
+    if (keepSourceAudio && sourceHasAudio && audio?.normalize !== false) {
+      const measured = await this.measureLoudness(input, start, clipDuration);
+      if (measured) {
+        audioFilters.push(
+          `loudnorm=I=-16:LRA=11:TP=-1.5:measured_I=${measured.integratedLufs}:measured_LRA=${measured.rangeLu}:measured_TP=${measured.truePeakDb}:measured_thresh=${measured.thresholdDb}:offset=${measured.targetOffset}:linear=true:print_format=summary`,
+        );
+      }
+    }
+    if (keepSourceAudio && audio?.volume !== undefined && audio.volume !== 1) {
+      audioFilters.push(`volume=${Number(audio.volume).toFixed(3)}`);
+    }
+    if (audioFilters.length) {
+      args.push('-af', audioFilters.join(','));
     }
     args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
-    if (mapAudio) {
-      if (sourceHasAudio) {
-        // Keep the ORIGINAL audio: default stream selection picks 0:a.
-        args.push('-c:a', 'aac');
-      } else if (options?.ensureAudio) {
-        args.push('-map', '0:v', '-map', '1:a', '-c:a', 'aac');
-      } else {
-        args.push('-an');
-      }
+    if (keepSourceAudio && sourceHasAudio) {
+      // Keep the ORIGINAL audio: default stream selection picks 0:a.
+      args.push('-c:a', 'aac');
+    } else if (options?.ensureAudio) {
+      // A muted clip still needs a silent stream because concat/acrossfade
+      // require every timeline segment to expose audio.
+      args.push('-map', '0:v', '-map', '1:a', '-c:a', 'aac');
+    } else {
+      args.push('-an');
     }
     args.push('-shortest', '-movflags', '+faststart', outPath);
     await run('ffmpeg', args, input);

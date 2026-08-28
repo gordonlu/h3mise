@@ -65,3 +65,44 @@ test('mixed cut then crossfade uses one video time base', async () => {
   assert.ok(Math.abs((info.durationSeconds ?? 0) - 2.2) < 0.25);
   assert.ok(Math.abs((info.audioDurationSeconds ?? 0) - (info.durationSeconds ?? 0)) < 0.25);
 });
+
+test('two-pass loudness normalization aligns quiet and loud clips', async () => {
+  const root = makeTempRoot('ffmpeg-loudness');
+  roots.push(root);
+  const ffmpeg = new Ffmpeg();
+  const source = join(root, 'source.mp4');
+  const loud = join(root, 'loud.mp4');
+  const quiet = join(root, 'quiet.mp4');
+  const loudNormalized = join(root, 'loud-normalized.mp4');
+  const quietNormalized = join(root, 'quiet-normalized.mp4');
+  await ffmpeg.syntheticVideo(source, 2, 'Audio', '640x360');
+  await ffmpeg.trim(source, loud, 0, 2, { audio: { volume: 1, normalize: false }, ensureAudio: true });
+  await ffmpeg.trim(source, quiet, 0, 2, { audio: { volume: 0.1, normalize: false }, ensureAudio: true });
+  const loudBefore = await ffmpeg.measureLoudness(loud);
+  const quietBefore = await ffmpeg.measureLoudness(quiet);
+  assert.ok(loudBefore && quietBefore);
+  assert.ok(Math.abs(loudBefore.integratedLufs - quietBefore.integratedLufs) > 8);
+
+  await ffmpeg.trim(loud, loudNormalized, 0, 2, { audio: { volume: 1, normalize: true }, ensureAudio: true });
+  await ffmpeg.trim(quiet, quietNormalized, 0, 2, { audio: { volume: 1, normalize: true }, ensureAudio: true });
+  const loudAfter = await ffmpeg.measureLoudness(loudNormalized);
+  const quietAfter = await ffmpeg.measureLoudness(quietNormalized);
+  assert.ok(loudAfter && quietAfter);
+  assert.ok(Math.abs(loudAfter.integratedLufs - quietAfter.integratedLufs) < 1);
+  assert.ok(Math.abs(loudAfter.integratedLufs - -16) < 1);
+  assert.ok(Math.abs(quietAfter.integratedLufs - -16) < 1);
+});
+
+test('muted timeline clips keep a silent audio stream for concat', async () => {
+  const root = makeTempRoot('ffmpeg-muted');
+  roots.push(root);
+  const ffmpeg = new Ffmpeg();
+  const source = join(root, 'source.mp4');
+  const muted = join(root, 'muted.mp4');
+  const out = join(root, 'out.mp4');
+  await ffmpeg.syntheticVideo(source, 0.8, 'Muted', '640x360');
+  await ffmpeg.trim(source, muted, 0, 0.8, { audio: { mute: true, normalize: true }, ensureAudio: true });
+  assert.equal((await ffmpeg.probe(muted)).hasAudio, true);
+  await ffmpeg.concat([muted, source], out, { transitions: [{ type: 'cut', duration: 0 }] });
+  assert.equal((await ffmpeg.probe(out)).hasAudio, true);
+});

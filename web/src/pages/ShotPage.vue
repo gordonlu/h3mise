@@ -83,11 +83,14 @@ async function refreshAiStatus() {
   }
 }
 
-/** Active render provider: prefer the real RunningHub when configured, else
- * whatever the server exposes (e.g. mock in offline mode). */
+/** Respect the project's explicit provider choice. Never silently fall back
+ * from a local workflow to a paid cloud provider (or vice versa). */
 const activeProvider = computed(() => {
-  const rh = project.providers.find((p) => p.id === 'runninghub' && p.configured);
-  return rh ?? project.providers[0] ?? null;
+  const preferred = project.current?.config.default_provider ?? 'runninghub';
+  return project.providers.find((provider) => provider.id === preferred)
+    ?? project.providers.find((provider) => provider.id === 'mock')
+    ?? project.providers[0]
+    ?? null;
 });
 const providerId = computed(() => activeProvider.value?.id ?? 'runninghub');
 

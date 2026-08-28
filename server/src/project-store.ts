@@ -273,7 +273,7 @@ export class ProjectStore {
         ? raw.default_aspect_ratio
         : DEFAULT_CONFIG.default_aspect_ratio,
       visual_style: typeof raw.visual_style === 'string' ? raw.visual_style : DEFAULT_CONFIG.visual_style,
-      default_provider: typeof raw.default_provider === 'string' && raw.default_provider
+      default_provider: raw.default_provider && ['runninghub', 'comfyui', 'mock'].includes(raw.default_provider)
         ? raw.default_provider
         : DEFAULT_CONFIG.default_provider,
       default_video_model: typeof raw.default_video_model === 'string' && raw.default_video_model

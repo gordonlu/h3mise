@@ -303,6 +303,39 @@ onUnmounted(() => off?.());
               @change="updateClip(activeClip.id, { transitionDuration: Number(($event.target as HTMLInputElement).value) })"
             /> 秒
           </label>
+          <div class="audio-controls">
+            <div class="audio-title">声音</div>
+            <label class="audio-option">
+              <input
+                type="checkbox"
+                :checked="activeClip.audio.normalize"
+                :disabled="activeClip.audio.mute"
+                @change="updateClip(activeClip.id, { audio: { ...activeClip.audio, normalize: ($event.target as HTMLInputElement).checked } })"
+              />
+              <span><strong>统一片段响度（推荐）</strong><small>导出时按对白标准归一到 -16 LUFS，避免不同 Take 忽大忽小。</small></span>
+            </label>
+            <label class="audio-option compact">
+              <input
+                type="checkbox"
+                :checked="activeClip.audio.mute"
+                @change="updateClip(activeClip.id, { audio: { ...activeClip.audio, mute: ($event.target as HTMLInputElement).checked } })"
+              />
+              静音此片段
+            </label>
+            <label class="row muted">
+              手动音量
+              <input
+                type="range"
+                min="0"
+                max="2"
+                step="0.05"
+                :disabled="activeClip.audio.mute"
+                :value="activeClip.audio.volume"
+                @change="updateClip(activeClip.id, { audio: { ...activeClip.audio, volume: Number(($event.target as HTMLInputElement).value) } })"
+              />
+              <span class="mono volume-value">{{ Math.round(activeClip.audio.volume * 100) }}%</span>
+            </label>
+          </div>
           <div class="muted">片段时长 {{ clipDuration(activeClip).toFixed(1) }}s · 原始 {{ (takeDuration.get(activeClip.takeId) ?? 0).toFixed(1) }}s</div>
           <button class="sm danger" @click="removeClip(activeClip.id)">从时间线移除</button>
         </div>
@@ -371,6 +404,14 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .trim-controls { gap: 10px; align-content: start; }
 .control-help, .first-clip-note { padding: 9px 11px; border-radius: 6px; background: var(--bg-subtle); color: var(--text-2); font-size: 12px; line-height: 1.55; }
 .first-clip-note { color: var(--text-3); }
+.audio-controls { display: grid; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-subtle); }
+.audio-title { font-size: 12px; font-weight: 700; }
+.audio-option { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-2); }
+.audio-option input { margin-top: 2px; }
+.audio-option span { display: grid; gap: 2px; }
+.audio-option small { color: var(--text-3); line-height: 1.45; }
+.audio-option.compact { align-items: center; }
+.volume-value { min-width: 42px; text-align: right; }
 .trim-io { gap: 6px; }
 .trim-input { width: 72px; }
 .add-row { padding: 5px 0; border-bottom: 1px dashed var(--line); }

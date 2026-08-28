@@ -2,6 +2,12 @@
 
 import type { H3Mode } from './director.js';
 
+export interface ProviderVerification {
+  status: 'unconfigured' | 'nodes_detected' | 'verified' | 'failed';
+  checkedAt: string | null;
+  note: string;
+}
+
 // Provider / AI profiles
 // ---------------------------------------------------------------------------
 
@@ -57,21 +63,54 @@ export interface AiAppProfile {
   /** Per-key node bindings for providerParams (P0-4): unknown params are
    * rejected, never guessed into an arbitrary node. */
   providerParamBindings?: Record<string, { nodeId: string; fieldName: string }>;
-  verification: {
-    /** unconfigured → nodes_detected (layout probed, mapping NOT confirmed) →
-     * verified (a real submission succeeded against this profile). */
-    status: 'unconfigured' | 'nodes_detected' | 'verified' | 'failed';
-    checkedAt: string | null;
-    note: string;
+  verification: ProviderVerification;
+}
+
+export interface ComfyUiInputBinding {
+  nodeId: string;
+  inputName: string;
+  /** Translate H3Mise canonical values (for example "16:9") to the exact
+   * widget value expected by a workflow. */
+  valueMap?: Record<string, string | number | boolean>;
+}
+
+export interface ComfyUiApiNode {
+  class_type: string;
+  inputs: Record<string, unknown>;
+  _meta?: { title?: string; [key: string]: unknown };
+}
+
+export interface ComfyUiWorkflowProfile {
+  provider: 'comfyui';
+  baseUrl: string;
+  /** Local ComfyUI uses no prefix. Keep configurable for compatible proxies. */
+  apiPrefix: string;
+  clientId: string;
+  /** Non-loopback URLs are rejected unless the user explicitly opts in. */
+  allowRemote: boolean;
+  workflow: Record<string, ComfyUiApiNode>;
+  inputs: {
+    prompt?: ComfyUiInputBinding;
+    mode?: ComfyUiInputBinding;
+    firstFrame?: ComfyUiInputBinding;
+    lastFrame?: ComfyUiInputBinding;
+    refImages: ComfyUiInputBinding[];
+    duration?: ComfyUiInputBinding;
+    aspectRatio?: ComfyUiInputBinding;
+    megapixels?: ComfyUiInputBinding;
   };
+  outputNodeId?: string;
+  providerParamBindings?: Record<string, ComfyUiInputBinding>;
+  capabilities: ProviderCapabilities;
+  verification: ProviderVerification;
 }
 
 export interface ProviderStatus {
   id: string;
   name: string;
-  kind: 'runninghub_ai_app';
+  kind: 'runninghub_ai_app' | 'comfyui_local' | 'mock';
   configured: boolean;
-  verification: AiAppProfile['verification'];
+  verification: ProviderVerification;
   capabilities: ProviderCapabilities | null;
 }
 

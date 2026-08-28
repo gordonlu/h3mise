@@ -2,13 +2,14 @@
 // Single source of truth for every business entity. Pure types — no runtime deps.
 
 export type ProjectFormat = 'single_shot' | 'sequence' | 'story';
+export type VideoProviderId = 'runninghub' | 'comfyui' | 'mock';
 
 export interface ProjectConfig {
   title: string;
   format: ProjectFormat;
   default_aspect_ratio: string;
   visual_style?: string;
-  default_provider: string;
+  default_provider: VideoProviderId;
   default_video_model: string;
   default_duration_seconds: number;
 }

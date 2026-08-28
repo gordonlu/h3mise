@@ -96,10 +96,12 @@ export function buildRoutes(services: AppServices): App {
 
   app.get('/api/health', async (c) => {
     const caps = await services.ffmpeg.capabilityCheck();
+    const comfyVerification = services.providers.getComfyUiProfile().verification.status;
     return c.json({
       ok: true,
       ffmpeg: caps,
       runningHubConfigured: services.providers.runningHubKeyPresent,
+      comfyUiConfigured: comfyVerification === 'nodes_detected' || comfyVerification === 'verified',
       providerMode: services.providers.providerMode,
       aiConfigured: services.ai.status.configured,
       projectOpen: Boolean(services.store.current),
@@ -234,7 +236,7 @@ export function buildRoutes(services: AppServices): App {
     const ctx = p(c);
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     // P2: whitelist — arbitrary keys must not be persisted into project.json.
-    const allowed: Array<keyof typeof ctx.config> = ['title', 'format', 'default_aspect_ratio', 'visual_style', 'default_duration_seconds'];
+    const allowed: Array<keyof typeof ctx.config> = ['title', 'format', 'default_aspect_ratio', 'visual_style', 'default_provider', 'default_duration_seconds'];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
       if (body[key] !== undefined) patch[key] = body[key];
@@ -245,6 +247,9 @@ export function buildRoutes(services: AppServices): App {
     }
     if (patch.default_aspect_ratio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(String(patch.default_aspect_ratio))) {
       return c.json({ error: 'invalid default_aspect_ratio' }, 400);
+    }
+    if (patch.default_provider !== undefined && !['runninghub', 'comfyui', 'mock'].includes(String(patch.default_provider))) {
+      return c.json({ error: 'invalid default_provider' }, 400);
     }
     const duration = Number(patch.default_duration_seconds);
     if (patch.default_duration_seconds !== undefined && (!Number.isFinite(duration) || duration <= 0)) delete patch.default_duration_seconds;
@@ -465,7 +470,7 @@ export function buildRoutes(services: AppServices): App {
     const report = await preflightMod.runBasicPreflight(ctx, services.providers, {
       shotId,
       promptVersionId: String(body.promptVersionId ?? promptMod.listPrompts(ctx, shotId).at(-1)?.id ?? ''),
-      providerId: String(body.providerId ?? 'runninghub'),
+      providerId: String(body.providerId ?? ctx.config.default_provider ?? 'runninghub'),
       megapixels: body.megapixels !== undefined ? Number(body.megapixels) : undefined,
     });
     return c.json(report, 201);
@@ -482,7 +487,7 @@ export function buildRoutes(services: AppServices): App {
     const body = await c.req.json();
     const shotId = String(body.shotId);
     const promptVersionId = String(body.promptVersionId);
-    const providerId = String(body.providerId ?? 'runninghub');
+    const providerId = String(body.providerId ?? ctx.config.default_provider ?? 'runninghub');
     // P0-2: build the EXACT render intent (client overrides included), gate
     // on that intent, and only then submit. The intent hash is persisted on
     // the job so any later re-submission can be audited against it.
@@ -512,11 +517,15 @@ export function buildRoutes(services: AppServices): App {
           preflight,
         }, 422);
       }
-      const profile = services.providers.getProfile();
-      const intentHash = preflightMod.renderIntentHash(intent, { appId: profile?.appId ?? '', checkedAt: profile?.verification.checkedAt ?? null });
+      const runningHubProfile = services.providers.getProfile();
+      const comfyProfile = services.providers.getComfyUiProfile();
+      const profileRef = providerId === 'comfyui'
+        ? { appId: `comfyui:${comfyProfile.clientId}`, checkedAt: comfyProfile.verification.checkedAt }
+        : { appId: runningHubProfile?.appId ?? providerId, checkedAt: runningHubProfile?.verification.checkedAt ?? null };
+      const intentHash = preflightMod.renderIntentHash(intent, profileRef);
       const request = {
         provider: providerId,
-        aiAppId: body.aiAppId ?? '2089265538441764866',
+        aiAppId: providerId === 'runninghub' ? body.aiAppId ?? runningHubProfile?.appId ?? '2089265538441764866' : 'comfyui-local',
         mode: intent.mode,
         promptVersionId,
         durationSeconds: intent.durationSeconds,
@@ -791,6 +800,22 @@ export function buildRoutes(services: AppServices): App {
   });
   app.post('/api/providers/runninghub/verify', async (c) => {
     const profile = await services.providers.detectAndVerify();
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(profile);
+  });
+  app.get('/api/providers/comfyui/profile', (c) => c.json(services.providers.getComfyUiProfile()));
+  app.put('/api/providers/comfyui/profile', async (c) => {
+    const profile = services.providers.saveComfyUiProfile(await c.req.json());
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(profile);
+  });
+  app.post('/api/providers/comfyui/import', async (c) => {
+    const profile = services.providers.importComfyUiWorkflow(await c.req.json());
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(profile);
+  });
+  app.post('/api/providers/comfyui/verify', async (c) => {
+    const profile = await services.providers.verifyComfyUi();
     services.bus.emit({ type: 'project.updated' });
     return c.json(profile);
   });

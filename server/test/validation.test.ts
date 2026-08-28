@@ -52,6 +52,12 @@ test('domain validation rejects invalid entities, shots, and timeline trims', as
   const clip = addClip(p, { shotId, takeId: take.id });
   assert.throws(() => updateClip(p, clip.id, { trimOut: take.duration + 1 }), /trimOut/);
   assert.throws(() => updateClip(p, clip.id, { trimIn: 2.95, trimOut: 3 }), /trimOut/);
+  assert.deepEqual(clip.audio, { volume: 1, mute: false, normalize: true });
+  assert.throws(() => updateClip(p, clip.id, { audio: { volume: 3, mute: false, normalize: true } }), /audio volume/);
+  p.db.run("UPDATE timeline_clips SET audio_json = '{\"volume\":0.8,\"mute\":false}' WHERE id = ?", [clip.id]);
+  assert.equal(getTimeline(p).clips[0]?.audio.normalize, true);
+  const audioUpdated = updateClip(p, clip.id, { audio: { volume: 0.8, mute: false, normalize: false } });
+  assert.deepEqual(audioUpdated.audio, { volume: 0.8, mute: false, normalize: false });
 });
 
 test('deleting a shot removes its generated take file', async () => {

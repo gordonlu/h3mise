@@ -1,17 +1,19 @@
 // Provider registry — the only place UI/code selects a render backend.
-// v0.1: 'runninghub' (real) + 'mock' (offline). Provider profiles persist in
+// RunningHub (cloud), ComfyUI (local), and Mock (offline). Provider profiles persist in
 // the GLOBAL registry DB (account-level: the AI App belongs to the user's
-// RunningHub account, not to any single project), so switching projects never
-// loses the verified node mapping.
+// the global registry DB rather than a project DB, so switching projects never
+// loses a verified workflow mapping.
 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { AiAppProfile, H3Mode, ProviderCapabilities, ProviderStatus, ReferenceRole } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, ProviderCapabilities, ProviderStatus } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 import type { VideoProvider } from './types.js';
 import { RunningHubAiAppProvider } from './runninghub.js';
+import { ComfyUiProvider } from './comfyui.js';
+import { defaultComfyUiProfile, importComfyUiWorkflow, sanitizeComfyUiProfile } from './comfyui-profile.js';
 import { MockProvider } from './mock.js';
 
 export const H3_AI_APP_ID = '2089265538441764866';
@@ -204,6 +206,8 @@ export class ProviderRegistry {
     const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub'");
     if (row) profile = jget<AiAppProfile>(row.profile_json, profile);
     this.providers.set('runninghub', new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile }));
+    const comfyProfile = this.getComfyUiProfile();
+    this.providers.set('comfyui', new ComfyUiProvider(comfyProfile));
     this.providers.set('mock', mock);
   }
 
@@ -229,6 +233,10 @@ export class ProviderRegistry {
         caps = { supportedModes: [] };
       }
     }
+    if (prov instanceof ComfyUiProvider) {
+      const status = this.getComfyUiProfile().verification.status;
+      if (status === 'unconfigured' || status === 'failed') caps = { supportedModes: [] };
+    }
     this.capsCache.set(id, caps);
     return caps;
   }
@@ -241,11 +249,12 @@ export class ProviderRegistry {
     for (const [id, prov] of this.providers) {
       const caps = await this.capabilities(id);
       const isRh = prov instanceof RunningHubAiAppProvider;
-      const profile = isRh ? this.getProfile() : null;
+      const isComfy = prov instanceof ComfyUiProvider;
+      const profile = isRh ? this.getProfile() : isComfy ? this.getComfyUiProfile() : null;
       out.push({
         id,
         name: prov.name,
-        kind: 'runninghub_ai_app',
+        kind: isRh ? 'runninghub_ai_app' : isComfy ? 'comfyui_local' : 'mock',
         configured: prov.configured,
         verification: profile?.verification ?? { status: 'unconfigured', checkedAt: null, note: 'mock provider' },
         capabilities: caps ?? null,
@@ -386,5 +395,91 @@ export class ProviderRegistry {
       verification: { status: 'verified', checkedAt: new Date().toISOString(), note: 'a real render submission succeeded against this profile' },
     };
     return this.saveProfile(updated);
+  }
+
+  getComfyUiProfile(): ComfyUiWorkflowProfile {
+    const fallback = defaultComfyUiProfile();
+    const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'comfyui'");
+    return row ? sanitizeComfyUiProfile(jget<unknown>(row.profile_json, fallback)) : fallback;
+  }
+
+  private persistComfyUiProfile(profile: ComfyUiWorkflowProfile): ComfyUiWorkflowProfile {
+    this.getRegistryDb().run(
+      'INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at',
+      ['comfyui', j(profile), new Date().toISOString()],
+    );
+    this.refresh();
+    return profile;
+  }
+
+  saveComfyUiProfile(raw: unknown): ComfyUiWorkflowProfile {
+    return this.persistComfyUiProfile(sanitizeComfyUiProfile(raw, { resetVerification: true }));
+  }
+
+  importComfyUiWorkflow(raw: unknown): ComfyUiWorkflowProfile {
+    return this.persistComfyUiProfile(importComfyUiWorkflow(this.getComfyUiProfile(), raw));
+  }
+
+  async verifyComfyUi(): Promise<ComfyUiWorkflowProfile> {
+    const current = this.getComfyUiProfile();
+    const provider = new ComfyUiProvider(current);
+    try {
+      if (!Object.keys(current.workflow).length) throw new Error('请先导入 ComfyUI API Format 工作流');
+      if (!current.capabilities.supportedModes.length) throw new Error('没有识别到可用的 Prompt 或参考图输入映射');
+      const slots = [
+        current.inputs.prompt,
+        current.inputs.mode,
+        current.inputs.firstFrame,
+        current.inputs.lastFrame,
+        ...current.inputs.refImages,
+        current.inputs.duration,
+        current.inputs.aspectRatio,
+        current.inputs.megapixels,
+        ...Object.values(current.providerParamBindings ?? {}),
+      ].filter((slot): slot is ComfyUiInputBinding => Boolean(slot));
+      for (const slot of slots) {
+        const node = current.workflow[slot.nodeId];
+        if (!node) throw new Error(`映射引用了不存在的节点 ${slot.nodeId}`);
+        if (!Object.prototype.hasOwnProperty.call(node.inputs, slot.inputName)) {
+          throw new Error(`节点 ${slot.nodeId} 没有输入字段 ${slot.inputName}`);
+        }
+      }
+      await provider.probe();
+      return this.persistComfyUiProfile({
+        ...current,
+        verification: {
+          status: 'nodes_detected',
+          checkedAt: new Date().toISOString(),
+          note: `connected to ${current.baseUrl}${current.apiPrefix}; workflow has ${Object.keys(current.workflow).length} nodes — mapping awaits one successful render`,
+        },
+      });
+    } catch (error) {
+      return this.persistComfyUiProfile({
+        ...current,
+        verification: {
+          status: 'failed',
+          checkedAt: new Date().toISOString(),
+          note: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  confirmProviderVerified(providerId: string): void {
+    if (providerId === 'runninghub') {
+      this.confirmVerified();
+      return;
+    }
+    if (providerId === 'comfyui') {
+      const profile = this.getComfyUiProfile();
+      this.persistComfyUiProfile({
+        ...profile,
+        verification: {
+          status: 'verified',
+          checkedAt: new Date().toISOString(),
+          note: 'a real ComfyUI prompt was accepted with this workflow mapping',
+        },
+      });
+    }
   }
 }

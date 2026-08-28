@@ -14,7 +14,7 @@
 
 把「写 Prompt、反复抽卡」变成「设计 Shot、选择 Take、剪辑成片」。
 
-H3Mise 是一个 **local-first、Shot-first、AI-optional** 的生成式视频导演工作台。故事、资产、镜头设计、Prompt、Take、连续性和时间线都保存在本地；RunningHub 只负责执行视频生成工作流。
+H3Mise 是一个 **local-first、Shot-first、AI-optional** 的生成式视频导演工作台。故事、资产、镜头设计、Prompt、Take、连续性和时间线都保存在本地；生成可交给本机 ComfyUI、RunningHub AI App 或离线 Mock Provider。
 
 ![Good Boy 导演台](docs/screenshots/director-desk.png)
 
@@ -41,8 +41,10 @@ H3Mise 是一个 **local-first、Shot-first、AI-optional** 的生成式视频�
 - **多模态 AI**：完善镜头设计和连续性时可读取参考图或尾帧；识图失败会自动回退到文字上下文。
 - **人物与生物主角**：人物、动物、机器人和拟人生物均可绑定 CharacterState。
 - **可控生成**：支持文生视频、首帧生视频、首尾帧生视频、参考图生视频等模式，以及 `0.6 / 0.8 / 1.0 / 1.2 MP` 输出档位。
+- **可选渲染后端**：项目可明确选择 ComfyUI Local、RunningHub AI App 或 Mock；Provider 未配置时不会静默切到另一个真实服务。
 - **连续性工作流**：Selected 后明确引导记录尾帧状态，并可将 Actual 状态继承到下一镜头的 Planned 状态。
 - **本地时间线**：选中 Take 后可裁切、加转场，并在本地 FFmpeg 导出成片。
+- **统一成片响度**：导出时可逐片段执行两遍响度归一化，减少不同 Take 之间忽大忽小的问题。
 - **渲染队列**：任务持久化、状态恢复、运行时长和历史耗时展示。
 - **防浪费**：付费渲染前执行本地 Preflight，拦截缺失素材或配置错误。
 - **项目锁**：同一浏览器的多个标签页不会并发操作不同项目，可明确切换当前项目。
@@ -66,7 +68,7 @@ pnpm start
 
 首次进入“项目”页，可安装内置 Demo。项目会复制到本地数据目录，修改不会影响仓库中的原始示例。
 
-> 未配置 RunningHub API Key 时可使用 Mock Provider，离线体验完整流程。
+> 不准备真实生成时可使用 Mock Provider，离线体验完整流程；本地生成可按 [ComfyUI 接入指南](ComfyUI.md) 导入自己的 API Format 工作流。
 
 ## 配置
 
@@ -76,11 +78,12 @@ pnpm start
 | --- | --- |
 | **RunningHub API Key** | 真实渲染所需；也可使用 `RUNNINGHUB_API_KEY` 环境变量 |
 | **AI App** | 可粘贴自己的 AI App ID 和节点映射，或自动检测工作流节点 |
+| **ComfyUI Local** | 导入 `workflow_api.json`，检查输入映射并检测本地服务；详见 [ComfyUI.md](ComfyUI.md) |
 | **内置 AI** | 使用 `AI_BASE_URL / AI_API_KEY / AI_MODEL` 配置 OpenAI 兼容模型 |
 
 其他可选环境变量：`PORT`（默认 `4789`）、`H3MISE_HOME`（默认 `~/.h3mise`）、`H3MISE_PROVIDER=mock|runninghub`、`H3MISE_SERVE_WEB=0`。
 
-如果不熟悉 RunningHub，或需要适配字段不同的自定义 AI App，可以让编码助手先阅读 [AGENTS.md](AGENTS.md)。其中包含安全配置、自动节点检测、手工映射和首次低成本验证步骤；助手不应索取或输出 API Key，也不能未经确认发起付费渲染。
+如果不熟悉 Provider，可以让编码助手先阅读 [AGENTS.md](AGENTS.md)。RunningHub 的安全配置、自动节点检测与首次低成本验证写在其中；ComfyUI 的 Agent 接入协议、Profile 映射和排错步骤在 [ComfyUI.md](ComfyUI.md)。助手不能未经确认发起真实渲染。
 
 ## 页面
 

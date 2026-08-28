@@ -328,8 +328,8 @@ export class RenderQueue {
   }
 
   /**
-   * Best-effort cancel: stops local tracking and polling. Remote RunningHub
-   * tasks cannot be cancelled and may still consume credits (the UI warns).
+   * Best-effort cancel: stops local tracking and polling. A Provider may not
+   * be able to stop work already running remotely or in a shared local queue.
    * Never throws 鈥?cancelling an already-finished/unknown job is a no-op.
    */
   async cancel(jobId: string): Promise<void> {
@@ -565,7 +565,7 @@ export class RenderQueue {
         // mapping is executable 鈫?profile becomes 'verified'.
         if (job.provider !== 'mock') {
           try {
-            this.registry.confirmVerified();
+            this.registry.confirmProviderVerified(job.provider);
           } catch {
             /* profile persistence is best-effort here */
           }

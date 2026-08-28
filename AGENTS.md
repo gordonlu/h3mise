@@ -7,6 +7,7 @@ This file tells coding assistants how to help a user run and configure H3Mise sa
 - H3Mise is local-first. Projects live under `H3MISE_HOME` (default `~/.h3mise`); do not commit, move, delete, or rewrite a user's project unless explicitly asked.
 - RunningHub is a paid render provider. H3Mise sends an AI App a prompt, references, duration, aspect ratio, megapixels, and optional mapped parameters.
 - The built-in Mock Provider is the safe fallback for learning and offline testing.
+- ComfyUI Local is a separate render provider. Its workflow mapping and safe Agent procedure are documented in `ComfyUI.md`; read that file before importing or editing a ComfyUI profile.
 - A `Shot` is the plan; a `Take` is a generated result. Never overwrite a Take to represent a new render.
 
 ## Help a first-time user
@@ -59,6 +60,16 @@ RunningHub AI Apps are not assumed to share fixed node IDs or field names. Treat
 7. Save the profile through `PUT /api/providers/runninghub/profile`, rerun Preflight, and make one minimal user-approved real submission. Only that successful submission may promote the profile to `verified`.
 
 If detection fails or the workflow cannot express a requested H3 mode, keep that mode disabled and fall back to Mock or a supported mode. Do not bypass capability checks.
+
+## Connect ComfyUI
+
+- Use a workflow exported in ComfyUI **API Format**, never a UI-only workflow JSON.
+- Keep RunningHub and ComfyUI profiles separate. A project selects one Provider explicitly; never silently fall back to a different real Provider.
+- Inspect inferred node/input mappings before verification. Ambiguous inputs must remain disabled until the user or their Agent maps them explicitly.
+- Connection verification may call `/system_stats` and `/object_info`, but it must not submit `/prompt`.
+- Default to loopback URLs. A non-loopback URL requires an explicit `allowRemote: true` after the endpoint has been reviewed.
+- Current ComfyUI reference upload supports images only. Do not pretend audio or video bindings are connected.
+- Follow the complete procedure and Profile schema in `ComfyUI.md`.
 
 ## Render safety rules
 

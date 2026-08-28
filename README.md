@@ -1,3 +1,13 @@
+<p align="center">
+  <img src="docs/images/h3mise-readme-banner.png" alt="H3Mise — Local-first AI video director workstation" width="100%">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f4511e" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Node.js-%E2%89%A522-339933" alt="Node.js 22 or newer">
+  <img src="https://img.shields.io/badge/local--first-yes-f4511e" alt="Local-first">
+</p>
+
 # H3Mise — 本地 AI 视频导演工作台
 
 > **mise** 来自电影术语 *mise-en-scène*（场面调度）。
@@ -92,3 +102,7 @@ scripts/  # 运维与验证脚本
 ```
 
 技术栈：Vue 3 + TypeScript + Vite · Node.js + Hono · SQLite (`node:sqlite`) · FFmpeg · SSE
+
+## License
+
+H3Mise 使用 [MIT License](LICENSE) 开源。Copyright © 2026 Gordon.

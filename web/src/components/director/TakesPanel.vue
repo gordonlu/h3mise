@@ -26,6 +26,7 @@ const props = defineProps<{
   committedTakeId: string | null;
   entities: EntityLite[];
   characterStates: StateLite[];
+  onImport: (file: File) => Promise<Take>;
   onSelect: (id: string) => Promise<void>;
   onReject: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -48,6 +49,9 @@ const playerB = ref<InstanceType<typeof VideoPlayer> | null>(null);
 const tagOpen = ref<Record<string, boolean>>({});
 const noteEdit = ref<string | null>(null);
 const busyId = ref<string | null>(null);
+const importInput = ref<HTMLInputElement | null>(null);
+const importBusy = ref(false);
+const importError = ref('');
 
 const activeTake = computed(() => props.takes.find((t) => t.id === active.value) ?? null);
 const takeA = computed(() => props.takes.find((t) => t.id === slotA.value) ?? null);
@@ -75,6 +79,22 @@ async function removeRejectedTake(take: Take) {
   if (active.value === take.id) active.value = null;
   if (slotA.value === take.id) slotA.value = null;
   if (slotB.value === take.id) slotB.value = null;
+}
+
+async function onImportPick(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  importBusy.value = true;
+  importError.value = '';
+  try {
+    await props.onImport(file);
+  } catch (error) {
+    importError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    importBusy.value = false;
+    input.value = '';
+  }
 }
 
 // --- A/B sync ---------------------------------------------------------------
@@ -222,6 +242,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 
 <template>
   <div class="col">
+    <div class="panel import-take-bar">
+      <input
+        ref="importInput"
+        class="file-input"
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+        @change="onImportPick"
+      />
+      <div>
+        <strong>已经在其他工具生成了视频？</strong>
+        <span>导入后会成为这个 Shot 的 Candidate Take，不会发起渲染或产生费用。</span>
+        <span v-if="importError" class="import-error">导入失败：{{ importError }}</span>
+      </div>
+      <button class="sm" :disabled="importBusy" @click="importInput?.click()">
+        {{ importBusy ? '正在读取并抽帧…' : '导入已有视频' }}
+      </button>
+    </div>
+
     <!-- A/B compare tray -->
     <div v-if="slotA || slotB" class="panel compare-tray">
       <div class="panel-title spread">
@@ -291,7 +329,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       </div>
     </div>
 
-    <div v-if="!takes.length" class="muted takes-empty">还没有 Take。渲染完成后会出现在这里。</div>
+    <div v-if="!takes.length" class="muted takes-empty">还没有 Take。可以生成新视频，也可以导入已有视频。</div>
 
     <div v-if="needsContinuity && !commitTarget" class="panel continuity-next-step">
       <div>
@@ -387,7 +425,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
         </div>
         <div class="take-body col">
           <div class="spread">
-            <span class="mono take-id">{{ t.id }}</span>
+            <div class="row take-identity">
+              <span class="mono take-id">{{ t.id }}</span>
+              <span v-if="t.source === 'import'" class="badge info no-dot" :title="t.provenance.originalFileName">IMPORTED</span>
+            </div>
             <div class="stars" :title="`评分 ${t.rating ?? '—'}`">
               <span v-for="i in 5" :key="i" class="star" :class="{ on: (t.rating ?? 0) >= i }" @click="setRating(t, i)">★</span>
             </div>
@@ -459,6 +500,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 </template>
 
 <style scoped>
+.file-input { display: none; }
+.import-take-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border-style: dashed; }
+.import-take-bar > div { display: grid; gap: 3px; min-width: 0; }
+.import-take-bar strong { font-size: 13px; }
+.import-take-bar span { color: var(--text-2); font-size: 11.5px; }
+.import-take-bar button { flex: none; }
+.import-take-bar .import-error { color: var(--bad); }
 .takes { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 .take { overflow: hidden; transition: border-color 0.15s, box-shadow 0.15s; }
 .take.selected { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok), var(--shadow-1); }
@@ -474,6 +522,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 .take-cover:hover .play-hint { opacity: 1; }
 .take-body { padding: 10px 12px; }
 .take-id { font-size: 11.5px; color: var(--text-2); }
+.take-identity { min-width: 0; }
 .stars { display: flex; gap: 1px; }
 .star { color: var(--line-2); cursor: pointer; font-size: 14px; transition: color 0.1s, transform 0.1s; }
 .star:hover { transform: scale(1.2); }

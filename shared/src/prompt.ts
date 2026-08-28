@@ -9,6 +9,7 @@ export type PromptSource =
   | 'deterministic_compiler'
   | 'ai_compiler'
   | 'external_ai'
+  | 'import'
   | 'manual';
 
 export interface PromptVersion {

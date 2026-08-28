@@ -946,6 +946,7 @@ const TABS = [
         :committed-take-id="currentActualContinuity?.sourceTakeId ?? null"
         :entities="sDetail?.entities ?? []"
         :character-states="sDetail?.characterStates ?? []"
+        :on-import="s.importTake"
         :on-select="s.selectTake"
         :on-reject="s.rejectTake"
         :on-delete="s.deleteTake"

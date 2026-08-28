@@ -106,6 +106,14 @@ export function useShot(shotId: string) {
     }
   }
 
+  async function importTake(file: File): Promise<Take> {
+    const form = new FormData();
+    form.append('file', file);
+    const take = await post<Take>(`/api/shots/${shotId}/takes/import`, form);
+    await load();
+    return take;
+  }
+
   async function selectTake(takeId: string) {
     await post(`/api/takes/${takeId}/select`);
     await load();
@@ -175,6 +183,7 @@ export function useShot(shotId: string) {
     runPreflight,
     attachSemanticReview,
     render,
+    importTake,
     selectTake,
     rejectTake,
     deleteTake,

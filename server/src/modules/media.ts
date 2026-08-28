@@ -34,7 +34,7 @@ function kindForMime(mime: string): MediaKind | null {
 export function importableKindForMime(mime: string): 'image' | 'audio' {
   const kind = kindForMime(mime);
   if (!kind) throw new Error(`unsupported media type: ${mime}`);
-  if (kind === 'video') throw new Error('视频上传已关闭：当前工作流只接受图片和参考音频');
+  if (kind === 'video') throw new Error('视频请从 Shot 的 Takes 区导入；资产库只接受图片和参考音频');
   return kind;
 }
 

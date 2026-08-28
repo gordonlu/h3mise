@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { makeTempRoot, cleanupTempRoot } from './helpers.js';
-import { Ffmpeg } from '../src/ffmpeg.js';
+import { Ffmpeg, parseLoudnessMeasurement } from '../src/ffmpeg.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -91,6 +91,33 @@ test('two-pass loudness normalization aligns quiet and loud clips', async () => 
   assert.ok(Math.abs(loudAfter.integratedLufs - quietAfter.integratedLufs) < 1);
   assert.ok(Math.abs(loudAfter.integratedLufs - -16) < 1);
   assert.ok(Math.abs(quietAfter.integratedLufs - -16) < 1);
+});
+
+test('loudness parser ignores truncated JSON-like AIGC metadata from imported videos', () => {
+  const stderr = `
+    AIGC            : {"Label": "1", "ProduceID": "RH_2093231239
+    encoder         : Lavf62.13.102
+  Duration: 00:00:15.08
+  [Parsed_loudnorm_0 @ 0x1234]
+  {
+    "input_i" : "-10.30",
+    "input_tp" : "-1.70",
+    "input_lra" : "3.90",
+    "input_thresh" : "-21.31",
+    "output_i" : "-16.32",
+    "output_tp" : "-7.24",
+    "output_lra" : "4.00",
+    "output_thresh" : "-27.26",
+    "normalization_type" : "dynamic",
+    "target_offset" : "0.32"
+  }`;
+  assert.deepEqual(parseLoudnessMeasurement(stderr), {
+    integratedLufs: -10.3,
+    truePeakDb: -1.7,
+    rangeLu: 3.9,
+    thresholdDb: -21.31,
+    targetOffset: 0.32,
+  });
 });
 
 test('muted timeline clips keep a silent audio stream for concat', async () => {

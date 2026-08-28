@@ -58,6 +58,24 @@ export interface LoudnessMeasurement {
   targetOffset: number;
 }
 
+/** Parse only the loudnorm measurement object. FFmpeg may print arbitrary
+ * media metadata before it; RunningHub videos, for example, carry a truncated
+ * `AIGC={...` tag in stderr. Starting at any `{` would swallow that tag and
+ * produce invalid JSON with raw log newlines inside a string. */
+export function parseLoudnessMeasurement(stderr: string): LoudnessMeasurement | null {
+  const matches = stderr.match(/\{\s*"input_i"\s*:\s*"[^"]+"[\s\S]*?"target_offset"\s*:\s*"[^"]+"\s*\}/g);
+  if (!matches?.length) return null;
+  const raw = JSON.parse(matches[matches.length - 1]!) as Record<string, string>;
+  const values = {
+    integratedLufs: Number(raw.input_i),
+    truePeakDb: Number(raw.input_tp),
+    rangeLu: Number(raw.input_lra),
+    thresholdDb: Number(raw.input_thresh),
+    targetOffset: Number(raw.target_offset),
+  };
+  return Object.values(values).every(Number.isFinite) ? values : null;
+}
+
 export interface FfmpegCapabilities {
   available: boolean;
   ffmpegVersion: string | null;
@@ -124,17 +142,7 @@ export class Ffmpeg {
     if (durationSeconds !== undefined) args.push('-t', String(Math.max(0.1, durationSeconds)));
     args.push('-map', '0:a:0', '-af', 'loudnorm=I=-16:LRA=11:TP=-1.5:print_format=json', '-f', 'null', '-');
     const { stderr } = await runResult('ffmpeg', args, path);
-    const matches = stderr.match(/\{[\s\S]*?"target_offset"\s*:\s*"[^"]+"[\s\S]*?\}/g);
-    if (!matches?.length) return null;
-    const raw = JSON.parse(matches[matches.length - 1]!) as Record<string, string>;
-    const values = {
-      integratedLufs: Number(raw.input_i),
-      truePeakDb: Number(raw.input_tp),
-      rangeLu: Number(raw.input_lra),
-      thresholdDb: Number(raw.input_thresh),
-      targetOffset: Number(raw.target_offset),
-    };
-    return Object.values(values).every(Number.isFinite) ? values : null;
+    return parseLoudnessMeasurement(stderr);
   }
 
   /** Extract one frame at `at` seconds into `outPath` (jpg). */

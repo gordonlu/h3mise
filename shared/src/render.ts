@@ -60,6 +60,14 @@ export interface RenderJob {
 // ---------------------------------------------------------------------------
 
 export type TakeStatus = 'candidate' | 'selected' | 'rejected';
+export type TakeSource = 'render' | 'import';
+
+export interface TakeProvenance {
+  originalFileName?: string;
+  provider?: string;
+  model?: string;
+  prompt?: string;
+}
 
 export const FAILURE_TAGS = [
   'identity_drift',
@@ -84,6 +92,8 @@ export interface Take {
   renderJobId: string;
   promptVersionId: string;
   directorPlanVersionId: string | null;
+  source: TakeSource;
+  provenance: TakeProvenance;
   localVideoPath: string; // relative under project shots/<shot>/takes/
   posterPath: string | null;
   firstFramePath: string | null;

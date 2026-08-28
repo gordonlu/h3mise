@@ -2,9 +2,9 @@
 // is explicit and does NOT auto-commit continuity. Frame Bridge artifacts
 // (poster / first / last frames) are generated locally on creation.
 
-import { join } from 'node:path';
-import { mkdir, unlink } from 'node:fs/promises';
-import { FAILURE_TAGS, type FailureTag, type Take } from '@h3mise/shared';
+import { extname, join } from 'node:path';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import { FAILURE_TAGS, type FailureTag, type Take, type TakeProvenance, type TakeSource } from '@h3mise/shared';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import type { ProjectContext } from '../project-store.js';
@@ -12,6 +12,7 @@ import type { Ffmpeg } from '../ffmpeg.js';
 import type { EventBus } from '../events.js';
 import { advanceShotStatus, advanceTo, getShot } from './shots.js';
 import { insertMedia, mediaUsage } from './assets.js';
+import { createPrompt } from './prompt.js';
 
 interface TakeRow {
   id: string;
@@ -19,6 +20,8 @@ interface TakeRow {
   render_job_id: string;
   prompt_version_id: string;
   director_plan_version_id: string | null;
+  source: string;
+  provenance_json: string;
   local_video_path: string;
   poster_path: string | null;
   first_frame_path: string | null;
@@ -38,6 +41,8 @@ export function takeFromRow(r: TakeRow): Take {
     renderJobId: r.render_job_id,
     promptVersionId: r.prompt_version_id,
     directorPlanVersionId: r.director_plan_version_id,
+    source: r.source as TakeSource,
+    provenance: jget<TakeProvenance>(r.provenance_json, {}),
     localVideoPath: r.local_video_path,
     posterPath: r.poster_path,
     firstFramePath: r.first_frame_path,
@@ -64,12 +69,16 @@ export function getTake(p: ProjectContext, id: string): Take {
 export async function createTake(
   p: ProjectContext,
   input: {
+    id?: string;
     shotId: string;
     renderJobId: string;
     promptVersionId: string;
     directorPlanVersionId: string | null;
+    source?: TakeSource;
+    provenance?: TakeProvenance;
     localVideoPath: string;
     duration: number;
+    notes?: string;
   },
   ffmpeg?: Ffmpeg,
 ): Promise<Take> {
@@ -78,7 +87,7 @@ export async function createTake(
   // Enforced twice: here and by UNIQUE(render_job_id) on takes.
   const existing = p.db.get<TakeRow>('SELECT * FROM takes WHERE render_job_id = ?', [input.renderJobId]);
   if (existing) return takeFromRow(existing);
-  const id = nextId(p.db, 'take');
+  const id = input.id ?? nextId(p.db, 'take');
   const now = new Date().toISOString();
   const framesDir = p.paths.shotFrames(input.shotId);
   await mkdir(framesDir, { recursive: true });
@@ -122,11 +131,116 @@ export async function createTake(
     }
   }
   p.db.run(
-    `INSERT INTO takes (id, shot_id, render_job_id, prompt_version_id, director_plan_version_id, local_video_path, poster_path, first_frame_path, last_frame_path, duration, status, rating, failure_tags_json, notes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', NULL, '[]', '', ?)`,
-    [id, input.shotId, input.renderJobId, input.promptVersionId, input.directorPlanVersionId, input.localVideoPath, posterPath, firstPath, lastPath, input.duration, now],
+    `INSERT INTO takes (id, shot_id, render_job_id, prompt_version_id, director_plan_version_id, source, provenance_json, local_video_path, poster_path, first_frame_path, last_frame_path, duration, status, rating, failure_tags_json, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', NULL, '[]', ?, ?)`,
+    [
+      id, input.shotId, input.renderJobId, input.promptVersionId, input.directorPlanVersionId,
+      input.source ?? 'render', j(input.provenance ?? {}), input.localVideoPath, posterPath,
+      firstPath, lastPath, input.duration, input.notes ?? '', now,
+    ],
   );
   return getTake(p, id);
+}
+
+const IMPORT_VIDEO_TYPES: Record<string, string> = {
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
+  'video/quicktime': '.mov',
+};
+
+function importedVideoExtension(fileName: string, mimeType: string): string {
+  const byMime = IMPORT_VIDEO_TYPES[mimeType.toLowerCase()];
+  if (byMime) return byMime;
+  const ext = extname(fileName).toLowerCase();
+  if (['.mp4', '.webm', '.mov'].includes(ext)) return ext;
+  throw new Error('unsupported imported video type; use MP4, WebM, or MOV');
+}
+
+/** Add an externally generated video to a Shot as a candidate Take. The
+ * supporting LOCAL_READY job is an audit record only: it never enters the
+ * provider queue and has zero cost. */
+export async function importTake(
+  p: ProjectContext,
+  input: {
+    shotId: string;
+    fileName: string;
+    mimeType: string;
+    data: Buffer;
+    provenance?: TakeProvenance;
+  },
+  ffmpeg: Ffmpeg,
+): Promise<Take> {
+  const shot = getShot(p, input.shotId);
+  const ext = importedVideoExtension(input.fileName, input.mimeType);
+  const takeId = nextId(p.db, 'take');
+  const relPath = join('shots', shot.id, 'takes', `${takeId}-imported${ext}`);
+  const absPath = p.resolveProjectPath(relPath);
+  await mkdir(p.paths.shotTakes(shot.id), { recursive: true });
+  await writeFile(absPath, input.data, { flag: 'wx' });
+
+  let duration = 0;
+  try {
+    const info = await ffmpeg.probe(absPath);
+    duration = Number(info.durationSeconds ?? 0);
+    if (!(duration > 0) || !(Number(info.width) > 0) || !(Number(info.height) > 0)) {
+      throw new Error('imported file does not contain a readable video stream');
+    }
+  } catch (error) {
+    await unlink(absPath).catch(() => undefined);
+    throw error;
+  }
+
+  const provenance: TakeProvenance = {
+    originalFileName: input.fileName,
+    provider: input.provenance?.provider?.trim() || 'external',
+    model: input.provenance?.model?.trim() || undefined,
+    prompt: input.provenance?.prompt?.trim() || undefined,
+  };
+  const prompt = createPrompt(p, {
+    shotId: shot.id,
+    source: 'import',
+    h3Mode: shot.h3Mode ?? 't2va',
+    text: provenance.prompt ?? '',
+  });
+  const jobId = nextId(p.db, 'job');
+  const now = new Date().toISOString();
+  p.db.run(
+    `INSERT INTO render_jobs (
+       id, project_id, shot_id, prompt_version_id, director_plan_version_id,
+       provider, status, submitted_at, started_at, finished_at,
+       request_snapshot_json, provider_response_snapshot_json, cost_json,
+       error, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, NULL, ?, 'LOCAL_READY', ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+    [
+      jobId, p.meta.id, shot.id, prompt.id, provenance.provider ?? 'external', now, now, now,
+      j({ source: 'import', originalFileName: input.fileName }),
+      j({ imported: true, originalFileName: input.fileName }),
+      j({ credits: 0, unit: 'local import' }), now, now,
+    ],
+  );
+
+  try {
+    const take = await createTake(p, {
+      id: takeId,
+      shotId: shot.id,
+      renderJobId: jobId,
+      promptVersionId: prompt.id,
+      directorPlanVersionId: null,
+      source: 'import',
+      provenance,
+      localVideoPath: relPath,
+      duration,
+      notes: `外部导入：${input.fileName}`,
+    }, ffmpeg);
+    p.db.run('UPDATE render_jobs SET take_id = ? WHERE id = ?', [take.id, jobId]);
+    advanceTo(p, shot.id, 'HAS_TAKES');
+    return take;
+  } catch (error) {
+    await unlink(absPath).catch(() => undefined);
+    p.db.run('DELETE FROM render_jobs WHERE id = ?', [jobId]);
+    p.db.run('DELETE FROM prompt_versions WHERE id = ?', [prompt.id]);
+    throw error;
+  }
 }
 
 export function updateTake(

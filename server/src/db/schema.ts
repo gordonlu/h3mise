@@ -340,6 +340,16 @@ CREATE TABLE timeline_exports (
 CREATE INDEX idx_timeline_exports_created ON timeline_exports(created_at);
 `,
   },
+  {
+    version: 11,
+    name: 'imported-take-provenance',
+    sql: `
+-- A Take may originate from an H3Mise render or an externally generated
+-- video imported into a Shot. Existing rows remain render Takes.
+ALTER TABLE takes ADD COLUMN source TEXT NOT NULL DEFAULT 'render';
+ALTER TABLE takes ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}';
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

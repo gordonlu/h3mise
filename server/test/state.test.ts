@@ -5,7 +5,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeStore, makeProject, makeShotWithPrompt, fakeTake, cleanupTempRoot, bus } from './helpers.js';
-import { listTakes, selectTake, getTake, rejectTake, updateTake, createTake, deleteRejectedTake } from '../src/modules/takes.js';
+import { listTakes, selectTake, getTake, rejectTake, updateTake, createTake, deleteRejectedTake, importTake } from '../src/modules/takes.js';
 import { getShot, advanceTo, advanceShotStatus, createShot } from '../src/modules/shots.js';
 import { commitContinuity, selectTakeAndCommit, emptyVisualState } from '../src/modules/continuity.js';
 import { getTimeline, addClip, addMissingSelectedTakes, invalidateShotClips, listTimelineExports, recoverTimelineExports, updateClip } from '../src/modules/timeline.js';
@@ -13,6 +13,7 @@ import { getPrompt, importRawPrompt } from '../src/modules/prompt.js';
 import { insertMedia, createBinding } from '../src/modules/assets.js';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import type { Ffmpeg } from '../src/ffmpeg.js';
 
 const roots: string[] = [];
 after(() => { for (const r of roots) cleanupTempRoot(r); });
@@ -105,6 +106,63 @@ test('createTake is idempotent per render job', async () => {
   });
   assert.equal(second.id, first.id);
   assert.equal(listTakes(p, shotId).length, 1);
+});
+
+test('an external video imports into a shot as a candidate Take with local provenance and frames', async () => {
+  const { p, shotId } = await fixture();
+  const ffmpeg = {
+    probe: async () => ({
+      durationSeconds: 7.5,
+      width: 1920,
+      height: 1080,
+      hasAudio: true,
+      audioDurationSeconds: 7.5,
+      format: 'mov,mp4',
+    }),
+    poster: async (_input: string, output: string) => {
+      await mkdir(dirname(output), { recursive: true });
+      await writeFile(output, 'poster');
+    },
+    firstLastFrames: async (_input: string, first: string, last: string) => {
+      await mkdir(dirname(first), { recursive: true });
+      await writeFile(first, 'first');
+      await writeFile(last, 'last');
+    },
+  } as unknown as Ffmpeg;
+
+  const take = await importTake(p, {
+    shotId,
+    fileName: 'shot-from-another-tool.mp4',
+    mimeType: 'video/mp4',
+    data: Buffer.from('fake video bytes'),
+    provenance: { provider: 'ComfyUI', model: 'local-workflow', prompt: 'Original prompt' },
+  }, ffmpeg);
+
+  assert.equal(take.source, 'import');
+  assert.equal(take.status, 'candidate');
+  assert.equal(take.duration, 7.5);
+  assert.deepEqual(take.provenance, {
+    originalFileName: 'shot-from-another-tool.mp4',
+    provider: 'ComfyUI',
+    model: 'local-workflow',
+    prompt: 'Original prompt',
+  });
+  assert.equal(getShot(p, shotId).status, 'HAS_TAKES');
+  await access(p.resolveProjectPath(take.localVideoPath));
+  await access(p.resolveProjectPath(take.posterPath!));
+  await access(p.resolveProjectPath(take.firstFramePath!));
+  await access(p.resolveProjectPath(take.lastFramePath!));
+
+  const job = p.db.get<{ provider: string; status: string; take_id: string; cost_json: string }>('SELECT provider, status, take_id, cost_json FROM render_jobs WHERE id = ?', [take.renderJobId]);
+  assert.equal(job?.provider, 'ComfyUI');
+  assert.equal(job?.status, 'LOCAL_READY');
+  assert.equal(job?.take_id, take.id);
+  assert.equal(JSON.parse(job!.cost_json).credits, 0);
+  assert.equal(getPrompt(p, take.promptVersionId).source, 'import');
+
+  selectTake(p, take.id, bus());
+  const clip = addClip(p, { shotId, takeId: take.id });
+  assert.equal(clip.takeId, take.id);
 });
 
 test('commitContinuity requires a selected take of the same shot', async () => {

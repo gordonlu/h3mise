@@ -81,10 +81,10 @@ test('RunningHub submission payload sends the selected megapixels value to its w
   assert.ok(nodeInfoList.some((item) => item.nodeId === 'shape' && item.fieldName === 'megapixels' && item.fieldValue === '1.2'));
 });
 
-test('project media import accepts images and audio but rejects video', () => {
+test('reference media import accepts images and audio but routes video through Shot Takes', () => {
   assert.equal(importableKindForMime('image/png'), 'image');
   assert.equal(importableKindForMime('audio/mpeg'), 'audio');
-  assert.throws(() => importableKindForMime('video/mp4'), /视频上传已关闭/);
+  assert.throws(() => importableKindForMime('video/mp4'), /Shot 的 Takes 区导入/);
 });
 
 function binding(id: string, roles: ReferenceBinding['roles']): ReferenceBinding {

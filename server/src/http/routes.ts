@@ -572,6 +572,27 @@ export function buildRoutes(services: AppServices): App {
 
   // --- takes ---------------------------------------------------------------
 
+  app.post('/api/shots/:id/takes/import', async (c) => {
+    const ctx = p(c);
+    const form = await c.req.formData();
+    const file = form.get('file');
+    if (!(file instanceof File)) return c.json({ error: 'missing video file' }, 400);
+    if (file.size > 500 * 1024 * 1024) return c.json({ error: 'video file too large (maximum 500 MB)' }, 413);
+    const take = await takesMod.importTake(ctx, {
+      shotId: c.req.param('id'),
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      data: Buffer.from(await file.arrayBuffer()),
+      provenance: {
+        provider: String(form.get('provider') ?? '').trim() || undefined,
+        model: String(form.get('model') ?? '').trim() || undefined,
+        prompt: String(form.get('prompt') ?? '').trim() || undefined,
+      },
+    }, services.ffmpeg);
+    services.bus.emit({ type: 'shot.updated', shotId: take.shotId, status: shotsMod.getShot(ctx, take.shotId).status });
+    return c.json(take, 201);
+  });
+
   app.get('/api/takes/:id', (c) => c.json(takesMod.getTake(p(c), c.req.param('id'))));
   app.patch('/api/takes/:id', async (c) => c.json(takesMod.updateTake(p(c), c.req.param('id'), await c.req.json())));
   app.post('/api/takes/:id/select', (c) => {

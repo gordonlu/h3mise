@@ -11,6 +11,24 @@ import { PROJECT_MIGRATIONS, REGISTRY_MIGRATIONS } from './db/schema.js';
 
 export const PROJECT_SUFFIX = '.h3studio';
 
+/** Windows Defender, Explorer thumbnails, and search indexing can briefly keep
+ * recently closed SQLite/media files open. Keep the project registered unless
+ * its directory was actually removed, and retry the transient lock instead of
+ * leaving an invisible orphan on disk. */
+async function removeProjectDirectory(dir: string, attempts = 6): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const transient = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'ENOTEMPTY';
+      if (!transient || attempt >= attempts) throw error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50 * attempt));
+    }
+  }
+}
+
 const BUNDLED_DEMO_DIRS: Record<string, string> = {
   'last-film-reel': 'last-film-reel.h3studio',
   'good-boy': 'good-boy.h3studio',
@@ -303,8 +321,10 @@ export class ProjectStore {
       this.current.close();
       this.current = null;
     }
+    // Files first: if Windows still has a handle open, the project remains
+    // visible and can be retried instead of disappearing from the registry.
+    await removeProjectDirectory(meta.dirPath);
     this.registry.run('DELETE FROM projects WHERE id = ?', [id]);
-    await import('node:fs/promises').then((fs) => fs.rm(meta.dirPath, { recursive: true, force: true }));
   }
 
   /** Projects present on disk but missing from the registry. */

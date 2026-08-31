@@ -62,3 +62,6 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Start app and verify built production UI
+        run: pnpm test:smoke

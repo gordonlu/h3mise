@@ -38,6 +38,10 @@ export function importableKindForMime(mime: string): 'image' | 'audio' {
   return kind;
 }
 
+export function isAbsoluteImportPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || /^\\\\[^\\]+\\[^\\]+/.test(path);
+}
+
 async function probeAndInsert(
   p: ProjectContext,
   ffmpeg: Ffmpeg,
@@ -113,7 +117,7 @@ export async function importPath(
   input: { path: string; label?: string },
 ): Promise<MediaAsset> {
   const abs = input.path.trim();
-  if (!abs.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(abs)) throw new Error('absolute path required');
+  if (!isAbsoluteImportPath(abs)) throw new Error('absolute path required');
   let st;
   try {
     st = await stat(abs);

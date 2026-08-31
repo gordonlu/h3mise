@@ -2,7 +2,7 @@
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProjectStore } from '../src/project-store.js';
@@ -59,4 +59,13 @@ test('invalid duration falls back per-field; garbage file yields pure defaults',
   const none = storeWithConfig(null);
   const cfgNone = await none.store.readConfig(none.root);
   assert.equal(cfgNone.title, 'Untitled');
+});
+
+test('deleting a project removes its directory before unregistering it', async () => {
+  const { store } = storeWithConfig(null);
+  const meta = await store.create({ title: 'Delete me', format: 'single_shot' });
+  assert.equal(existsSync(meta.dirPath), true);
+  await store.delete(meta.id);
+  assert.equal(existsSync(meta.dirPath), false);
+  assert.equal(await store.get(meta.id), undefined);
 });

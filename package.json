@@ -14,6 +14,7 @@
     "build": "pnpm -r build",
     "start": "pnpm --filter @h3mise/server start",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @h3mise/server test"
+    "test": "pnpm --filter @h3mise/server test",
+    "test:smoke": "node scripts/smoke-production.mjs"
   }
 }

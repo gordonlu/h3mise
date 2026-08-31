@@ -91,6 +91,26 @@ pnpm --filter @h3mise/web build
 pnpm start
 ```
 
+### Windows（PowerShell）
+
+先安装 [Node.js 22+](https://nodejs.org/)；然后在 PowerShell 中安装 pnpm 和 FFmpeg：
+
+```powershell
+corepack enable
+corepack prepare pnpm@11.7.0 --activate
+choco install ffmpeg -y
+
+node --version
+pnpm --version
+ffmpeg -version
+ffprobe -version
+pnpm install
+pnpm build
+pnpm start
+```
+
+没有 Chocolatey 时，也可以自行安装 FFmpeg，但必须确保 `ffmpeg.exe` 和 `ffprobe.exe` 都在 `PATH` 中。默认项目目录是 `%USERPROFILE%\.h3mise`；素材既支持盘符绝对路径，也支持 `\\server\share\file.mp4` 形式的局域网共享路径。
+
 首次进入“项目”页，可安装内置 Demo。项目会复制到本地数据目录，修改不会影响仓库中的原始示例。
 
 > 不准备真实生成时可使用 Mock Provider，离线体验完整流程；本地生成可按 [ComfyUI 接入指南](ComfyUI.md) 导入自己的 API Format 工作流。

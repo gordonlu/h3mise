@@ -380,6 +380,11 @@ export function resolveDependentsAfterSelection(p: ProjectContext, upstreamShotI
       [shot.id],
     )?.n ?? 0;
     if (active > 0) continue;
+    // Do not silently rewrite the inputs of a Shot that already has review
+    // history. Its user must explicitly accept the new upstream tail frame;
+    // the batch planner will then mark the old Take stale and allow a rerender.
+    const takeCount = p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM takes WHERE shot_id = ?', [shot.id])?.n ?? 0;
+    if (takeCount > 0) continue;
     const before = renderReadiness(p, shot);
     if (before.dependsOnShotId !== upstreamShotId || !before.canResolveFrame) continue;
     resolved.push(resolvePreviousTakeFrame(p, shot.id));

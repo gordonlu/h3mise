@@ -59,6 +59,44 @@ export interface RenderJob {
   updatedAt: string;
 }
 
+export type RenderBatchShotStage =
+  | 'ready'
+  | 'active'
+  | 'done'
+  | 'needs_selection'
+  | 'waiting_dependency'
+  | 'needs_assets'
+  | 'needs_prompt'
+  | 'needs_preflight'
+  | 'blocked';
+
+export interface RenderBatchShot {
+  shotId: string;
+  title: string;
+  order: number;
+  mode: H3Mode;
+  stage: RenderBatchShotStage;
+  reason: string;
+  promptVersionId: string | null;
+  preflightId: string | null;
+  dependency: import('./shots.js').ShotRenderReadiness;
+}
+
+export interface RenderBatchPlan {
+  projectId: string;
+  providerId: string;
+  providerConcurrency: number;
+  megapixels?: number;
+  shots: RenderBatchShot[];
+  counts: Record<RenderBatchShotStage, number>;
+}
+
+export interface RenderBatchPrepareResult {
+  prepared: Array<{ shotId: string; promptVersionId: string; preflightId: string; blocked: boolean }>;
+  skipped: Array<{ shotId: string; reason: string }>;
+  plan: RenderBatchPlan;
+}
+
 // ---------------------------------------------------------------------------
 // Take
 // ---------------------------------------------------------------------------

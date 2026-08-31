@@ -362,7 +362,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     sections[6]!.checks.push({ key: 'duplicate.ok', severity: 'info', message: '没有重复的生成任务' });
   }
 
-  const report = finalizePreflight(p, sections, intent.shotId, intent.promptVersionId, null, false);
+  const report = finalizePreflight(p, sections, intent.shotId, intent.promptVersionId, intent.providerId, null, false);
   return report;
 }
 
@@ -371,6 +371,7 @@ export function finalizePreflight(
   sections: Array<{ key: string; label: string; checks: PreflightCheck[] }>,
   shotId: string,
   promptVersionId: string | null,
+  providerId: string | null,
   semantic: PreflightSection[] | null,
   aiSemanticRun: boolean,
 ): PreflightReport {
@@ -387,8 +388,8 @@ export function finalizePreflight(
   const id = nextId(p.db, 'preflight');
   const now = new Date().toISOString();
   p.db.run(
-    'INSERT INTO preflight_reports (id, shot_id, prompt_version_id, basic_json, semantic_json, risk, blocked, ai_semantic_run, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, shotId, promptVersionId, j(normalized), semantic ? j(semantic) : null, risk, blocked ? 1 : 0, aiSemanticRun ? 1 : 0, now],
+    'INSERT INTO preflight_reports (id, shot_id, prompt_version_id, provider_id, basic_json, semantic_json, risk, blocked, ai_semantic_run, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, shotId, promptVersionId, providerId, j(normalized), semantic ? j(semantic) : null, risk, blocked ? 1 : 0, aiSemanticRun ? 1 : 0, now],
   );
   const shot = getShot(p, shotId);
   if (!blocked) {
@@ -398,6 +399,7 @@ export function finalizePreflight(
     id,
     shotId,
     promptVersionId,
+    providerId,
     basic: normalized,
     semantic,
     risk,
@@ -409,7 +411,7 @@ export function finalizePreflight(
 
 export function listPreflightReports(p: ProjectContext, shotId: string): PreflightReport[] {
   return p.db
-    .all<{ id: string; shot_id: string; prompt_version_id: string | null; basic_json: string; semantic_json: string | null; risk: string; blocked: number; ai_semantic_run: number; created_at: string }>(
+    .all<{ id: string; shot_id: string; prompt_version_id: string | null; provider_id: string | null; basic_json: string; semantic_json: string | null; risk: string; blocked: number; ai_semantic_run: number; created_at: string }>(
       'SELECT * FROM preflight_reports WHERE shot_id = ? ORDER BY created_at DESC',
       [shotId],
     )
@@ -417,6 +419,7 @@ export function listPreflightReports(p: ProjectContext, shotId: string): Preflig
       id: r.id,
       shotId: r.shot_id,
       promptVersionId: r.prompt_version_id,
+      providerId: r.provider_id,
       basic: jget<PreflightSection[]>(r.basic_json, []),
       semantic: r.semantic_json ? jget<PreflightSection[]>(r.semantic_json, []) : null,
       risk: r.risk as PreflightReport['risk'],

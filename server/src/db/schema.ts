@@ -362,6 +362,16 @@ ALTER TABLE shots ADD COLUMN depends_on_shot_id TEXT REFERENCES shots(id) ON DEL
 CREATE INDEX idx_shots_render_dependency ON shots(depends_on_shot_id);
 `,
   },
+  {
+    version: 13,
+    name: 'preflight-provider-identity',
+    sql: `
+-- A batch may switch Provider profiles. Never reuse a green Preflight from a
+-- different backend as proof that the current backend is ready.
+ALTER TABLE preflight_reports ADD COLUMN provider_id TEXT;
+CREATE INDEX idx_preflight_provider ON preflight_reports(shot_id, prompt_version_id, provider_id);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

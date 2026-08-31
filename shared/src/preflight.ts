@@ -20,6 +20,7 @@ export interface PreflightReport {
   id: string;
   shotId: string;
   promptVersionId: string | null;
+  providerId?: string | null;
   basic: PreflightSection[];
   semantic: PreflightSection[] | null; // null when AI not run
   risk: 'LOW' | 'MEDIUM' | 'HIGH';

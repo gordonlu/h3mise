@@ -23,6 +23,7 @@ import * as assetsMod from '../modules/assets.js';
 import * as directorMod from '../modules/director.js';
 import * as promptMod from '../modules/prompt.js';
 import * as preflightMod from '../modules/preflight.js';
+import * as renderBatchMod from '../modules/render-batch.js';
 import * as takesMod from '../modules/takes.js';
 import * as continuityMod from '../modules/continuity.js';
 import * as timelineMod from '../modules/timeline.js';
@@ -560,6 +561,26 @@ export function buildRoutes(services: AppServices): App {
     const shotId = c.req.query('shotId');
     if (!shotId && c.req.query('scope') === 'all') return c.json(await services.queue.listAll());
     return c.json(services.queue.list(shotId || undefined));
+  });
+  app.get('/api/render/batch/plan', async (c) => {
+    const ctx = p(c);
+    const providerId = c.req.query('providerId') ?? ctx.config.default_provider ?? 'runninghub';
+    const mp = c.req.query('megapixels');
+    return c.json(await renderBatchMod.planRenderBatch(ctx, services.providers, {
+      providerId,
+      ...(mp !== undefined ? { megapixels: Number(mp) } : {}),
+    }));
+  });
+  app.post('/api/render/batch/prepare', async (c) => {
+    const ctx = p(c);
+    const body = (await c.req.json().catch(() => ({}))) as { providerId?: unknown; megapixels?: unknown };
+    const providerId = typeof body.providerId === 'string' ? body.providerId : ctx.config.default_provider ?? 'runninghub';
+    const result = await renderBatchMod.prepareRenderBatch(ctx, services.providers, {
+      providerId,
+      ...(body.megapixels !== undefined ? { megapixels: Number(body.megapixels) } : {}),
+    });
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result);
   });
   app.get('/api/render/:id', (c) => {
     const job = services.queue.get(c.req.param('id'));

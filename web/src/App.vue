@@ -27,6 +27,7 @@ let off: (() => void) | null = null;
 
 // Professional IA. Quick Edit is a parallel view over the same project data.
 const nav = [
+  { to: '/production', label: () => '总控台' },
   { to: '/story', label: () => t('nav.story') },
   { to: '/shots', label: () => t('nav.shots') },
   { to: '/assets', label: () => t('nav.assets') },

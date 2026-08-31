@@ -30,6 +30,7 @@ import * as timelineMod from '../modules/timeline.js';
 import * as mediaMod from '../modules/media.js';
 import * as aiActions from '../modules/ai-actions.js';
 import * as guideMod from '../modules/guide.js';
+import * as productionMod from '../modules/production.js';
 import { serveMedia } from './media-route.js';
 import { createKeyedMutex } from '../modules/mutex.js';
 import { BibleFormatError, importBible } from '../modules/import-bible.js';
@@ -232,6 +233,7 @@ export function buildRoutes(services: AppServices): App {
   });
 
   app.get('/api/guide/project', (c) => c.json(guideMod.projectGuideSummary(p(c))));
+  app.get('/api/production', async (c) => c.json(await productionMod.productionOverview(p(c), services.providers)));
 
   app.patch('/api/current-project/config', async (c) => {
     const ctx = p(c);

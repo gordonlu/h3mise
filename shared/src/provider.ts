@@ -28,6 +28,9 @@ export interface ProviderCapabilities {
 
 export interface AiAppProfile {
   provider: string;
+  /** Maximum active remote tasks for this account/workflow. Defaults to 1
+   * because a wrong value can create several paid tasks at once. */
+  concurrency?: number;
   appId: string;
   invokeUrl: string;
   protocolVersion: 'observed';
@@ -82,6 +85,8 @@ export interface ComfyUiApiNode {
 
 export interface ComfyUiWorkflowProfile {
   provider: 'comfyui';
+  /** Maximum active prompts for this local workflow/GPU. */
+  concurrency?: number;
   baseUrl: string;
   /** Local ComfyUI uses no prefix. Keep configurable for compatible proxies. */
   apiPrefix: string;

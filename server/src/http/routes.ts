@@ -210,9 +210,9 @@ export function buildRoutes(services: AppServices): App {
         ownsContext = true;
       }
       const activeJobs = ctx.db.all<{ id: string }>(
-        "SELECT id FROM render_jobs WHERE status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
+        "SELECT id FROM render_jobs WHERE status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
       );
-      await Promise.all(activeJobs.map((job) => services.queue.cancel(job.id)));
+      await Promise.all(activeJobs.map((job) => services.queue.cancel(job.id, id)));
     } catch {
       // Missing/unreadable projects are still safe to remove from the registry.
     } finally {
@@ -327,7 +327,7 @@ export function buildRoutes(services: AppServices): App {
       const selected = ctx.db.get<{ id: string }>("SELECT id FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1", [s.id]);
       const takeCount = ctx.db.get<{ n: number }>('SELECT COUNT(*) as n FROM takes WHERE shot_id = ?', [s.id])!.n;
       const activeJobs = ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) as n FROM render_jobs WHERE shot_id = ? AND status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
+        "SELECT COUNT(*) as n FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
         [s.id],
       )!.n;
       // PRD §9 card fields: missing-asset hint + latest preflight risk flag.
@@ -339,6 +339,7 @@ export function buildRoutes(services: AppServices): App {
         ctx.db.get<{ risk: string }>('SELECT risk FROM preflight_reports WHERE shot_id = ? ORDER BY created_at DESC LIMIT 1', [s.id])?.risk ?? null;
       return {
         ...s,
+        renderReadiness: shotsMod.renderReadiness(ctx, s),
         takeCount,
         selectedTakeId: selected?.id ?? null,
         activeJobs,
@@ -358,6 +359,7 @@ export function buildRoutes(services: AppServices): App {
     assetsMod.ensureShotEntityImageBindings(ctx, shot);
     return c.json({
       shot,
+      renderReadiness: shotsMod.renderReadiness(ctx, shot),
       plans: directorMod.listPlanVersions(ctx, shot.id),
       prompts: promptMod.listPrompts(ctx, shot.id),
       takes: takesMod.listTakes(ctx, shot.id),
@@ -398,14 +400,20 @@ export function buildRoutes(services: AppServices): App {
     assetsMod.ensureShotEntityImageBindings(ctx, shot);
     return c.json(shot);
   });
+  app.post('/api/shots/:id/render-dependency/resolve', (c) => {
+    const ctx = p(c);
+    const readiness = shotsMod.resolvePreviousTakeFrame(ctx, c.req.param('id'));
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(readiness);
+  });
   app.delete('/api/shots/:id', async (c) => {
     const ctx = p(c);
     const shotId = c.req.param('id');
     const activeJobs = ctx.db.all<{ id: string }>(
-      "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
+      "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
       [shotId],
     );
-    await Promise.all(activeJobs.map((job) => services.queue.cancel(job.id)));
+    await Promise.all(activeJobs.map((job) => services.queue.cancel(job.id, ctx.meta.id)));
     await shotsMod.deleteShotAndFiles(ctx, shotId);
     return c.json({ ok: true });
   });
@@ -548,8 +556,9 @@ export function buildRoutes(services: AppServices): App {
     });
   });
 
-  app.get('/api/render', (c) => {
+  app.get('/api/render', async (c) => {
     const shotId = c.req.query('shotId');
+    if (!shotId && c.req.query('scope') === 'all') return c.json(await services.queue.listAll());
     return c.json(services.queue.list(shotId || undefined));
   });
   app.get('/api/render/:id', (c) => {
@@ -558,12 +567,12 @@ export function buildRoutes(services: AppServices): App {
   });
   app.post('/api/render/:id/cancel', async (c) => {
     // cancel is best-effort and never throws (see RenderQueue.cancel).
-    await services.queue.cancel(c.req.param('id'));
+    await services.queue.cancel(c.req.param('id'), c.req.query('projectId'));
     return c.json({ ok: true });
   });
   app.post('/api/render/:id/retry', async (c) => {
     try {
-      await services.queue.retry(c.req.param('id'));
+      await services.queue.retry(c.req.param('id'), c.req.query('projectId'));
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 409);
     }
@@ -601,6 +610,8 @@ export function buildRoutes(services: AppServices): App {
     // P1: a reselect invalidates the shot's old clips (old take is no longer
     // selected; the timeline must never export it).
     timelineMod.invalidateShotClips(ctx, take.shotId);
+    shotsMod.resolveDependentsAfterSelection(ctx, take.shotId);
+    services.bus.emit({ type: 'project.updated' });
     return c.json(take);
   });
   app.post('/api/takes/:id/reject', (c) => c.json(takesMod.rejectTake(p(c), c.req.param('id'))));
@@ -622,6 +633,8 @@ export function buildRoutes(services: AppServices): App {
     const state = body.state ?? continuityMod.emptyVisualState();
     const result = continuityMod.selectTakeAndCommit(ctx, c.req.param('id'), state, services.bus);
     timelineMod.invalidateShotClips(ctx, result.take.shotId);
+    shotsMod.resolveDependentsAfterSelection(ctx, result.take.shotId);
+    services.bus.emit({ type: 'project.updated' });
     return c.json(result);
   });
 
@@ -798,12 +811,22 @@ export function buildRoutes(services: AppServices): App {
   // --- provider ------------------------------------------------------------
 
   app.get('/api/providers', async (c) => c.json(await services.providers.statuses()));
+  app.put('/api/providers/:id/concurrency', async (c) => {
+    const id = c.req.param('id');
+    if (id !== 'runninghub' && id !== 'comfyui') return c.json({ error: 'provider does not support configurable concurrency' }, 400);
+    const body = await c.req.json();
+    const concurrency = services.providers.setConcurrency(id, body.concurrency);
+    services.queue.reschedule();
+    services.bus.emit({ type: 'project.updated' });
+    return c.json({ concurrency });
+  });
   app.get('/api/providers/runninghub/profile', (c) => {
     const profile = services.providers.getProfile();
     return c.json(profile ? { ...profile, bindingSlots: enabledBindingSlots(profile) } : null);
   });
   app.put('/api/providers/runninghub/profile', async (c) => {
     const profile = services.providers.saveProfile(await c.req.json());
+    services.queue.reschedule();
     services.bus.emit({ type: 'project.updated' });
     return c.json(profile);
   });
@@ -827,6 +850,7 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/providers/comfyui/profile', (c) => c.json(services.providers.getComfyUiProfile()));
   app.put('/api/providers/comfyui/profile', async (c) => {
     const profile = services.providers.saveComfyUiProfile(await c.req.json());
+    services.queue.reschedule();
     services.bus.emit({ type: 'project.updated' });
     return c.json(profile);
   });

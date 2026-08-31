@@ -1,14 +1,16 @@
 // Shot module — PRD §8-10. Shot is the first-class citizen; state machine with
 // limited rollback. Status advances only through allowed transitions.
 
-import type { H3Mode, Shot, ShotStatus } from '@h3mise/shared';
+import type { H3Mode, Shot, ShotRenderReadiness, ShotStatus } from '@h3mise/shared';
 import { SHOT_STATUS_ORDER } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
 import { unlink } from 'node:fs/promises';
+import { createBinding, deleteBinding, listBindings } from './assets.js';
 
 const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
 const H3_MODES = new Set(['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
+const DEPENDENCY_MODES = new Set(['auto', 'independent', 'planned', 'previous_take', 'manual_frame']);
 
 function validateShotPatch(input: CreateShotInput): void {
   if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0)) {
@@ -17,6 +19,7 @@ function validateShotPatch(input: CreateShotInput): void {
   if (input.shotFunction !== undefined && !SHOT_FUNCTIONS.has(input.shotFunction)) throw new Error('invalid shotFunction');
   if (input.h3Mode !== undefined && input.h3Mode !== null && !H3_MODES.has(input.h3Mode)) throw new Error('invalid h3Mode');
   if (input.aspectRatio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(input.aspectRatio)) throw new Error('invalid aspectRatio');
+  if (input.renderDependencyMode !== undefined && !DEPENDENCY_MODES.has(input.renderDependencyMode)) throw new Error('invalid renderDependencyMode');
 }
 
 interface ShotRow {
@@ -33,6 +36,8 @@ interface ShotRow {
   h3_mode: string | null;
   primary_character_id: string | null;
   scene_id: string | null;
+  render_dependency_mode: string;
+  depends_on_shot_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +57,8 @@ function shotFromRow(r: ShotRow): Shot {
     h3Mode: (r.h3_mode as H3Mode | null) ?? null,
     primaryCharacterId: r.primary_character_id,
     sceneId: r.scene_id,
+    renderDependencyMode: r.render_dependency_mode as Shot['renderDependencyMode'],
+    dependsOnShotId: r.depends_on_shot_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -78,6 +85,8 @@ export interface CreateShotInput {
   h3Mode?: H3Mode | null;
   primaryCharacterId?: string | null;
   sceneId?: string | null;
+  renderDependencyMode?: Shot['renderDependencyMode'];
+  dependsOnShotId?: string | null;
   order?: number;
 }
 
@@ -87,8 +96,8 @@ export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot
   const now = new Date().toISOString();
   const ord = input.order ?? p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM shots')!.m;
   p.db.run(
-    `INSERT INTO shots (id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO shots (id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, render_dependency_mode, depends_on_shot_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.sequenceId ?? null,
@@ -102,6 +111,8 @@ export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot
       input.h3Mode ?? null,
       input.primaryCharacterId ?? null,
       input.sceneId ?? null,
+      input.renderDependencyMode ?? 'auto',
+      input.dependsOnShotId ?? null,
       now,
       now,
     ],
@@ -190,6 +201,17 @@ export function advanceTo(p: ProjectContext, id: string, target: ShotStatus): Sh
 
 export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Shot, 'id' | 'createdAt' | 'updatedAt' | 'status'>>): Shot {
   validateShotPatch(patch);
+  if (patch.dependsOnShotId) {
+    if (patch.dependsOnShotId === id) throw new Error('a shot cannot depend on itself');
+    getShot(p, patch.dependsOnShotId);
+    const seen = new Set([id]);
+    let cursor: string | null = patch.dependsOnShotId;
+    while (cursor) {
+      if (seen.has(cursor)) throw new Error('render dependency cycle detected');
+      seen.add(cursor);
+      cursor = p.db.get<{ depends_on_shot_id: string | null }>('SELECT depends_on_shot_id FROM shots WHERE id = ?', [cursor])?.depends_on_shot_id ?? null;
+    }
+  }
   const now = new Date().toISOString();
   const map: Record<string, string> = {
     sequenceId: 'sequence_id',
@@ -203,6 +225,8 @@ export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Sh
     h3Mode: 'h3_mode',
     primaryCharacterId: 'primary_character_id',
     sceneId: 'scene_id',
+    renderDependencyMode: 'render_dependency_mode',
+    dependsOnShotId: 'depends_on_shot_id',
   };
   const cols: string[] = [];
   const vals: unknown[] = [];
@@ -262,6 +286,105 @@ export function reorderShots(p: ProjectContext, ids: string[]): Shot[] {
     ids.forEach((id, i) => p.db.run('UPDATE shots SET ord = ? WHERE id = ?', [i, id]));
   });
   return listShots(p);
+}
+
+function previousShot(p: ProjectContext, shot: Shot): Shot | null {
+  const row = shot.sequenceId === null
+    ? p.db.get<ShotRow>('SELECT * FROM shots WHERE sequence_id IS NULL AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.order])
+    : p.db.get<ShotRow>('SELECT * FROM shots WHERE sequence_id = ? AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.sequenceId, shot.order]);
+  return row ? shotFromRow(row) : null;
+}
+
+/** Resolve whether a shot can enter the render scheduler. This deliberately
+ * uses input provenance rather than shotFunction: a reaction may be either
+ * independent or hard-bridged to an upstream selected Take. */
+export function renderReadiness(p: ProjectContext, shotOrId: Shot | string): ShotRenderReadiness {
+  const shot = typeof shotOrId === 'string' ? getShot(p, shotOrId) : shotOrId;
+  const hasFirstFrame = listBindings(p, shot.id).some((binding) => binding.roles.includes('first_frame'));
+  let effective: ShotRenderReadiness['effectiveMode'];
+  if (shot.renderDependencyMode === 'auto') {
+    effective = shot.h3Mode === 'i2va' || shot.h3Mode === 'fl2va' ? 'manual_frame' : 'independent';
+  } else {
+    effective = shot.renderDependencyMode;
+  }
+
+  if (effective === 'independent' || effective === 'planned') {
+    return { configuredMode: shot.renderDependencyMode, effectiveMode: effective, dependsOnShotId: null, ready: true, canResolveFrame: false, reason: effective === 'planned' ? '使用计划连续性，可并行生成' : '不依赖其他镜头，可并行生成' };
+  }
+  if (effective === 'manual_frame') {
+    return { configuredMode: shot.renderDependencyMode, effectiveMode: effective, dependsOnShotId: null, ready: hasFirstFrame, canResolveFrame: false, reason: hasFirstFrame ? '首帧已准备，可并行生成' : '等待上传或绑定首帧' };
+  }
+
+  const upstream = shot.dependsOnShotId ? getShot(p, shot.dependsOnShotId) : previousShot(p, shot);
+  if (!upstream) {
+    return { configuredMode: shot.renderDependencyMode, effectiveMode: effective, dependsOnShotId: null, ready: false, canResolveFrame: false, reason: '没有可用的上游镜头' };
+  }
+  const selected = p.db.get<{ id: string; last_frame_path: string | null }>(
+    "SELECT id, last_frame_path FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1",
+    [upstream.id],
+  );
+  const frame = selected?.last_frame_path
+    ? p.db.get<{ id: string }>('SELECT id FROM media_assets WHERE file_name = ?', [selected.last_frame_path])
+    : null;
+  const matchingFrame = frame
+    ? listBindings(p, shot.id).some((binding) => binding.assetId === frame.id && binding.roles.includes('first_frame'))
+    : false;
+  return {
+    configuredMode: shot.renderDependencyMode,
+    effectiveMode: effective,
+    dependsOnShotId: upstream.id,
+    ready: matchingFrame,
+    canResolveFrame: Boolean(frame),
+    reason: matchingFrame
+      ? `已继承 ${upstream.title || upstream.id} 的 Selected 尾帧`
+      : frame
+        ? `${upstream.title || upstream.id} 已选片，可绑定尾帧后生成`
+        : `等待 ${upstream.title || upstream.id} 生成并选片`,
+  };
+}
+
+/** Bind an upstream Selected Take's last frame as this shot's first frame. */
+export function resolvePreviousTakeFrame(p: ProjectContext, shotId: string): ShotRenderReadiness {
+  const shot = getShot(p, shotId);
+  const readiness = renderReadiness(p, shot);
+  if (readiness.effectiveMode !== 'previous_take' || !readiness.dependsOnShotId) throw new Error('shot is not configured to inherit a previous Take');
+  const selected = p.db.get<{ id: string; last_frame_path: string | null }>(
+    "SELECT id, last_frame_path FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1",
+    [readiness.dependsOnShotId],
+  );
+  if (!selected?.last_frame_path) throw new Error('upstream shot has no selected Take last frame yet');
+  const media = p.db.get<{ id: string }>('SELECT id FROM media_assets WHERE file_name = ?', [selected.last_frame_path]);
+  if (!media) throw new Error('selected Take last-frame asset is missing');
+  for (const binding of listBindings(p, shotId)) {
+    if (binding.roles.includes('first_frame')) deleteBinding(p, binding.id);
+  }
+  createBinding(p, {
+    assetId: media.id,
+    roles: ['first_frame'],
+    label: `Frame bridge from ${readiness.dependsOnShotId}/${selected.id} last frame`,
+    shotId,
+  });
+  return renderReadiness(p, shotId);
+}
+
+/** A selection is the dependency barrier. Once crossed, update every direct
+ * previous_take child to the new real tail frame. The child is made ready but
+ * is not submitted: paid rendering still requires an explicit batch/single
+ * render confirmation and a fresh prompt/preflight. */
+export function resolveDependentsAfterSelection(p: ProjectContext, upstreamShotId: string): ShotRenderReadiness[] {
+  const resolved: ShotRenderReadiness[] = [];
+  for (const shot of listShots(p)) {
+    if (shot.renderDependencyMode !== 'previous_take') continue;
+    const active = p.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
+      [shot.id],
+    )?.n ?? 0;
+    if (active > 0) continue;
+    const before = renderReadiness(p, shot);
+    if (before.dependsOnShotId !== upstreamShotId || !before.canResolveFrame) continue;
+    resolved.push(resolvePreviousTakeFrame(p, shot.id));
+  }
+  return resolved;
 }
 
 /** Create N shots from a shot list (paste from external AI / manual). */

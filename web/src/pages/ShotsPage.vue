@@ -7,10 +7,11 @@ import { useToastStore } from '../stores/toast';
 import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL } from '@h3mise/shared';
-import type { Shot, ShotStatus } from '@h3mise/shared';
+import type { Shot, ShotRenderReadiness, ShotStatus } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
 
 interface ShotCard extends Shot {
+  renderReadiness: ShotRenderReadiness;
   takeCount: number;
   selectedTakeId: string | null;
   activeJobs: number;
@@ -218,6 +219,9 @@ onMounted(load);
             <span class="badge no-dot">{{ s.shotFunction }}</span>
             <span v-if="entityName(s.primaryCharacterId)" class="badge no-dot">{{ entityName(s.primaryCharacterId) }}</span>
             <span v-if="entityName(s.sceneId)" class="badge info no-dot">{{ entityName(s.sceneId) }}</span>
+            <span :class="['badge', s.renderReadiness.ready ? 'ok' : 'warn']" :title="s.renderReadiness.reason">
+              {{ s.renderReadiness.ready ? (s.renderReadiness.effectiveMode === 'previous_take' ? '尾帧已接通' : '可并行') : s.renderReadiness.reason }}
+            </span>
           </div>
           <div class="muted purpose">{{ s.purpose || '—' }}</div>
           <!-- PRD §9 card fields: missing assets + risk flag -->

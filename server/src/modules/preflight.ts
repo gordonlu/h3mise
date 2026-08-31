@@ -12,7 +12,7 @@ import { SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightRepo
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
-import { getShot, advanceShotStatus, advanceTo } from './shots.js';
+import { getShot, advanceShotStatus, advanceTo, renderReadiness } from './shots.js';
 import { getPrompt } from './prompt.js';
 import { ensureShotEntityImageBindings, getMedia } from './assets.js';
 import { pathReadable } from '../ffmpeg.js';
@@ -337,6 +337,12 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     }
   }
   sections[4]!.checks.push({ key: 'integrity.shot', severity: 'info', message: `镜头 ${shot.id} / ${SHOT_STATUS_LABEL[shot.status]}` });
+  const dependency = renderReadiness(p, shot);
+  sections[4]!.checks.push({
+    key: 'integrity.render_dependency',
+    severity: dependency.ready ? 'info' : 'error',
+    message: dependency.reason,
+  });
 
   // Credential
   if (provider?.configured === false) {
@@ -347,7 +353,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
 
   // Duplicate: an active render is a hard error (PRD: no duplicate paid submit)
   const active = p.db.get<{ id: string }>(
-    "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING') LIMIT 1",
+    "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING') LIMIT 1",
     [shot.id],
   );
   if (active) {

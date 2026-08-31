@@ -28,6 +28,22 @@ export type ShotStatus =
   | 'CONTINUITY_COMMITTED'
   | 'LOCKED';
 
+export type ShotRenderDependencyMode =
+  | 'auto'
+  | 'independent'
+  | 'planned'
+  | 'previous_take'
+  | 'manual_frame';
+
+export interface ShotRenderReadiness {
+  configuredMode: ShotRenderDependencyMode;
+  effectiveMode: Exclude<ShotRenderDependencyMode, 'auto'>;
+  dependsOnShotId: string | null;
+  ready: boolean;
+  canResolveFrame: boolean;
+  reason: string;
+}
+
 export const SHOT_STATUS_ORDER: Record<ShotStatus, number> = {
   DRAFT: 0,
   PLANNED: 1,
@@ -95,6 +111,8 @@ export interface Shot {
   h3Mode: H3Mode | null;
   primaryCharacterId: string | null;
   sceneId: string | null;
+  renderDependencyMode: ShotRenderDependencyMode;
+  dependsOnShotId: string | null;
   createdAt: string;
   updatedAt: string;
 }

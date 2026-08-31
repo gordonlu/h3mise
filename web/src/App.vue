@@ -34,7 +34,7 @@ const nav = [
 ];
 
 function activeJobCount(): number {
-  return render.jobs.filter((j: RenderJob) => ['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)).length;
+  return render.jobs.filter((j: RenderJob) => ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)).length;
 }
 
 async function switchProject(id: string) {
@@ -71,12 +71,17 @@ function onProjectsClickOutside(e: MouseEvent) {
 
 /** Global SSE → toast notifications (render lifecycle, takes, continuity). */
 function notify(e: AppEvent) {
+  const renderProjectId = e.type.startsWith('render.job.') && 'projectId' in e ? e.projectId : null;
+  const isCurrentRenderProject = !renderProjectId || renderProjectId === project.projectId;
+  const projectLabel = renderProjectId && !isCurrentRenderProject
+    ? `（${project.projects.find((item) => item.id === renderProjectId)?.title ?? renderProjectId}）`
+    : '';
   switch (e.type) {
     case 'render.job.succeeded':
-      toasts.push({ kind: 'ok', text: `渲染成功，Take 已就绪（Shot ${e.shotId}）`, actionLabel: '去选片', actionTo: `/shots/${e.shotId}` });
+      toasts.push({ kind: 'ok', text: `渲染成功${projectLabel}，Take 已就绪（Shot ${e.shotId}）`, ...(isCurrentRenderProject ? { actionLabel: '去选片', actionTo: `/shots/${e.shotId}` } : {}) });
       break;
     case 'render.job.failed':
-      toasts.push({ kind: 'err', text: `渲染失败（Shot ${e.shotId}）：${e.error?.slice(0, 120) ?? ''}`, actionLabel: '查看', actionTo: `/shots/${e.shotId}` });
+      toasts.push({ kind: 'err', text: `渲染失败${projectLabel}（Shot ${e.shotId}）：${e.error?.slice(0, 120) ?? ''}`, ...(isCurrentRenderProject ? { actionLabel: '查看', actionTo: `/shots/${e.shotId}` } : {}) });
       break;
     case 'take.selected':
       toasts.push({ kind: 'info', text: `已选片（Shot ${e.shotId}）` });
@@ -85,7 +90,7 @@ function notify(e: AppEvent) {
       toasts.push({ kind: 'ok', text: `${e.scope === 'visual' ? '视觉' : '叙事'}连续性已提交（Shot ${e.shotId}）` });
       break;
     case 'render.job.created':
-      toasts.push({ kind: 'info', text: `渲染任务已创建（Shot ${e.shotId}）` });
+      toasts.push({ kind: 'info', text: `渲染任务已创建${projectLabel}（Shot ${e.shotId}）` });
       break;
   }
 }

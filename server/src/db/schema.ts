@@ -350,6 +350,18 @@ ALTER TABLE takes ADD COLUMN source TEXT NOT NULL DEFAULT 'render';
 ALTER TABLE takes ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}';
 `,
   },
+  {
+    version: 12,
+    name: 'shot-render-dependencies',
+    sql: `
+-- Shot order is editorial order, not necessarily a render dependency. Keep
+-- the generation relationship explicit so independent shots can run in
+-- parallel while frame-bridged shots wait for the selected upstream Take.
+ALTER TABLE shots ADD COLUMN render_dependency_mode TEXT NOT NULL DEFAULT 'auto';
+ALTER TABLE shots ADD COLUMN depends_on_shot_id TEXT REFERENCES shots(id) ON DELETE SET NULL;
+CREATE INDEX idx_shots_render_dependency ON shots(depends_on_shot_id);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

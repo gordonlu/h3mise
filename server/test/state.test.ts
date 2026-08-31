@@ -6,7 +6,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeStore, makeProject, makeShotWithPrompt, fakeTake, cleanupTempRoot, bus } from './helpers.js';
 import { listTakes, selectTake, getTake, rejectTake, updateTake, createTake, deleteRejectedTake, importTake } from '../src/modules/takes.js';
-import { getShot, advanceTo, advanceShotStatus, createShot } from '../src/modules/shots.js';
+import { getShot, advanceTo, advanceShotStatus, createShot, renderReadiness, resolveDependentsAfterSelection, updateShot } from '../src/modules/shots.js';
 import { commitContinuity, selectTakeAndCommit, emptyVisualState } from '../src/modules/continuity.js';
 import { getTimeline, addClip, addMissingSelectedTakes, invalidateShotClips, listTimelineExports, recoverTimelineExports, updateClip } from '../src/modules/timeline.js';
 import { getPrompt, importRawPrompt } from '../src/modules/prompt.js';
@@ -46,6 +46,34 @@ test('reject is explicit; reselect after reject works', async () => {
   assert.equal(getTake(p, a.id).status, 'rejected');
   selectTake(p, b.id, bus());
   assert.equal(getTake(p, b.id).status, 'selected');
+});
+
+test('previous-take dependency waits for selection then auto-binds the real tail frame', async () => {
+  const { p, shotId, promptVersionId } = await fixture();
+  const downstream = createShot(p, { title: 'Downstream', h3Mode: 'i2va', renderDependencyMode: 'previous_take', dependsOnShotId: shotId });
+  assert.equal(renderReadiness(p, downstream).ready, false);
+  assert.match(renderReadiness(p, downstream).reason, /等待/);
+
+  const take = await fakeTake(p, shotId, promptVersionId, 'bridge');
+  const framePath = `shots/${shotId}/frames/${take.id}-last.jpg`;
+  const frame = insertMedia(p, {
+    kind: 'image',
+    fileName: framePath,
+    mimeType: 'image/jpeg',
+    sizeBytes: 10,
+    source: 'frame_extract',
+    label: `${take.id} last frame`,
+  });
+  p.db.run('UPDATE takes SET last_frame_path = ? WHERE id = ?', [framePath, take.id]);
+  selectTake(p, take.id, bus());
+  const resolved = resolveDependentsAfterSelection(p, shotId);
+  assert.equal(resolved.length, 1);
+  assert.equal(renderReadiness(p, downstream.id).ready, true);
+  const binding = p.db.get<{ asset_id: string; roles_json: string }>('SELECT asset_id, roles_json FROM reference_bindings WHERE shot_id = ?', [downstream.id]);
+  assert.equal(binding?.asset_id, frame.id);
+  assert.match(binding?.roles_json ?? '', /first_frame/);
+
+  assert.throws(() => updateShot(p, shotId, { renderDependencyMode: 'previous_take', dependsOnShotId: downstream.id }), /cycle/);
 });
 
 test('only rejected takes can be deleted; owned files are cleaned and referenced frames survive', async () => {

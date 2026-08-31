@@ -7,12 +7,12 @@ import type { ShotStatus } from './shots.js';
 // ---------------------------------------------------------------------------
 
 export type AppEvent =
-  | { type: 'render.job.created'; jobId: string; shotId: string }
-  | { type: 'render.job.queued'; jobId: string; shotId: string }
-  | { type: 'render.job.running'; jobId: string; shotId: string }
-  | { type: 'render.job.succeeded'; jobId: string; shotId: string; takeId: string }
-  | { type: 'render.job.failed'; jobId: string; shotId: string; error: string }
-  | { type: 'render.job.updated'; jobId: string; shotId: string; status: RenderJobStatus }
+  | { type: 'render.job.created'; projectId: string; jobId: string; shotId: string }
+  | { type: 'render.job.queued'; projectId: string; jobId: string; shotId: string }
+  | { type: 'render.job.running'; projectId: string; jobId: string; shotId: string }
+  | { type: 'render.job.succeeded'; projectId: string; jobId: string; shotId: string; takeId: string }
+  | { type: 'render.job.failed'; projectId: string; jobId: string; shotId: string; error: string }
+  | { type: 'render.job.updated'; projectId: string; jobId: string; shotId: string; status: RenderJobStatus }
   | { type: 'take.created'; takeId: string; shotId: string }
   | { type: 'take.selected'; takeId: string; shotId: string }
   | { type: 'continuity.committed'; shotId: string; scope: 'visual' | 'narrative' }

@@ -8,7 +8,7 @@ import { useRenderStore } from '../stores/render';
 import { confirmDialog } from '../stores/confirm';
 import { get, post, del, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
-import type { DirectorPlan, MediaAsset, NextAction, ReferenceBinding } from '@h3mise/shared';
+import type { DirectorPlan, MediaAsset, NextAction, ReferenceBinding, ShotRenderDependencyMode, ShotRenderReadiness } from '@h3mise/shared';
 import PlanEditor from '../components/director/PlanEditor.vue';
 import PromptPanel from '../components/director/PromptPanel.vue';
 import PreflightPanel from '../components/director/PreflightPanel.vue';
@@ -43,6 +43,21 @@ function showVisionStatus(result: unknown) {
 }
 
 const s = useShot(shotId);
+const renderReadiness = computed(() => s.detail.value?.renderReadiness ?? null);
+
+async function updateRenderDependency(mode: ShotRenderDependencyMode) {
+  await s.updateShot({ renderDependencyMode: mode });
+}
+
+async function resolveRenderDependency() {
+  try {
+    await post<ShotRenderReadiness>(`/api/shots/${shotId}/render-dependency/resolve`);
+    await s.load();
+    toasts.push({ kind: 'ok', text: '已把上游 Selected Take 的尾帧绑定为本镜头首帧；请重新生成提示词并 Preflight' });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
 
 const {
   detail: sDetail,
@@ -555,7 +570,7 @@ onBeforeRouteLeave(async () => {
 let off: (() => void) | null = null;
 let shotRefresh: Promise<void> | null = null;
 
-const ACTIVE_RENDER_STATUSES = new Set(['UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING']);
+const ACTIVE_RENDER_STATUSES = new Set(['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING']);
 
 /**
  * A preflight report is an immutable audit record. If its only error says an
@@ -638,6 +653,9 @@ const TABS = [
         <span class="badge no-dot">{{ sShot.aspectRatio }}</span>
         <span class="badge no-dot">{{ sShot.shotFunction }}</span>
         <span v-if="sShot.sequenceId" class="badge info no-dot">{{ sDetail?.sequences.find((x) => x.id === sShot?.sequenceId)?.title }}</span>
+        <span v-if="renderReadiness" :class="['badge', renderReadiness.ready ? 'ok' : 'warn']" :title="renderReadiness.reason">
+          {{ renderReadiness.ready ? '可进入队列' : renderReadiness.reason }}
+        </span>
       </div>
       <div class="row controls">
         <button class="sm danger ghost" title="删除此 Shot 及其全部子数据" @click="deleteThisShot">删除 Shot</button>
@@ -647,6 +665,17 @@ const TABS = [
             <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
           </select>
         </label>
+        <label class="ctl">
+          <span class="ctl-label">生成关系</span>
+          <select :value="sShot.renderDependencyMode" @change="updateRenderDependency(($event.target as HTMLSelectElement).value as ShotRenderDependencyMode)">
+            <option value="auto">自动判断</option>
+            <option value="independent">独立生成（可并行）</option>
+            <option value="planned">文字连续性（可并行）</option>
+            <option value="previous_take">承接上一镜尾帧</option>
+            <option value="manual_frame">手工首帧</option>
+          </select>
+        </label>
+        <button v-if="renderReadiness?.canResolveFrame && !renderReadiness.ready" class="sm" @click="resolveRenderDependency">绑定上一镜尾帧</button>
         <label class="ctl">
           <span class="ctl-label">时长</span>
           <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" title="时长（秒，1–15）" placeholder="5" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />

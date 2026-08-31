@@ -11,7 +11,7 @@ export function shotGuideSnapshot(p: ProjectContext, shot: Shot): GuideShotSnaps
   const prompt = p.db.get<{ id: string }>('SELECT id FROM prompt_versions WHERE shot_id = ? ORDER BY created_at DESC LIMIT 1', [shot.id]);
   const preflight = latestPreflight(p, shot.id);
   const active = p.db.get<{ id: string }>(
-    "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING') ORDER BY created_at DESC LIMIT 1",
+    "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING') ORDER BY created_at DESC LIMIT 1",
     [shot.id],
   );
   const selected = p.db.get<{ id: string }>("SELECT id FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1", [shot.id]);

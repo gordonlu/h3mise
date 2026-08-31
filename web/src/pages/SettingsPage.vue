@@ -105,6 +105,17 @@ async function saveProfile() {
   }
 }
 
+async function saveProviderConcurrency(provider: 'runninghub' | 'comfyui', value: number) {
+  const concurrency = Math.min(4, Math.max(1, Math.round(value || 1)));
+  try {
+    await put(`/api/providers/${provider}/concurrency`, { concurrency });
+    await load();
+    notice.value = `并发上限已保存为 ${concurrency}；等待中的任务会按新上限调度`;
+  } catch (e) {
+    notice.value = `保存并发上限失败：${e instanceof Error ? e.message : e}`;
+  }
+}
+
 async function saveApiKey() {
   if (!apiKeyInput.value.trim()) {
     notice.value = '请输入 API Key';
@@ -229,6 +240,11 @@ async function verifyComfyProfile() {
             AI App: <span class="mono">{{ profile?.appId }}</span> — 可换成你自己的 H3 工作流：在 RunningHub 控制台复制
             AI App ID 粘贴到下方 Profile 的 <span class="mono">appId</span>，保存后点「检测并获取节点映射」即可自动适配新工作流。
           </p>
+          <label class="field">
+            同时生成任务数（1–4）
+            <input type="number" min="1" max="4" :value="profile?.concurrency ?? 1" @change="saveProviderConcurrency('runninghub', Number(($event.target as HTMLInputElement).value))" />
+            <span class="muted">按你的 RunningHub 账户并发额度设置。提高后可能同时创建多个付费任务。</span>
+          </label>
           <div class="row">
             <button class="sm" :disabled="verifying" @click="verify">{{ verifying ? '检测中…' : '检测并获取节点映射（apiCallDemo）' }}</button>
             <button class="sm" @click="editingProfile = !editingProfile">编辑 Profile（JSON）</button>
@@ -250,6 +266,11 @@ async function verifyComfyProfile() {
             <span class="mono">AI_BASE_URL / AI_API_KEY / AI_MODEL</span>
             （OpenAI-compatible：OpenAI / DeepSeek / MiniMax / Ollama）。
           </p>
+          <label class="field">
+            同时生成任务数（1–4）
+            <input type="number" min="1" max="4" :value="comfyProfile?.concurrency ?? 1" @change="saveProviderConcurrency('comfyui', Number(($event.target as HTMLInputElement).value))" />
+            <span class="muted">默认 1；只有显存和工作流允许时才提高。</span>
+          </label>
           <p class="muted">外部 AI 流程始终可用：Director Desk → External AI → Copy Context Package，粘贴到任意外部 AI。</p>
         </div>
       </div>

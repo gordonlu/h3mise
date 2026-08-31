@@ -24,6 +24,7 @@ export const H3_AI_APP_URL = `https://www.runninghub.cn/openapi/v2/run/ai-app/${
 export function defaultAiAppProfile(): AiAppProfile {
   return {
     provider: 'runninghub',
+    concurrency: 1,
     appId: H3_AI_APP_ID,
     invokeUrl: H3_AI_APP_URL,
     protocolVersion: 'observed',
@@ -215,6 +216,33 @@ export class ProviderRegistry {
     return this.providers.get(id);
   }
 
+  /** Scheduler limit. Unknown/invalid values always collapse to the safest
+   * single-task behavior; Mock is intentionally wider for offline testing. */
+  concurrencyLimit(id: string): number {
+    if (id === 'mock') return 4;
+    const raw = id === 'runninghub'
+      ? this.getProfile()?.concurrency
+      : id === 'comfyui'
+        ? this.getComfyUiProfile().concurrency
+        : 1;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 ? Math.min(4, n) : 1;
+  }
+
+  setConcurrency(id: 'runninghub' | 'comfyui', value: unknown): number {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > 4) throw new Error('concurrency must be an integer from 1 to 4');
+    if (id === 'runninghub') {
+      const current = this.getProfile() ?? defaultAiAppProfile();
+      this.saveProfile({ ...current, concurrency: n });
+    } else {
+      const current = this.getComfyUiProfile();
+      // A scheduler-only change does not invalidate a verified workflow.
+      this.persistComfyUiProfile(sanitizeComfyUiProfile({ ...current, concurrency: n }));
+    }
+    return n;
+  }
+
   async capabilities(id: string): Promise<ProviderCapabilities | undefined> {
     const prov = this.providers.get(id);
     if (!prov) return undefined;
@@ -332,6 +360,9 @@ export class ProviderRegistry {
       ...d,
       ...base,
       appId,
+      concurrency: Number.isInteger(Number(base.concurrency))
+        ? Math.min(4, Math.max(1, Number(base.concurrency)))
+        : d.concurrency,
       invokeUrl: typeof base.invokeUrl === 'string' && base.invokeUrl.trim() ? base.invokeUrl.trim() : d.invokeUrl,
       nodes: Array.isArray(base.nodes) ? base.nodes : d.nodes,
       inputs,

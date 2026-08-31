@@ -14,12 +14,14 @@ import type {
   Take,
   VisualContinuityState,
   ShotGuideState,
+  ShotRenderReadiness,
   NextAction,
   ContinuityEntry,
 } from '@h3mise/shared';
 
 export interface ShotDetail {
   shot: Shot;
+  renderReadiness: ShotRenderReadiness;
   plans: DirectorPlanVersion[];
   prompts: PromptVersion[];
   takes: Take[];

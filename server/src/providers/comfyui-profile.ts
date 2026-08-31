@@ -16,6 +16,7 @@ const EMPTY_VERIFICATION: ProviderVerification = {
 export function defaultComfyUiProfile(): ComfyUiWorkflowProfile {
   return {
     provider: 'comfyui',
+    concurrency: 1,
     baseUrl: 'http://127.0.0.1:8188',
     apiPrefix: '',
     clientId: `h3mise-${randomUUID()}`,
@@ -170,6 +171,9 @@ export function sanitizeComfyUiProfile(raw: unknown, options?: { resetVerificati
   );
   return {
     provider: 'comfyui',
+    concurrency: Number.isInteger(Number(base.concurrency))
+      ? Math.min(4, Math.max(1, Number(base.concurrency)))
+      : d.concurrency,
     baseUrl: typeof base.baseUrl === 'string' && base.baseUrl.trim() ? base.baseUrl.trim().replace(/\/+$/, '') : d.baseUrl,
     apiPrefix,
     clientId: typeof base.clientId === 'string' && base.clientId.trim() ? base.clientId.trim() : d.clientId,

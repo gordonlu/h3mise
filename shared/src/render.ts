@@ -5,6 +5,7 @@ import type { H3Mode } from './director.js';
 import type { MediaKind } from './assets.js';
 
 export type RenderJobStatus =
+  | 'LOCAL_QUEUED'
   | 'UPLOADING'
   | 'SUBMITTING'
   | 'QUEUED'
@@ -33,6 +34,9 @@ export interface RenderJob {
   id: string;
   /** Owning project (P0-1): jobs are pinned to their project, never to the UI's current project. */
   projectId: string;
+  /** Computed display metadata returned by the global queue endpoint. */
+  projectTitle?: string;
+  shotTitle?: string;
   shotId: string;
   promptVersionId: string;
   directorPlanVersionId: string | null;

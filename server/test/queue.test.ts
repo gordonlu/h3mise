@@ -101,7 +101,7 @@ test('jobs live in the owning project DB and submit in the open project', async 
   pB.close();
 });
 
-test('submit rejects a duplicate active job for the same intent', async () => {
+test('submit allows only one active job per shot even when intent changes', async () => {
   const { root, store } = await makeStore('queue');
   roots.push(root);
   const p = await makeProjectDetached(store, 'dupP');
@@ -119,12 +119,12 @@ test('submit rejects a duplicate active job for the same intent', async () => {
     queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request, intentHash: 'same' }),
     /already active/,
   );
-  // a DIFFERENT intent (changed duration) is allowed
-  const job2 = queue.submit({
+  // A different intent is still the same Shot and must not create a second
+  // paid task while the first is active.
+  assert.throws(() => queue.submit({
     projectId: p.meta.id, shotId, promptVersionId, provider: 'mock',
     request: { ...request, durationSeconds: 2 }, intentHash: 'other',
-  });
-  assert.notEqual(job2.id, undefined);
+  }), /already active/);
   queue.forgetProject(p.meta.id);
   cur.close();
 });
@@ -480,6 +480,59 @@ test('deleting a shot with an active job releases the single worker for the next
   });
   await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [secondJob.id])?.status === 'LOCAL_READY', 15_000);
   assert.equal(getShot(cur, second.shotId).status, 'HAS_TAKES');
+  queue.forgetProject(cur.meta.id);
+  cur.close();
+});
+
+class HoldingProvider implements VideoProvider {
+  readonly id = 'holding';
+  readonly name = 'Holding';
+  readonly configured = true;
+  submits: string[] = [];
+  async capabilities() { return { supportedModes: ['t2va' as const] }; }
+  async uploadAsset(_a: MediaAsset, _p: string) { return { providerRef: 'x' }; }
+  async submit(): Promise<RenderJobHandle> {
+    const providerTaskId = `holding-${this.submits.length + 1}`;
+    this.submits.push(providerTaskId);
+    return { providerTaskId };
+  }
+  async status(): Promise<RenderStatus> { return { status: 'RUNNING' }; }
+  async result(): Promise<RenderResult> { throw new Error('not complete'); }
+  async cancel() {}
+}
+
+test('provider concurrency runs independent shots in parallel and keeps overflow locally queued', async () => {
+  const { root, store } = await makeStore('queue-concurrency');
+  roots.push(root);
+  const p = await makeProjectDetached(store, 'parallel');
+  const shots = [makeShotWithPrompt(p, 't2va'), makeShotWithPrompt(p, 't2va'), makeShotWithPrompt(p, 't2va')];
+  for (const shot of shots) advanceTo(p, shot.shotId, 'PREFLIGHT_READY');
+  const provider = new HoldingProvider();
+  const registryStub = {
+    get: () => provider,
+    concurrencyLimit: () => 2,
+    confirmProviderVerified: () => undefined,
+  } as unknown as ProviderRegistry;
+  const queue = new RenderQueue(() => store, registryStub, new Ffmpeg(), bus(), 20);
+  const cur = await store.open(p.meta.id);
+  p.close();
+
+  const jobs = shots.map((shot, index) => queue.submit({
+    projectId: cur.meta.id,
+    shotId: shot.shotId,
+    promptVersionId: shot.promptVersionId,
+    provider: 'holding',
+    request: REQUEST(shot.promptVersionId),
+    intentHash: `parallel-${index}`,
+  }));
+
+  await waitFor(() => provider.submits.length === 2, 3000);
+  assert.equal(cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [jobs[2]!.id])?.status, 'LOCAL_QUEUED');
+
+  await queue.cancel(jobs[0]!.id, cur.meta.id);
+  await waitFor(() => provider.submits.length === 3, 3000);
+  assert.notEqual(cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [jobs[2]!.id])?.status, 'LOCAL_QUEUED');
+  for (const job of jobs) await queue.cancel(job.id, cur.meta.id);
   queue.forgetProject(cur.meta.id);
   cur.close();
 });

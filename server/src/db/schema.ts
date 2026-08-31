@@ -372,6 +372,28 @@ ALTER TABLE preflight_reports ADD COLUMN provider_id TEXT;
 CREATE INDEX idx_preflight_provider ON preflight_reports(shot_id, prompt_version_id, provider_id);
 `,
   },
+  {
+    version: 14,
+    name: 'auto-produce-runs',
+    sql: `
+-- Persist only orchestration checkpoints. Story, beats, shots, prompts,
+-- render jobs, takes and timeline remain the canonical production data.
+CREATE TABLE auto_produce_runs (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'preparing',
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  shots_json TEXT NOT NULL DEFAULT '[]',
+  current_step TEXT NOT NULL DEFAULT '',
+  export_rel_path TEXT,
+  export_duration_seconds REAL,
+  error TEXT,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT
+);
+CREATE INDEX idx_auto_produce_status ON auto_produce_runs(status);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

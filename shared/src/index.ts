@@ -14,3 +14,5 @@ export * from './provider.js';
 export * from './events.js';
 export * from './guide.js';
 export * from './production.js';
+export * from './auto-produce.js';
+export * from './film-check.js';

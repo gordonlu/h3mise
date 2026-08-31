@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import type { ProductionIssueCategory, ProductionIssueSeverity, ProductionOverview, RenderBatchShotStage } from '@h3mise/shared';
-import { get } from '../api/client';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import type { AutoProducePlan, AutoProduceRun, ProductionIssueCategory, ProductionIssueSeverity, ProductionOverview, RenderBatchShotStage, VideoProviderId } from '@h3mise/shared';
+import { get, post, subscribeEvents } from '../api/client';
 
 const overview = ref<ProductionOverview | null>(null);
 const loading = ref(true);
 const error = ref('');
 const issueFilter = ref<'all' | ProductionIssueSeverity>('all');
+const autoPlan = ref<AutoProducePlan | null>(null);
+const autoRun = ref<AutoProduceRun | null>(null);
+const autoBusy = ref(false);
+const autoError = ref('');
+const providerId = ref<VideoProviderId>('mock');
+const megapixels = ref(0.6);
+const realConfirmed = ref(false);
+let stopEvents: (() => void) | null = null;
 
 const stageLabel: Record<RenderBatchShotStage, string> = {
   ready: '可以生成', active: '生成中', done: '已选片', needs_selection: '待选片',
@@ -30,19 +38,55 @@ function seconds(value: number): string {
   return value >= 60 ? `${Math.floor(value / 60)}m ${Math.round(value % 60)}s` : `${value.toFixed(value % 1 ? 1 : 0)}s`;
 }
 
-async function load() {
-  loading.value = true;
+async function load(silent = false) {
+  if (!silent) loading.value = true;
   error.value = '';
   try {
-    overview.value = await get<ProductionOverview>('/api/production');
+    const [production, plan, active, runs] = await Promise.all([
+      get<ProductionOverview>('/api/production'), get<AutoProducePlan>('/api/auto-produce/plan'),
+      get<AutoProduceRun | null>('/api/auto-produce/active'), get<AutoProduceRun[]>('/api/auto-produce/runs'),
+    ]);
+    overview.value = production;
+    autoPlan.value = plan;
+    autoRun.value = active ?? runs[0] ?? null;
+    if (!autoRun.value) providerId.value = plan.settings.providerId;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
-    loading.value = false;
+    if (!silent) loading.value = false;
   }
 }
 
-onMounted(load);
+const chosenProvider = computed(() => autoPlan.value?.providers.find((provider) => provider.id === providerId.value));
+const progress = computed(() => autoRun.value?.totalShots ? Math.round(autoRun.value.doneShots / autoRun.value.totalShots * 100) : 0);
+
+async function startAuto() {
+  if (!autoPlan.value) return;
+  autoBusy.value = true; autoError.value = '';
+  try {
+    autoRun.value = await post<AutoProduceRun>('/api/auto-produce/start', {
+      providerId: providerId.value, aspectRatio: autoPlan.value.settings.aspectRatio,
+      megapixels: megapixels.value, skipCompleted: true,
+      confirmRealProvider: providerId.value !== 'mock' && realConfirmed.value,
+    });
+  } catch (cause) { autoError.value = cause instanceof Error ? cause.message : String(cause); }
+  finally { autoBusy.value = false; }
+}
+
+async function cancelAuto() {
+  if (!autoRun.value) return;
+  autoBusy.value = true;
+  try { autoRun.value = await post<AutoProduceRun>(`/api/auto-produce/${autoRun.value.id}/cancel`, {}); }
+  finally { autoBusy.value = false; }
+}
+
+onMounted(() => {
+  void load();
+  stopEvents = subscribeEvents((event) => {
+    if (event.type === 'auto.updated' || event.type === 'render.job.updated' || event.type === 'render.job.succeeded' || event.type === 'render.job.failed') void load(true);
+  });
+});
+onUnmounted(() => stopEvents?.());
 </script>
 
 <template>
@@ -53,13 +97,41 @@ onMounted(load);
         <h1>制片总控台</h1>
         <p class="muted">不是多一个编辑器，而是告诉你项目卡在哪里、现在最该做什么。</p>
       </div>
-      <button class="sm" :disabled="loading" @click="load">{{ loading ? '检查中…' : '重新检查' }}</button>
+      <button class="sm" :disabled="loading" @click="load()">{{ loading ? '检查中…' : '重新检查' }}</button>
     </header>
 
     <div v-if="error" class="error-box">读取项目状态失败：{{ error }}</div>
     <div v-else-if="loading" class="loading-card">正在检查故事、镜头、资产、生成、选片和时间线…</div>
 
     <template v-else-if="overview">
+      <section class="auto-card">
+        <div class="auto-copy">
+          <p class="eyebrow">BEGINNER MODE</p>
+          <h2>一键制作</h2>
+          <p>确认一次设置，系统会在当前项目里完成Beat、Shot、Prompt、生成、选片、时间线、成片检查和导出。完成后仍可回到专业工作台继续编辑。</p>
+          <p v-if="autoPlan?.storyPreparation.note" class="prep-note">{{ autoPlan.storyPreparation.note }}</p>
+        </div>
+        <div v-if="autoRun && !['succeeded','failed','cancelled'].includes(autoRun.status)" class="run-box">
+          <div class="run-head"><strong>{{ autoRun.currentStep }}</strong><span>{{ autoRun.doneShots }}/{{ autoRun.totalShots }}</span></div>
+          <div class="progress"><i :style="{ width: `${progress}%` }" /></div>
+          <small>刷新或切换项目不会丢失进度；已成功的生成不会重复提交。</small>
+          <button class="sm" :disabled="autoBusy" @click="cancelAuto">停止后续步骤</button>
+        </div>
+        <div v-else class="auto-settings">
+          <label>生成服务<select v-model="providerId">
+            <option v-for="provider in autoPlan?.providers" :key="provider.id" :value="provider.id" :disabled="!provider.usable">{{ provider.name }}{{ provider.usable ? '' : '（不可用）' }}</option>
+          </select></label>
+          <label>清晰度<select v-model.number="megapixels"><option :value="0.6">0.6MP（推荐）</option><option :value="0.8">0.8MP</option><option :value="1">1.0MP</option><option :value="1.2">1.2MP</option></select></label>
+          <div class="estimate">预计{{ autoPlan?.renderCount ?? 0 }}个新生成 · {{ seconds(autoPlan?.estimatedDurationSeconds ?? 0) }}成片</div>
+          <label v-if="chosenProvider?.requiresConfirmation" class="paid-confirm"><input v-model="realConfirmed" type="checkbox"> 我确认本次会向{{ chosenProvider.name }}提交{{ autoPlan?.renderCount }}个真实任务，可能产生费用；失败不会自动重投</label>
+          <button class="primary" :disabled="autoBusy || Boolean(autoPlan?.blockers.length) || !chosenProvider?.usable || (chosenProvider?.requiresConfirmation && !realConfirmed)" @click="startAuto">{{ autoBusy ? '正在开始…' : '确认并开始制作' }}</button>
+          <div v-if="autoPlan?.blockers.length" class="auto-blocker">{{ autoPlan.blockers.join('；') }}</div>
+          <div v-if="autoRun?.status === 'succeeded'" class="auto-success">上次制作完成：<a v-if="autoRun.exportUrl" :href="autoRun.exportUrl" target="_blank">预览成片</a></div>
+          <div v-else-if="autoRun?.status === 'failed'" class="auto-blocker">上次停在：{{ autoRun.currentStep }}。{{ autoRun.error }}</div>
+          <div v-if="autoError" class="auto-blocker">{{ autoError }}</div>
+        </div>
+      </section>
+
       <section class="metrics">
         <article><span>镜头进度</span><strong>{{ overview.summary.selectedCount }} / {{ overview.summary.shotCount }}</strong><small>已选片</small></article>
         <article><span>计划 / 镜头</span><strong>{{ seconds(overview.summary.plannedDurationSeconds) }} / {{ seconds(overview.summary.shotDurationSeconds) }}</strong><small>故事规划与 Shot 合计</small></article>
@@ -70,7 +142,7 @@ onMounted(load);
       <section class="next-section">
         <div class="section-title">
           <div><p class="eyebrow">NEXT 3</p><h2>现在最该做</h2></div>
-          <span class="provider">当前生成服务：{{ overview.providerId }}</span>
+          <span class="provider">专业流程默认服务：{{ overview.providerId }}</span>
         </div>
         <div v-if="overview.nextActions.length" class="next-grid">
           <router-link v-for="(action, index) in overview.nextActions" :key="action.id" :to="action.to" class="next-card" :class="action.severity">
@@ -123,6 +195,9 @@ onMounted(load);
 
 <style scoped>
 .production-page { max-width: 1320px; margin: 0 auto; padding: 26px 28px 64px; display: grid; gap: 24px; }
+.auto-card { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(360px, .9fr); gap: 28px; padding: 22px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: linear-gradient(135deg, var(--accent-soft), var(--bg-2) 60%); box-shadow: var(--shadow-1); }
+.auto-copy h2 { margin: 2px 0 8px; font-size: 24px; }.auto-copy > p:not(.eyebrow) { max-width: 660px; margin: 0; color: var(--text-2); line-height: 1.7; }.prep-note { margin-top: 10px !important; color: var(--accent-text) !important; font-size: 12px; }
+.auto-settings, .run-box { display: grid; gap: 10px; align-content: start; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2); }.auto-settings label { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 8px; font-size: 12px; }.auto-settings select { min-width: 0; }.estimate { color: var(--text-3); font-size: 11px; }.auto-settings .paid-confirm { grid-template-columns: auto 1fr; padding: 9px; background: var(--warn-soft); color: var(--warn); line-height: 1.5; }.paid-confirm input { margin: 0; }.auto-blocker { color: var(--bad); font-size: 11px; line-height: 1.5; }.auto-success { color: var(--ok); font-size: 12px; }.run-head { display: flex; justify-content: space-between; gap: 12px; }.run-head span { font: 700 11px var(--mono); color: var(--accent-text); }.progress { height: 7px; overflow: hidden; border-radius: 99px; background: var(--bg-subtle); }.progress i { display: block; height: 100%; background: var(--accent); transition: width .25s; }.run-box small { color: var(--text-3); }
 .page-head, .section-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 h1 { margin: 1px 0 4px; font: 600 30px/1.25 var(--serif); } h2 { margin: 0; font: 600 20px/1.3 var(--serif); }
 .eyebrow { margin: 0; color: var(--accent-text); font: 700 10px/1.5 var(--mono); letter-spacing: .16em; }
@@ -144,5 +219,5 @@ h1 { margin: 1px 0 4px; font: 600 30px/1.25 var(--serif); } h2 { margin: 0; font
 .shot-row:hover { text-decoration: none; background: var(--bg-subtle); }.shot-order { font: 700 11px var(--mono); color: var(--text-3); }.shot-name { display: grid; min-width: 0; }.shot-name strong { color: var(--text); }.shot-name small { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stage { justify-self: start; padding: 2px 7px; border-radius: 999px; background: var(--info-soft); color: var(--info); font-size: 10px; }.stage.blocked { background: var(--bad-soft); color: var(--bad); }.stage.needs_selection, .stage.needs_assets, .stage.waiting_dependency { background: var(--warn-soft); color: var(--warn); }.stage.done { background: var(--ok-soft); color: var(--ok); }
 .ok-text { color: var(--ok); }.empty-filter { padding: 28px 4px 8px; color: var(--text-3); text-align: center; }
-@media (max-width: 1120px) { .metrics { grid-template-columns: repeat(2, 1fr); }.next-grid { grid-template-columns: 1fr; }.shot-row { grid-template-columns: 38px 1fr 90px 55px; }.shot-row > :nth-last-child(-n+2) { display: none; } }
+@media (max-width: 1120px) { .auto-card { grid-template-columns: 1fr; }.metrics { grid-template-columns: repeat(2, 1fr); }.next-grid { grid-template-columns: 1fr; }.shot-row { grid-template-columns: 38px 1fr 90px 55px; }.shot-row > :nth-last-child(-n+2) { display: none; } }
 </style>

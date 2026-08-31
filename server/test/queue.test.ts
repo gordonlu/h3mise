@@ -396,7 +396,7 @@ test('sustained unusable provider answers eventually fail the job (no silent han
   const job = queue.submit({ projectId: cur.meta.id, shotId, promptVersionId, provider: 'flaky', request: REQUEST(promptVersionId), intentHash: 'h' });
   await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status === 'FAILED', 60_000);
   assert.match(cur.db.get<{ error: string | null }>('SELECT error FROM render_jobs WHERE id = ?', [job.id])?.error ?? '', /consecutive polls/);
-  queue.forgetProject(cur.meta.id);
+  await queue.forgetProject(cur.meta.id);
   cur.close();
 });
 
@@ -533,6 +533,6 @@ test('provider concurrency runs independent shots in parallel and keeps overflow
   await waitFor(() => provider.submits.length === 3, 3000);
   assert.notEqual(cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [jobs[2]!.id])?.status, 'LOCAL_QUEUED');
   for (const job of jobs) await queue.cancel(job.id, cur.meta.id);
-  queue.forgetProject(cur.meta.id);
+  await queue.forgetProject(cur.meta.id);
   cur.close();
 });

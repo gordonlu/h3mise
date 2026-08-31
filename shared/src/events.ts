@@ -18,4 +18,5 @@ export type AppEvent =
   | { type: 'continuity.committed'; shotId: string; scope: 'visual' | 'narrative' }
   | { type: 'shot.updated'; shotId: string; status: ShotStatus }
   | { type: 'project.updated' }
+  | { type: 'auto.updated'; runId: string; status: import('./auto-produce.js').AutoProduceStatus }
   | { type: 'job.updated'; jobId: string; status: 'running' | 'done' | 'failed' | 'cancelled'; kind: string };

@@ -89,6 +89,9 @@ export class RenderQueue {
   private readonly pollMs: number;
   /** Detached contexts for projects with active jobs (never `store.current`). */
   private readonly detached = new Map<string, ProjectContext>();
+  /** Single-flight guards concurrent workers from opening two SQLite handles
+   * for the same project and leaking the one overwritten in `detached`. */
+  private readonly openingDetached = new Map<string, Promise<ProjectContext | null>>();
 
   constructor(
     private readonly getStore: () => ProjectStore,
@@ -124,15 +127,7 @@ export class RenderQueue {
     if (this.stoppedProjects.has(projectId)) return null;
     const cur = this.getStore().current;
     if (cur && cur.meta.id === projectId) return cur;
-    let ctx = this.detached.get(projectId);
-    if (ctx) return ctx;
-    try {
-      ctx = await this.getStore().openDetached(projectId);
-      this.detached.set(projectId, ctx);
-      return ctx;
-    } catch {
-      return null;
-    }
+    return this.openDetachedOnce(projectId);
   }
 
   /**
@@ -146,18 +141,37 @@ export class RenderQueue {
     if (this.stoppedProjects.has(projectId)) return null;
     const cached = this.detached.get(projectId);
     if (cached) return cached;
-    try {
-      const ctx = await this.getStore().openDetached(projectId);
-      this.detached.set(projectId, ctx);
-      return ctx;
-    } catch {
-      return null;
-    }
+    return this.openDetachedOnce(projectId);
+  }
+
+  private async openDetachedOnce(projectId: string): Promise<ProjectContext | null> {
+    const cached = this.detached.get(projectId);
+    if (cached) return cached;
+    const existing = this.openingDetached.get(projectId);
+    if (existing) return existing;
+    const opening = (async () => {
+      try {
+        const ctx = await this.getStore().openDetached(projectId);
+        if (this.stoppedProjects.has(projectId)) {
+          ctx.close();
+          return null;
+        }
+        this.detached.set(projectId, ctx);
+        return ctx;
+      } catch {
+        return null;
+      } finally {
+        this.openingDetached.delete(projectId);
+      }
+    })();
+    this.openingDetached.set(projectId, opening);
+    return opening;
   }
 
   /** Drop a detached context (e.g. project deleted while jobs were pending). */
-  forgetProject(projectId: string): void {
+  async forgetProject(projectId: string): Promise<void> {
     this.stoppedProjects.add(projectId);
+    await this.openingDetached.get(projectId);
     for (const wake of this.waiters.get(projectId) ?? []) wake();
     this.waiters.delete(projectId);
     const ctx = this.detached.get(projectId);
@@ -174,6 +188,21 @@ export class RenderQueue {
     }
     for (const k of [...this.handles.keys()]) {
       if (k.startsWith(`${projectId}/`)) this.handles.delete(k);
+    }
+    // Cancellation wakes pollers, but their async finally blocks still need a
+    // turn before the detached SQLite handle is safe to remove. Awaiting this
+    // in project deletion prevents Windows EPERM and avoids deleting a DB
+    // underneath a worker. Callers that do not await retain the old best-effort
+    // behaviour.
+    const deadline = Date.now() + 30_000;
+    while ([...this.active.keys()].some((key) => key.startsWith(`${projectId}/`)) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    if (![...this.active.keys()].some((key) => key.startsWith(`${projectId}/`))) {
+      const remaining = this.detached.get(projectId);
+      remaining?.close();
+      this.detached.delete(projectId);
+      this.deferredClose.delete(projectId);
     }
   }
 
@@ -300,6 +329,12 @@ export class RenderQueue {
     });
   }
 
+  /** Stable detached context for long-lived orchestration. It is owned by the
+   * queue and remains valid when the interactive project changes. */
+  async backgroundContext(projectId: string): Promise<ProjectContext | null> {
+    return this.pipelineCtx(projectId);
+  }
+
   /** Global queue view. Job ids repeat across project DBs, so every item is
    * returned with its owning project and display names. */
   async listAll(): Promise<RenderJob[]> {
@@ -344,6 +379,23 @@ export class RenderQueue {
     const p = this.getStore().current;
     if (!p) throw new Error('no project open');
     if (input.projectId !== p.meta.id) throw new Error('render job must be created in the open project');
+    return this.submitInContext(p, input);
+  }
+
+  /** Background equivalent used by persisted workflows. The returned job row
+   * already exists before any Provider I/O begins, so callers can checkpoint
+   * its id without a paid-submission recovery gap. */
+  async submitDetached(input: { projectId: string; shotId: string; promptVersionId: string; provider: string; request: RenderRequest; intentHash: string }): Promise<RenderJob> {
+    const p = await this.pipelineCtx(input.projectId);
+    if (!p) throw new Error('project unavailable for render');
+    return this.submitInContext(p, input);
+  }
+
+  private submitInContext(
+    p: ProjectContext,
+    input: { projectId: string; shotId: string; promptVersionId: string; provider: string; request: RenderRequest; intentHash: string },
+  ): RenderJob {
+    if (input.projectId !== p.meta.id) throw new Error('render job project mismatch');
     const shot = getShot(p, input.shotId);
     const prompt = getPrompt(p, input.promptVersionId);
     // One active task per Shot covers double-click, multi-tab, network replay,

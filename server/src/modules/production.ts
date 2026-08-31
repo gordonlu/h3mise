@@ -11,6 +11,7 @@ import { getStory, listBeats } from './story.js';
 import { listShots } from './shots.js';
 import { getTimeline, listTimelineExports } from './timeline.js';
 import { planRenderBatch } from './render-batch.js';
+import { jget } from '../db/sqlite.js';
 
 const ACTIVE = ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'];
 
@@ -52,7 +53,10 @@ export async function productionOverview(p: ProjectContext, registry: ProviderRe
   const story = getStory(p);
   const shots = listShots(p);
   const beats = listBeats(p);
-  const providerId = p.config.default_provider ?? 'runninghub';
+  const activeAuto = p.db.get<{ settings_json: string }>("SELECT settings_json FROM auto_produce_runs WHERE status NOT IN ('succeeded','failed','cancelled') ORDER BY started_at DESC LIMIT 1");
+  const providerId = activeAuto
+    ? jget<{ providerId?: string }>(activeAuto.settings_json, {}).providerId ?? p.config.default_provider ?? 'runninghub'
+    : p.config.default_provider ?? 'runninghub';
   const provider = registry.get(providerId);
   const batch = await planRenderBatch(p, registry, { providerId });
   const timeline = getTimeline(p);

@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { get, post, patch, del, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { useToastStore } from '../stores/toast';
 import { t } from '../stores/locale';
-import type { TimelineClip } from '@h3mise/shared';
+import type { FilmCheckResult, TimelineClip } from '@h3mise/shared';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import EmptyState from '../components/EmptyState.vue';
 
@@ -33,6 +33,7 @@ const activeClipId = ref<string | null>(null);
 const trimPlayer = ref<InstanceType<typeof VideoPlayer> | null>(null);
 const dragId = ref<string | null>(null);
 const dropTargetId = ref<string | null>(null);
+const filmCheck = ref<FilmCheckResult | null>(null);
 
 const PX_PER_SEC = 14;
 const MIN_CLIP_PX = 72;
@@ -77,6 +78,7 @@ async function load() {
   shotsWithTakes.value = takes.filter((t): t is ShotWithTake => t !== null);
   exports.value = await get<TimelineExport[]>('/api/timeline/exports');
   playUrl.value = exports.value[0]?.url ?? '';
+  filmCheck.value = await get<FilmCheckResult>('/api/film-check');
 }
 
 async function addClip(shotId: string, takeId: string) {
@@ -148,11 +150,21 @@ function markTrim(which: 'in' | 'out') {
 }
 
 async function exportTimeline() {
-  exportJob.value = { id: '', status: 'running' };
-  const res = await post<{ jobId: string }>('/api/timeline/export', {});
-  exportJob.value = { id: res.jobId, status: 'running', result: undefined, error: null };
-  toasts.push({ kind: 'info', text: `导出任务 ${res.jobId} 已启动（后台运行）` });
-  void pollExport(res.jobId);
+  try {
+    filmCheck.value = await get<FilmCheckResult>('/api/film-check');
+    if (!filmCheck.value.canExport) {
+      toasts.push({ kind: 'err', text: `成片检查未通过：${filmCheck.value.errors[0]?.message ?? '请查看问题列表'}` });
+      return;
+    }
+    exportJob.value = { id: '', status: 'running' };
+    const res = await post<{ jobId: string }>('/api/timeline/export', {});
+    exportJob.value = { id: res.jobId, status: 'running', result: undefined, error: null };
+    toasts.push({ kind: 'info', text: `导出任务 ${res.jobId} 已启动（后台运行）` });
+    void pollExport(res.jobId);
+  } catch (error) {
+    exportJob.value = null;
+    toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 async function pollExport(jobId: string) {
@@ -190,9 +202,14 @@ onUnmounted(() => off?.());
   <div class="page">
     <div class="spread">
       <h1>{{ t('pages.timeline.title') }} <span class="muted">{{ t('pages.timeline.clipsCount', { n: clips.length, s: totalSeconds.toFixed(1) }) }}</span></h1>
-      <button class="primary" :disabled="!clips.length || exportJob?.status === 'running'" @click="exportTimeline">
+      <button class="primary" :disabled="!clips.length || filmCheck?.canExport === false || exportJob?.status === 'running'" @click="exportTimeline">
         {{ exportJob?.status === 'running' ? t('pages.timeline.exporting') : t('pages.timeline.export') }}
       </button>
+    </div>
+
+    <div v-if="filmCheck && (filmCheck.errors.length || filmCheck.warnings.length)" class="panel film-check" :class="{ blocked: !filmCheck.canExport }">
+      <div class="panel-title">成片检查 · {{ filmCheck.canExport ? '可以导出' : `${filmCheck.errors.length}项需要处理` }}</div>
+      <p v-for="issue in [...filmCheck.errors, ...filmCheck.warnings]" :key="issue.code + issue.message">{{ issue.severity === 'error' ? '阻塞' : '提醒' }}：{{ issue.message }}</p>
     </div>
 
     <div v-if="exportJob && exportJob.status === 'running'" class="panel progress-panel">
@@ -421,4 +438,5 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .progress-panel { }
 .progress-track { height: 6px; background: var(--inset); border-radius: 3px; margin: 10px 14px 14px; overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent-bright)); transition: width 0.4s; }
+.film-check { padding: 13px 16px; border-color: var(--warn); }.film-check.blocked { border-color: var(--bad); background: var(--bad-soft); }.film-check p { margin: 6px 0 0; color: var(--text-2); font-size: 12px; }
 </style>

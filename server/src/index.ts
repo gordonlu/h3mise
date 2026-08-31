@@ -14,6 +14,7 @@ import { JobRunner } from './modules/jobs.js';
 import { buildApp } from './http/app.js';
 import { SessionManager } from './http/security.js';
 import { join } from 'node:path';
+import { AutoProduceService } from './modules/auto-produce.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
   const jobs = new JobRunner(bus);
   const ai = new AIService(config.ai, join(config.home, 'skills'));
   const sessions = new SessionManager();
+  const auto = new AutoProduceService(() => store, registry, queue, ffmpeg, bus);
 
   // Restore the last opened project (auto-recovery, PRD §49).
   const lastId = store.registry.get<{ value: string }>("SELECT value FROM kv WHERE key = 'last_project_id'")?.value;
@@ -65,6 +67,7 @@ async function main(): Promise<void> {
   // which project the UI reopens.
   await queue.recover();
   console.log('  queue:       recovered pending render jobs');
+  await auto.resumeAll();
 
   const app = buildApp(
     {
@@ -76,6 +79,7 @@ async function main(): Promise<void> {
       ai,
       jobs,
       sessions,
+      auto,
     },
     config.webDist,
   );

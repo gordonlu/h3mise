@@ -32,6 +32,8 @@ import * as aiActions from '../modules/ai-actions.js';
 import * as guideMod from '../modules/guide.js';
 import * as productionMod from '../modules/production.js';
 import * as videoAnalysisMod from '../modules/video-analysis.js';
+import * as filmCheckMod from '../modules/film-check.js';
+import type { AutoProduceService } from '../modules/auto-produce.js';
 import { serveMedia } from './media-route.js';
 import { createKeyedMutex } from '../modules/mutex.js';
 import { BibleFormatError, importBible } from '../modules/import-bible.js';
@@ -46,6 +48,7 @@ export interface AppServices {
   ai: AIService;
   jobs: JobRunner;
   sessions: SessionManager;
+  auto: AutoProduceService;
 }
 
 type App = Hono<{ Variables: { services: AppServices } }>;
@@ -221,7 +224,7 @@ export function buildRoutes(services: AppServices): App {
     } finally {
       if (ownsContext) ctx?.close();
     }
-    services.queue.forgetProject(id);
+    await services.queue.forgetProject(id);
     await services.store.delete(id);
     services.providers.refresh();
     return c.json({ ok: true });
@@ -235,6 +238,24 @@ export function buildRoutes(services: AppServices): App {
 
   app.get('/api/guide/project', (c) => c.json(guideMod.projectGuideSummary(p(c))));
   app.get('/api/production', async (c) => c.json(await productionMod.productionOverview(p(c), services.providers)));
+  app.get('/api/auto-produce/plan', async (c) => c.json(await services.auto.buildPlan(p(c))));
+  app.get('/api/auto-produce/runs', (c) => c.json(services.auto.listRuns(p(c))));
+  app.get('/api/auto-produce/active', (c) => c.json(services.auto.getActiveRun(p(c))));
+  app.post('/api/auto-produce/start', async (c) => {
+    const body = await c.req.json();
+    try {
+      return c.json(services.auto.start(p(c), {
+        providerId: body.providerId ?? 'mock',
+        aspectRatio: String(body.aspectRatio ?? p(c).config.default_aspect_ratio),
+        megapixels: Number(body.megapixels ?? 0.6),
+        skipCompleted: body.skipCompleted !== false,
+        confirmRealProvider: body.confirmRealProvider === true,
+      }), 201);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+  app.post('/api/auto-produce/:id/cancel', async (c) => c.json(await services.auto.cancel(p(c).meta.id, c.req.param('id'))));
 
   app.patch('/api/current-project/config', async (c) => {
     const ctx = p(c);
@@ -696,9 +717,12 @@ export function buildRoutes(services: AppServices): App {
     ...item,
     url: `/api/file/${encodeURIComponent(item.relPath)}`,
   }))));
+  app.get('/api/film-check', async (c) => c.json(await filmCheckMod.runFilmCheck(p(c))));
   app.post('/api/timeline/export', async (c) => {
     const ctx = p(c);
     const body = await c.req.json().catch(() => ({}));
+    const check = await filmCheckMod.runFilmCheck(ctx);
+    if (!check.canExport) return c.json({ error: '成片检查未通过', filmCheck: check }, 422);
     const projectId = ctx.meta.id;
     // P1: run against a DETACHED context. The closure outlives the request,
     // and store.open() closes the old current db when the UI switches

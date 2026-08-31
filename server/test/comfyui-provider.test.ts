@@ -61,7 +61,11 @@ test('ComfyUI provider maps inputs, uploads frames, polls history, and cancels o
     return json(res, { error: 'not found' }, 404);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
+  t.after(() => new Promise<void>((resolve, reject) => {
+    server.closeIdleConnections();
+    server.closeAllConnections();
+    server.close((error) => error ? reject(error) : resolve());
+  }));
   const address = server.address();
   assert.ok(address && typeof address === 'object');
 

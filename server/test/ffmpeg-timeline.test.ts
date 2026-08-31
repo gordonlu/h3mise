@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { makeTempRoot, cleanupTempRoot } from './helpers.js';
-import { Ffmpeg, parseLoudnessMeasurement } from '../src/ffmpeg.js';
+import { Ffmpeg, parseLoudnessMeasurement, parseSceneCutTimestamps } from '../src/ffmpeg.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -132,4 +132,37 @@ test('muted timeline clips keep a silent audio stream for concat', async () => {
   assert.equal((await ffmpeg.probe(muted)).hasAudio, true);
   await ffmpeg.concat([muted, source], out, { transitions: [{ type: 'cut', duration: 0 }] });
   assert.equal((await ffmpeg.probe(out)).hasAudio, true);
+});
+
+test('filmstrip extracts an evenly sampled WebP preview set', async () => {
+  const root = makeTempRoot('ffmpeg-filmstrip');
+  roots.push(root);
+  const ffmpeg = new Ffmpeg();
+  const source = join(root, 'source.mp4');
+  const stripDir = join(root, 'strip');
+  await ffmpeg.syntheticVideo(source, 1.2, 'Filmstrip', '640x360');
+  const frames = await ffmpeg.filmstrip(source, stripDir, 1.2, 5);
+  assert.equal(frames.length, 5);
+  assert.equal(frames[0]?.timeSeconds, 0);
+  assert.ok((frames.at(-1)?.timeSeconds ?? 0) > 0.8);
+  assert.ok(frames.every((frame) => frame.path.endsWith('.webp')));
+});
+
+test('scene cut parser returns unique sorted timestamps without inventing time zero', () => {
+  const stderr = `
+    [Parsed_showinfo_1] n:0 pts:0 pts_time:0 pos:1
+    [Parsed_showinfo_1] n:1 pts:3820 pts_time:3.82 pos:2
+    [Parsed_showinfo_1] n:2 pts:7410 pts_time:7.410 pos:3
+    [Parsed_showinfo_1] n:3 pts:7410 pts_time:7.410 pos:3`;
+  assert.deepEqual(parseSceneCutTimestamps(stderr), [3.82, 7.41]);
+});
+
+test('scene detection runs locally on a video without requiring AI', async () => {
+  const root = makeTempRoot('ffmpeg-scene-cuts');
+  roots.push(root);
+  const ffmpeg = new Ffmpeg();
+  const source = join(root, 'source.mp4');
+  await ffmpeg.syntheticVideo(source, 0.8, 'Scene analysis', '640x360');
+  const cuts = await ffmpeg.detectSceneCuts(source, 0.35);
+  assert.ok(cuts.every((cut) => cut > 0.02));
 });

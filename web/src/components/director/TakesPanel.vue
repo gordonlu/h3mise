@@ -5,6 +5,7 @@ import { FAILURE_TAGS } from '@h3mise/shared';
 import { takeVideoUrl, fileUrl } from '../../api/client';
 import { confirmDialog } from '../../stores/confirm';
 import VideoPlayer from '../VideoPlayer.vue';
+import VideoAnalysisFilmstrip from '../VideoAnalysisFilmstrip.vue';
 
 interface EntityLite {
   id: string;
@@ -326,6 +327,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       </div>
       <div class="panel-body">
         <VideoPlayer :src="takeVideoUrl(activeTake.id)" :poster="activeTake.posterPath ? fileUrl(activeTake.posterPath) : undefined" :max-height="420" />
+        <VideoAnalysisFilmstrip :take-id="activeTake.id" />
       </div>
     </div>
 

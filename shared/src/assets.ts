@@ -55,6 +55,28 @@ export interface MediaAsset {
   createdAt: string;
 }
 
+export interface VideoAnalysisFrame {
+  relPath: string;
+  timeSeconds: number;
+}
+
+/** Deterministic local video analysis. It contains no AI guesses and is safe
+ * to cache/rebuild from the source Take. */
+export interface VideoAnalysis {
+  sourceTakeId: string;
+  durationSeconds: number;
+  width: number | null;
+  height: number | null;
+  frames: VideoAnalysisFrame[];
+  /** Includes 0 as the beginning boundary, followed by detected hard cuts. */
+  sceneCuts: number[];
+  suitability: {
+    level: 'good' | 'warning' | 'poor';
+    reasons: string[];
+  };
+  generatedAt: string;
+}
+
 export type ReferenceRole =
   | 'identity'
   | 'costume'

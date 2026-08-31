@@ -2,8 +2,8 @@
 // machine via child_process.spawn; no bundling, no remote transcode.
 
 import { spawn } from 'node:child_process';
-import { access, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { access, mkdir, readdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 export interface FfprobeInfo {
   durationSeconds: number | null;
@@ -74,6 +74,13 @@ export function parseLoudnessMeasurement(stderr: string): LoudnessMeasurement | 
     targetOffset: Number(raw.target_offset),
   };
   return Object.values(values).every(Number.isFinite) ? values : null;
+}
+
+export function parseSceneCutTimestamps(stderr: string): number[] {
+  const cuts = [...stderr.matchAll(/pts_time:([0-9]+(?:\.[0-9]+)?)/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value > 0.02);
+  return [...new Set(cuts.map((value) => Number(value.toFixed(3))))].sort((a, b) => a - b);
 }
 
 export interface FfmpegCapabilities {
@@ -165,6 +172,36 @@ export class Ffmpeg {
       this.extractFrame(input, firstPath, 0, '1280:-2'),
       this.extractFrame(input, lastPath, Math.max(0, durationSeconds - 0.05), '1280:-2'),
     ]);
+  }
+
+  /** Detect obvious edit points using FFmpeg's deterministic scene score. */
+  async detectSceneCuts(input: string, threshold = 0.35): Promise<number[]> {
+    if (!Number.isFinite(threshold) || threshold <= 0 || threshold >= 1) throw new Error('scene threshold must be between 0 and 1');
+    const { stderr } = await runResult('ffmpeg', [
+      '-hide_banner', '-nostats', '-i', input,
+      '-filter:v', `select='gt(scene,${threshold})',showinfo`,
+      '-an', '-f', 'null', '-',
+    ], input);
+    return parseSceneCutTimestamps(stderr);
+  }
+
+  /** Extract a compact, evenly sampled WebP strip in one FFmpeg process. */
+  async filmstrip(input: string, outDir: string, durationSeconds: number, frameCount = 12): Promise<Array<{ path: string; timeSeconds: number }>> {
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) throw new Error('filmstrip duration must be positive');
+    const count = Math.min(24, Math.max(2, Math.round(frameCount)));
+    await mkdir(outDir, { recursive: true });
+    const fps = count / Math.max(0.1, durationSeconds);
+    await run('ffmpeg', [
+      '-y', '-hide_banner', '-nostats', '-i', input,
+      '-vf', `fps=${fps.toFixed(6)},scale=240:-2:force_original_aspect_ratio=decrease`,
+      '-frames:v', String(count), '-c:v', 'libwebp', '-q:v', '70',
+      join(outDir, 'frame-%04d.webp'),
+    ], input);
+    const files = (await readdir(outDir)).filter((name) => /^frame-\d+\.webp$/i.test(name)).sort();
+    return files.map((name, index) => ({
+      path: join(outDir, name),
+      timeSeconds: Number(Math.min(Math.max(0, durationSeconds - 0.05), index * durationSeconds / count).toFixed(3)),
+    }));
   }
 
   /** Trim input to [start, end] into outPath (mp4, h264+aac). */

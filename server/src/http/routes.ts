@@ -31,6 +31,7 @@ import * as mediaMod from '../modules/media.js';
 import * as aiActions from '../modules/ai-actions.js';
 import * as guideMod from '../modules/guide.js';
 import * as productionMod from '../modules/production.js';
+import * as videoAnalysisMod from '../modules/video-analysis.js';
 import { serveMedia } from './media-route.js';
 import { createKeyedMutex } from '../modules/mutex.js';
 import { BibleFormatError, importBible } from '../modules/import-bible.js';
@@ -814,6 +815,11 @@ export function buildRoutes(services: AppServices): App {
       return c.json({ error: 'invalid take path' }, 400);
     }
     return serveLocalFile(c, abs);
+  });
+
+  app.post('/api/takes/:id/analyze', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    return c.json(await videoAnalysisMod.analyzeTakeVideo(p(c), services.ffmpeg, c.req.param('id'), body.force === true));
   });
 
   // --- exported files (timeline exports etc.) ------------------------------

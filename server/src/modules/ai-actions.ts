@@ -13,6 +13,7 @@ import * as storyMod from './story.js';
 import * as assetsMod from './assets.js';
 import * as continuityMod from './continuity.js';
 import * as takesMod from './takes.js';
+import { directorStyleAiContext } from './director-styles.js';
 import { emptyDirectorPlan, type DirectorPlan, type StoryBeat, type VisualContinuityState } from '@h3mise/shared';
 
 type ActionName =
@@ -301,7 +302,8 @@ export async function runAction(
 ): Promise<unknown> {
   if (!ai.model) throw new Error('AI not configured — use external AI templates instead');
   const skills = await ai.loadSkills();
-  const skillText = skills.map((s) => `# ${s.title}\n${s.content}`).join('\n\n---\n\n');
+  const styleContext = directorStyleAiContext(ctx);
+  const skillText = `${skills.map((s) => `# ${s.title}\n${s.content}`).join('\n\n---\n\n')}\n\n---\n\n${styleContext}`;
   const shotId = body.shotId ? String(body.shotId) : null;
   const shot = shotId ? shotsMod.getShot(ctx, shotId) : null;
   const suppliedPlan = body.plan ? directorMod.normalizeDirectorPlan(body.plan).plan : null;
@@ -466,7 +468,7 @@ Empty output shape: ${JSON.stringify(empty)}`),
 
 FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element: "title" (string), "summary" (string). Optional: category, location, timeOfDay, weather, characters, stateChange, durationSeconds. No prose. No markdown. No code fences. No tables. Begin with '[' and end with ']'. Example:
 [{"title":"节拍标题","summary":"一句话概括","category":"setup","location":"","timeOfDay":"","weather":"","characters":[],"stateChange":"","durationSeconds":5}]`;
-      const userMsg = `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}`;
+      const userMsg = `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\n${styleContext}`;
 
       let raw: unknown;
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -493,7 +495,7 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
     case 'beats_to_shots': {
       const beats = body.beats as Array<{ title?: string; summary?: string; id?: string }> | undefined;
       const items = await ai.model.structured<Array<{ title: string; purpose: string; shotFunction: string; durationSeconds: number; h3Mode: string }>>({
-        system: `你把 StoryBeats 转成 H3 镜头序列。默认一个镜头=一个连续事件。每个镜头：title、purpose（中文）、shotFunction（establishing|wide|medium|closeup|insert|reaction|action|transition|montage|pov|aerial|dialogue|other）、durationSeconds（1-15，以 beat 的 durationSeconds 为基准）、h3Mode（t2va|i2va|fl2va|l2va|ref2va）。title 和 purpose 一律用中文。只返回 JSON 数组。`,
+        system: `你把 StoryBeats 转成 H3 镜头序列。默认一个镜头=一个连续事件。每个镜头：title、purpose（中文）、shotFunction（establishing|wide|medium|closeup|insert|reaction|action|transition|montage|pov|aerial|dialogue|other）、durationSeconds（1-15，以 beat 的 durationSeconds 为基准）、h3Mode（t2va|i2va|fl2va|l2va|ref2va）。title 和 purpose 一律用中文。只返回 JSON 数组。\n\n${styleContext}`,
         messages: [{ role: 'user', content: `Beats:\n${JSON.stringify(beats ?? [])}\n\nConvert each beat into one shot.` }],
         temperature: 0.4,
       });
@@ -503,7 +505,7 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
       // Story → Beats → Shots → Plans, stops before render (PRD §40).
       const story = storyMod.getStory(ctx);
       const beats = normalizeBeats(await ai.model.structured<unknown>({
-        system: `You break a story into StoryBeats (see story_to_beats rules). Return ONLY a JSON array.`,
+        system: `You break a story into StoryBeats (see story_to_beats rules). Return ONLY a JSON array.\n\n${styleContext}`,
         messages: [{ role: 'user', content: `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}` }],
         temperature: 0.5,
       }));
@@ -549,5 +551,6 @@ References: ${JSON.stringify(refs)}
 Committed actual continuity: ${JSON.stringify(latest?.state)}
 Entities: ${JSON.stringify(entities)}
 Character states: ${JSON.stringify(states)}
+${directorStyleAiContext(ctx)}
 Request: ${String(body.request ?? 'Produce the DirectorPlan for this shot.')}`;
 }

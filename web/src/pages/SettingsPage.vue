@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
-import type { AiAppProfile, ComfyUiWorkflowProfile } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, StoryboardProviderProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
 const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; comfyUiConfigured: boolean; aiConfigured: boolean } | null>(null);
@@ -20,6 +20,9 @@ const comfyProfile = ref<ComfyUiWorkflowProfile | null>(null);
 const comfyProfileJson = ref('');
 const editingComfyProfile = ref(false);
 const verifyingComfy = ref(false);
+const storyboardProfile = ref<StoryboardProviderProfile | null>(null);
+const verifyingStoryboard = ref(false);
+const directorStyles = ref<DirectorStylePreset[]>([]);
 
 // P0-6 semantics: only a successful real submit marks the profile verified;
 // discovery alone only ever reaches "nodes_detected".
@@ -55,6 +58,16 @@ async function load() {
     apiKeyInfo.value = await get<{ source: 'settings' | 'env' | 'none'; configured: boolean }>('/api/providers/runninghub/apikey');
   } catch {
     /* keep null */
+  }
+  try {
+    storyboardProfile.value = await get<StoryboardProviderProfile>('/api/providers/runninghub/storyboard-profile');
+  } catch {
+    /* keep null */
+  }
+  try {
+    directorStyles.value = (await get<{ presets: DirectorStylePreset[] }>('/api/director-styles')).presets;
+  } catch {
+    /* free text remains available */
   }
   try {
     comfyProfile.value = await get<ComfyUiWorkflowProfile>('/api/providers/comfyui/profile');
@@ -175,6 +188,29 @@ async function verifyComfyProfile() {
     verifyingComfy.value = false;
   }
 }
+
+async function saveStoryboardProfile() {
+  if (!storyboardProfile.value) return;
+  try {
+    storyboardProfile.value = await put<StoryboardProviderProfile>('/api/providers/runninghub/storyboard-profile', storyboardProfile.value);
+    notice.value = 'Storyboard 生图配置已保存；修改 AI App 后请重新检测节点';
+  } catch (e) {
+    notice.value = `Storyboard 配置保存失败：${e instanceof Error ? e.message : e}`;
+  }
+}
+
+async function verifyStoryboardProfile() {
+  verifyingStoryboard.value = true;
+  try {
+    await saveStoryboardProfile();
+    storyboardProfile.value = await post<StoryboardProviderProfile>('/api/providers/runninghub/storyboard-profile/verify', {});
+    notice.value = `Storyboard 节点检测完成：${storyboardProfile.value.verification.note}`;
+  } catch (e) {
+    notice.value = `Storyboard 节点检测失败：${e instanceof Error ? e.message : e}`;
+  } finally {
+    verifyingStoryboard.value = false;
+  }
+}
 </script>
 
 <template>
@@ -209,7 +245,9 @@ async function verifyComfyProfile() {
           </label>
           <label class="field">
             视觉风格
-            <input :value="project.current.config.visual_style ?? ''" placeholder="如：胶片颗粒 + 暖色调" @change="saveProjectConfig({ visual_style: ($event.target as HTMLInputElement).value })" />
+            <input list="director-style-presets" :value="project.current.config.visual_style ?? ''" placeholder="如：武林外传风格、邵氏电影风格、港片警匪感" @change="saveProjectConfig({ visual_style: ($event.target as HTMLInputElement).value })" />
+            <datalist id="director-style-presets"><option v-for="style in directorStyles" :key="style.id" :value="style.name" /></datalist>
+            <span class="muted">熟悉的作品名只用于匹配；H3Mise AI 会接收通用导演属性，最终提示词不会照搬作品名。</span>
           </label>
           <div class="muted mono">{{ project.current.meta.dirPath }}</div>
         </div>
@@ -252,6 +290,30 @@ async function verifyComfyProfile() {
           <div v-if="profile?.verification.note" class="muted">上次检测：{{ profile.verification.note }}</div>
           <textarea v-if="editingProfile" v-model="profileJson" rows="12" class="mono" placeholder="在此粘贴 / 编辑 RunningHub AI App Profile JSON（appId、节点映射 inputs、成本、能力）"></textarea>
           <button v-if="editingProfile" class="primary sm" @click="saveProfile">保存 Profile</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Provider — Storyboard 生图（可选付费）</div>
+        <div v-if="storyboardProfile" class="panel-body col">
+          <div class="row">
+            <span class="badge" :class="verifClass(storyboardProfile.verification.status)">{{ verifLabel(storyboardProfile.verification.status) }}</span>
+            <label class="row"><input v-model="storyboardProfile.enabled" type="checkbox" /> 启用</label>
+          </div>
+          <p class="muted">复用 RunningHub API Key，但与视频 AI App 完全分开。只有在 Storyboard 页明确确认后才创建付费任务。</p>
+          <label class="field">生图 AI App ID<input v-model="storyboardProfile.appId" class="mono" /></label>
+          <label class="field">单次预估费用（CNY，仅用于确认提示）<input v-model.number="storyboardProfile.estimatedCostCny" type="number" min="0" step="0.01" /></label>
+          <div class="grid two">
+            <label class="field">3 格输出尺寸<input v-model="storyboardProfile.sizeValues[3]" /></label>
+            <label class="field">6 格输出尺寸<input v-model="storyboardProfile.sizeValues[6]" /></label>
+            <label class="field">9 格输出尺寸<input v-model="storyboardProfile.sizeValues[9]" /></label>
+          </div>
+          <div class="muted mono">Prompt {{ storyboardProfile.inputs.prompt.nodeId || '—' }}/{{ storyboardProfile.inputs.prompt.fieldName }} · Size {{ storyboardProfile.inputs.size.nodeId || '—' }}/{{ storyboardProfile.inputs.size.fieldName }} · Layout {{ storyboardProfile.inputs.layoutImage.nodeId || '—' }}/{{ storyboardProfile.inputs.layoutImage.fieldName }}</div>
+          <div v-if="storyboardProfile.verification.note" class="muted">{{ storyboardProfile.verification.note }}</div>
+          <div class="row">
+            <button class="sm" @click="saveStoryboardProfile">保存</button>
+            <button class="primary sm" :disabled="verifyingStoryboard" @click="verifyStoryboardProfile">{{ verifyingStoryboard ? '检测中…' : '保存并检测节点' }}</button>
+          </div>
         </div>
       </div>
 

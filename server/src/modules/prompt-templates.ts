@@ -19,6 +19,7 @@ export interface CompileContext {
   references: ReferenceBinding[];
   /** Generation mode this prompt is compiled for (set by compileDeterministic). */
   mode?: H3Mode;
+  directorStyle?: string;
 }
 
 interface NumberedRef {
@@ -138,6 +139,7 @@ function integratedMultimodalDescription(ctx: CompileContext, num: ReturnType<ty
   });
   const parts = [
     ...(refLines.length ? ['References:\n' + refLines.join('\n')] : []),
+    line('Director style', ctx.directorStyle ?? ''),
     line('Subject', plan.subject.primarySubject),
     line('Motion owner', plan.subject.primaryMotionOwner),
     line('Action', plan.subject.action),
@@ -341,6 +343,7 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
     ...(startFrameLine ? [startFrameLine] : []),
     ...(endFrameLine ? [endFrameLine] : []),
     ...(continuityLine ? [continuityLine] : []),
+    line('Director style', ctx.directorStyle ?? ''),
     line('Subject', subjectValue),
     line('Action', plan.subject.action),
     line('Start position', plan.blocking.startPosition),

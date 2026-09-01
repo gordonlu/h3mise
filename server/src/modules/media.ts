@@ -97,7 +97,7 @@ async function probeAndInsert(
 export async function importUpload(
   p: ProjectContext,
   ffmpeg: Ffmpeg,
-  input: { fileName: string; mimeType: string; data: Buffer; label?: string },
+  input: { fileName: string; mimeType: string; data: Buffer; label?: string; source?: MediaAsset['source'] },
 ): Promise<MediaAsset> {
   const kind = importableKindForMime(input.mimeType);
   const safe = basename(input.fileName).replace(/[^\w.\- ]+/g, '_');
@@ -107,7 +107,7 @@ export async function importUpload(
   await mkdir(join(p.root, 'assets'), { recursive: true });
   await writeFile(abs, input.data);
   const { size } = await stat(abs);
-  return probeAndInsert(p, ffmpeg, { relPath, mimeType: input.mimeType, sizeBytes: size, source: 'import', label: input.label, kind });
+  return probeAndInsert(p, ffmpeg, { relPath, mimeType: input.mimeType, sizeBytes: size, source: input.source ?? 'import', label: input.label, kind });
 }
 
 /** Import an existing local file by absolute path (local-first feature). */

@@ -174,6 +174,73 @@ export class Ffmpeg {
     ]);
   }
 
+  /** Create a deterministic black-border storyboard layout reference. */
+  async storyboardGridTemplate(outPath: string, panelCount: 3 | 6 | 9): Promise<void> {
+    const columns = 3;
+    const rows = panelCount / columns;
+    const cell = 512;
+    await mkdir(dirname(outPath), { recursive: true });
+    await run('ffmpeg', [
+      '-y', '-f', 'lavfi', '-i', `color=c=white:s=${columns * cell}x${rows * cell}`,
+      '-vf', `drawgrid=w=${cell}:h=${cell}:t=8:c=black`,
+      '-frames:v', '1', '-update', '1', outPath,
+    ], outPath);
+  }
+
+  /** One black-framed panel used when regenerating only one grid cell. */
+  async storyboardPanelTemplate(outPath: string): Promise<void> {
+    await mkdir(dirname(outPath), { recursive: true });
+    await run('ffmpeg', [
+      '-y', '-f', 'lavfi', '-i', 'color=c=white:s=1536x1024',
+      '-vf', 'drawbox=x=0:y=0:w=iw:h=ih:t=10:c=black',
+      '-frames:v', '1', '-update', '1', outPath,
+    ], outPath);
+  }
+
+  /** Split an AI-generated grid by fixed geometry; no image AI involved. */
+  async splitStoryboardGrid(input: string, outputPaths: string[], panelCount: 3 | 6 | 9): Promise<void> {
+    if (outputPaths.length !== panelCount) throw new Error('storyboard output count does not match panel count');
+    const info = await this.probe(input);
+    if (!info.width || !info.height) throw new Error('cannot read storyboard image dimensions');
+    const columns = 3;
+    const rows = panelCount / columns;
+    const cellWidth = Math.floor(info.width / columns);
+    const cellHeight = Math.floor(info.height / rows);
+    const inset = Math.max(2, Math.round(Math.min(cellWidth, cellHeight) * 0.004));
+    await Promise.all(outputPaths.map(async (outPath, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const x = column * cellWidth + inset;
+      const y = row * cellHeight + inset;
+      const width = Math.max(2, cellWidth - inset * 2);
+      const height = Math.max(2, cellHeight - inset * 2);
+      await mkdir(dirname(outPath), { recursive: true });
+      await run('ffmpeg', [
+        '-y', '-i', input, '-vf', `crop=${width}:${height}:${x}:${y}`,
+        '-frames:v', '1', '-update', '1', outPath,
+      ], input);
+    }));
+  }
+
+  /** Rebuild a black-border sheet from selected panel versions locally. */
+  async composeStoryboardGrid(inputs: string[], outPath: string, panelCount: 3 | 6 | 9): Promise<void> {
+    if (inputs.length !== panelCount) throw new Error('storyboard input count does not match panel count');
+    const cell = 512;
+    const columns = 3;
+    const rows = panelCount / columns;
+    const inputArgs = inputs.flatMap((path) => ['-i', path]);
+    const filters = inputs.map((_, index) =>
+      `[${index}:v]scale=${cell - 12}:${cell - 12}:force_original_aspect_ratio=decrease,pad=${cell}:${cell}:(ow-iw)/2:(oh-ih)/2:color=black[p${index}]`,
+    );
+    const layout = inputs.map((_, index) => `${(index % columns) * cell}_${Math.floor(index / columns) * cell}`).join('|');
+    filters.push(`${inputs.map((_, index) => `[p${index}]`).join('')}xstack=inputs=${panelCount}:layout=${layout}:fill=black,drawgrid=w=${cell}:h=${cell}:t=8:c=black[out]`);
+    await mkdir(dirname(outPath), { recursive: true });
+    await run('ffmpeg', [
+      '-y', ...inputArgs, '-filter_complex', filters.join(';'), '-map', '[out]',
+      '-frames:v', '1', '-update', '1', outPath,
+    ], outPath);
+  }
+
   /** Detect obvious edit points using FFmpeg's deterministic scene score. */
   async detectSceneCuts(input: string, threshold = 0.35): Promise<number[]> {
     if (!Number.isFinite(threshold) || threshold <= 0 || threshold >= 1) throw new Error('scene threshold must be between 0 and 1');

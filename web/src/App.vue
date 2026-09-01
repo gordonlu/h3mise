@@ -29,6 +29,7 @@ let off: (() => void) | null = null;
 const nav = [
   { to: '/production', label: () => '总控台' },
   { to: '/story', label: () => t('nav.story') },
+  { to: '/storyboard', label: () => 'Storyboard' },
   { to: '/shots', label: () => t('nav.shots') },
   { to: '/assets', label: () => t('nav.assets') },
   { to: '/timeline', label: () => t('nav.timeline') },

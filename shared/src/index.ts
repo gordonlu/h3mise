@@ -16,3 +16,6 @@ export * from './guide.js';
 export * from './production.js';
 export * from './auto-produce.js';
 export * from './film-check.js';
+export * from './storyboard.js';
+export * from './story-skeleton.js';
+export * from './director-style.js';

@@ -8,6 +8,7 @@ import { compileDeterministic, type CompileContext } from './prompt-templates.js
 import { latestPlan } from './director.js';
 import { getShot } from './shots.js';
 import { ensureShotEntityImageBindings, listBindings } from './assets.js';
+import { directorStyleAiContext, directorStylePromptDirective } from './director-styles.js';
 
 interface PvRow {
   id: string;
@@ -83,6 +84,7 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
       },
     },
     references: refs,
+    directorStyle: directorStylePromptDirective(p),
   };
   const text = compileDeterministic(ctx, mode);
   return createPrompt(p, {
@@ -128,6 +130,7 @@ export function buildContextPackage(
   const story = p.db.get<{ title: string; synopsis: string }>('SELECT title, synopsis FROM story LIMIT 1');
   return {
     project,
+    director_style_context: directorStyleAiContext(p),
     story_context: story,
     previous_selected_take: (() => {
       // P1: predecessor by shot order, not by created_at across the project.

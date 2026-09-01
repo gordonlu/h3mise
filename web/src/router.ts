@@ -8,6 +8,7 @@ export const router = createRouter({
     { path: '/quick', name: 'quick', component: () => import('./pages/QuickEditPage.vue') },
     { path: '/production', name: 'production', component: () => import('./pages/ProductionPage.vue') },
     { path: '/story', name: 'story', component: () => import('./pages/StoryPage.vue') },
+    { path: '/storyboard', name: 'storyboard', component: () => import('./pages/StoryboardPage.vue') },
     { path: '/shots', name: 'shots', component: () => import('./pages/ShotsPage.vue') },
     { path: '/shots/:id', name: 'shot', component: () => import('./pages/ShotPage.vue') },
     { path: '/assets', name: 'assets', component: () => import('./pages/AssetsPage.vue') },

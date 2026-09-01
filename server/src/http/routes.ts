@@ -18,6 +18,9 @@ import type { SessionManager } from './security.js';
 import { sessionGuard } from './security.js';
 import type { JobRunner } from '../modules/jobs.js';
 import * as storyMod from '../modules/story.js';
+import * as skeletonMod from '../modules/story-skeletons.js';
+import { DIRECTOR_STYLE_PRESETS, resolveDirectorStyle } from '../modules/director-styles.js';
+import * as storyboardMod from '../modules/storyboard.js';
 import * as shotsMod from '../modules/shots.js';
 import * as assetsMod from '../modules/assets.js';
 import * as directorMod from '../modules/director.js';
@@ -81,6 +84,9 @@ export function buildRoutes(services: AppServices): App {
   // open/create decisions so two tabs cannot both observe an unlocked state
   // and silently replace each other's project.
   const projectSwitchGate = createKeyedMutex();
+  // Reconciliation downloads and registers generated images. Keep it
+  // idempotent when multiple browser tabs poll the same Storyboard.
+  const storyboardGate = createKeyedMutex();
 
   const projectLocked = (c: Context, requestedProjectId?: string) => {
     const current = services.store.current;
@@ -342,6 +348,60 @@ export function buildRoutes(services: AppServices): App {
     return c.json({ ok: true });
   });
   app.post('/api/story/beats/reorder', async (c) => c.json(storyMod.reorderBeats(p(c), (await c.req.json()).ids)));
+  app.get('/api/story/skeletons', (c) => c.json(skeletonMod.STORY_SKELETONS));
+  app.get('/api/director-styles', (c) => c.json({ presets: DIRECTOR_STYLE_PRESETS, selected: resolveDirectorStyle(p(c).config.visual_style) }));
+  app.post('/api/story/skeletons/recommend', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { theme?: unknown };
+    return c.json(await skeletonMod.recommendSkeletons(services.ai, typeof body.theme === 'string' ? body.theme : ''));
+  });
+  app.post('/api/story/skeletons/:id/apply', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { segmentCount?: unknown };
+    const created = skeletonMod.applySkeleton(p(c), c.req.param('id'), Number(body.segmentCount));
+    services.bus.emit({ type: 'project.updated' });
+    return c.json({ created }, 201);
+  });
+
+  // --- optional storyboard -------------------------------------------------
+
+  app.get('/api/storyboard', (c) => storyboardGate(`storyboard:${p(c).meta.id}`, async () =>
+    c.json(await storyboardMod.reconcileStoryboard(p(c), services.ffmpeg, services.providers, c.req.query('id'))),
+  ));
+  app.get('/api/storyboard/pages', (c) => c.json(storyboardMod.listStoryboardPages(p(c))));
+  app.post('/api/storyboard/prepare', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { panelCount?: number };
+    const result = storyboardMod.prepareStoryboard(p(c), body.panelCount);
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result, 201);
+  });
+  app.patch('/api/storyboard/panels/:id', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { description?: unknown };
+    const result = storyboardMod.updatePanel(p(c), c.req.param('id'), body.description);
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result);
+  });
+  app.post('/api/storyboard/:id/generate', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { confirmed?: boolean };
+    if (body.confirmed !== true) return c.json({ error: '付费生图需要明确确认' }, 400);
+    const result = await storyboardGate(`storyboard:${p(c).meta.id}`, () =>
+      storyboardMod.submitSheetGeneration(p(c), services.ffmpeg, services.providers, c.req.param('id')),
+    );
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result, 202);
+  });
+  app.post('/api/storyboard/:id/panels/:panelId/regenerate', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { confirmed?: boolean };
+    if (body.confirmed !== true) return c.json({ error: '付费生图需要明确确认' }, 400);
+    const result = await storyboardGate(`storyboard:${p(c).meta.id}`, () =>
+      storyboardMod.submitPanelRegeneration(p(c), services.ffmpeg, services.providers, c.req.param('id'), c.req.param('panelId')),
+    );
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result, 202);
+  });
+  app.post('/api/storyboard/:id/approve', (c) => {
+    const result = storyboardMod.approveStoryboard(p(c), c.req.param('id'));
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result);
+  });
 
   // --- shots ---------------------------------------------------------------
 
@@ -897,6 +957,17 @@ export function buildRoutes(services: AppServices): App {
   });
   app.post('/api/providers/runninghub/verify', async (c) => {
     const profile = await services.providers.detectAndVerify();
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(profile);
+  });
+  app.get('/api/providers/runninghub/storyboard-profile', (c) => c.json(services.providers.getStoryboardProfile()));
+  app.put('/api/providers/runninghub/storyboard-profile', async (c) => {
+    const profile = services.providers.saveStoryboardProfile(await c.req.json());
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(profile);
+  });
+  app.post('/api/providers/runninghub/storyboard-profile/verify', async (c) => {
+    const profile = await services.providers.verifyStoryboardProfile();
     services.bus.emit({ type: 'project.updated' });
     return c.json(profile);
   });

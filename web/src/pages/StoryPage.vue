@@ -1,20 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { get, post, patch, del } from '../api/client';
-import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
-import type { StoryBeat } from '@h3mise/shared';
+import type { SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StorySkeleton } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
 
-const project = useProjectStore();
 const toasts = useToastStore();
 const story = ref<{ id: string; title: string; synopsis: string; body: string; plannedDurationSeconds: number } | null>(null);
 const beats = ref<StoryBeat[]>([]);
 const shots = ref<Array<{ id: string; title: string; storyBeatId: string | null }>>([]);
 const aiEnabled = ref(false);
 const aiBusy = ref(false);
+const skeletonOpen = ref(false);
+const skeletonBusy = ref(false);
+const skeletonTheme = ref('');
+const skeletonCount = ref<SkeletonSegmentCount>(6);
+const skeletons = ref<StorySkeleton[]>([]);
+const skeletonRecommendations = ref<SkeletonRecommendation[]>([]);
+const skeletonMode = ref<SkeletonRecommendationResult['mode']>('local');
 
 const CATEGORIES = ['setup', 'inciting_incident', 'rising_action', 'climax', 'falling_action', 'resolution', 'transition', 'other'];
 const CATEGORY_LABEL: Record<string, string> = {
@@ -44,11 +49,16 @@ const beatShots = computed(() => {
 const canAiSplit = computed(() => Boolean(story.value?.body?.trim()) && !aiBusy.value);
 
 async function load() {
-  story.value = await get('/api/story');
-  beats.value = await get('/api/story/beats');
-  shots.value = await get('/api/shots');
-  await project.refreshProviders();
-  aiEnabled.value = project.providers.some((p) => p.configured);
+  const [loadedStory, loadedBeats, loadedShots, aiStatus] = await Promise.all([
+    get<typeof story.value>('/api/story'),
+    get<StoryBeat[]>('/api/story/beats'),
+    get<typeof shots.value>('/api/shots'),
+    get<{ configured: boolean }>('/api/ai/status').catch(() => ({ configured: false })),
+  ]);
+  story.value = loadedStory;
+  beats.value = loadedBeats;
+  shots.value = loadedShots;
+  aiEnabled.value = aiStatus.configured;
 }
 
 async function saveStory(patchData: Partial<NonNullable<typeof story.value>>) {
@@ -215,6 +225,47 @@ async function aiStoryToBeats() {
   }
 }
 
+async function openSkeletons() {
+  skeletonOpen.value = !skeletonOpen.value;
+  if (!skeletonOpen.value || skeletons.value.length) return;
+  try {
+    skeletons.value = await get<StorySkeleton[]>('/api/story/skeletons');
+    skeletonRecommendations.value = skeletons.value.slice(0, 3).map((skeleton, index) => ({ skeleton, score: 1 - index * 0.01, reason: '内置通用节奏骨架' }));
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+async function recommendSkeletons() {
+  skeletonBusy.value = true;
+  try {
+    const result = await post<SkeletonRecommendationResult>('/api/story/skeletons/recommend', { theme: skeletonTheme.value });
+    skeletonRecommendations.value = result.recommendations;
+    skeletonMode.value = result.mode;
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  } finally {
+    skeletonBusy.value = false;
+  }
+}
+
+async function applyStorySkeleton(skeleton: StorySkeleton) {
+  const ok = await confirmDialog({
+    title: `套用「${skeleton.name}」`,
+    message: `将追加 ${skeletonCount.value} 个 Beat 草稿${beats.value.length ? `；当前已有 ${beats.value.length} 个 Beat，不会覆盖` : ''}。不会创建 Shot，也不会调用付费 API。`,
+    confirmLabel: '追加 Beat 草稿',
+  });
+  if (!ok) return;
+  try {
+    await post(`/api/story/skeletons/${skeleton.id}/apply`, { segmentCount: skeletonCount.value });
+    await load();
+    skeletonOpen.value = false;
+    toasts.push({ kind: 'ok', text: `已追加 ${skeletonCount.value} 个「${skeleton.name}」Beat 草稿` });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -222,16 +273,46 @@ onMounted(load);
   <div class="page">
     <div class="spread page-head">
       <h1>{{ t('pages.story.title') }}</h1>
-      <button
-        v-if="aiEnabled"
-        class="primary sm"
-        :disabled="!canAiSplit"
-        :title="!story?.body?.trim() ? t('pages.story.aiSplitEmpty') : ''"
-        @click="aiStoryToBeats"
-      >
-        {{ aiBusy ? t('pages.story.aiSplitting') : t('pages.story.aiSplit') }}
-      </button>
+      <div class="row">
+        <button class="sm" @click="openSkeletons">{{ skeletonOpen ? '收起灵感' : '找节奏灵感' }}</button>
+        <RouterLink class="button-link sm" to="/storyboard">可选：生成 Storyboard →</RouterLink>
+        <button
+          v-if="aiEnabled"
+          class="primary sm"
+          :disabled="!canAiSplit"
+          :title="!story?.body?.trim() ? t('pages.story.aiSplitEmpty') : ''"
+          @click="aiStoryToBeats"
+        >
+          {{ aiBusy ? t('pages.story.aiSplitting') : t('pages.story.aiSplit') }}
+        </button>
+      </div>
     </div>
+
+    <section v-if="skeletonOpen" class="panel skeleton-browser">
+      <div class="panel-title spread"><span>短剧叙事骨架</span><span class="muted">骨架免费内置，AI 只增强推荐</span></div>
+      <div class="panel-body col">
+        <div class="skeleton-search">
+          <label class="field grow">你的主题或冲突<input v-model="skeletonTheme" placeholder="例如：职场新人被领导抢功，最后拿出证据" @keyup.enter="recommendSkeletons" /></label>
+          <label class="field count-field">Beat 数<select v-model="skeletonCount"><option :value="3">3 段</option><option :value="6">6 段</option><option :value="9">9 段</option></select></label>
+          <button class="primary" :disabled="skeletonBusy" @click="recommendSkeletons">{{ skeletonBusy ? '匹配中…' : '推荐骨架' }}</button>
+        </div>
+        <div class="spread">
+          <span class="muted">{{ skeletonMode === 'ai' ? 'AI 语义推荐' : skeletonMode === 'local_fallback' ? 'AI 不可用，已回退本地匹配' : '本地标签匹配' }}</span>
+          <button class="sm ghost" @click="skeletonRecommendations = skeletons.map((skeleton, index) => ({ skeleton, score: 1 - index * 0.01, reason: '全部骨架' }))">查看全部</button>
+        </div>
+        <div class="skeleton-grid">
+          <article v-for="item in skeletonRecommendations" :key="item.skeleton.id" class="skeleton-card">
+            <div class="spread"><strong>{{ item.skeleton.name }}</strong><span class="badge">{{ item.skeleton.group === 'high_tension' ? '高压兑现' : item.skeleton.group === 'comedy' ? '喜剧' : item.skeleton.group === 'suspense' ? '悬疑' : '情感' }}</span></div>
+            <p>{{ item.skeleton.description }}</p>
+            <div class="muted match-reason">{{ item.reason }}</div>
+            <ol class="skeleton-preview">
+              <li v-for="segment in item.skeleton.variants[skeletonCount]" :key="segment.title"><strong>{{ segment.title }}</strong><span>{{ segment.purpose }}</span></li>
+            </ol>
+            <button class="sm primary" @click="applyStorySkeleton(item.skeleton)">套用为 {{ skeletonCount }} 个 Beat 草稿</button>
+          </article>
+        </div>
+      </div>
+    </section>
 
     <div class="grid story-grid">
       <div class="panel facts-panel">
@@ -326,9 +407,10 @@ onMounted(load);
 <style scoped>
 .page { padding: 24px 32px; max-width: 1280px; margin: 0 auto; }
 .page-head { margin-bottom: 14px; }
+.skeleton-browser { margin-bottom: 14px; }.skeleton-search { display: flex; align-items: end; gap: 10px; }.skeleton-search .grow { flex: 1; }.count-field { width: 100px; }.skeleton-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }.skeleton-card { display: flex; flex-direction: column; gap: 9px; padding: 14px; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-2); }.skeleton-card p { margin: 0; line-height: 1.6; }.match-reason { font-size: 11px; }.skeleton-preview { display: grid; gap: 6px; margin: 0; padding-left: 20px; font-size: 12px; }.skeleton-preview li { padding-left: 3px; }.skeleton-preview strong,.skeleton-preview span { display: block; }.skeleton-preview span { color: var(--muted); line-height: 1.45; }
 h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .story-grid { grid-template-columns: 1fr 1.15fr; align-items: start; }
-@media (max-width: 1000px) { .story-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .story-grid,.skeleton-grid { grid-template-columns: 1fr; }.skeleton-search { align-items: stretch; flex-direction: column; }.count-field { width: 100%; } }
 .facts-panel { align-self: start; }
 .facts-body { padding: 18px; gap: 14px; }
 .grid.two { grid-template-columns: 1fr 1fr; gap: 14px; }

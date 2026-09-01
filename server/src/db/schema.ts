@@ -394,6 +394,76 @@ CREATE TABLE auto_produce_runs (
 CREATE INDEX idx_auto_produce_status ON auto_produce_runs(status);
 `,
   },
+  {
+    version: 15,
+    name: 'optional-storyboards',
+    sql: `
+-- Storyboard is an optional visual approval layer. Text plans are free;
+-- generated images and jobs are explicit, versioned project artifacts.
+CREATE TABLE storyboards (
+  id TEXT PRIMARY KEY,
+  panel_count INTEGER NOT NULL CHECK (panel_count IN (3, 6, 9)),
+  status TEXT NOT NULL DEFAULT 'draft',
+  source_duration_seconds REAL NOT NULL DEFAULT 0,
+  sheet_asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
+  prompt TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE storyboard_panels (
+  id TEXT PRIMARY KEY,
+  storyboard_id TEXT NOT NULL REFERENCES storyboards(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
+  version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (storyboard_id, ord)
+);
+CREATE INDEX idx_storyboard_panels_storyboard ON storyboard_panels(storyboard_id, ord);
+
+CREATE TABLE storyboard_panel_versions (
+  id TEXT PRIMARY KEY,
+  panel_id TEXT NOT NULL REFERENCES storyboard_panels(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+  source TEXT NOT NULL DEFAULT 'sheet_split',
+  created_at TEXT NOT NULL,
+  UNIQUE (panel_id, version)
+);
+
+CREATE TABLE storyboard_jobs (
+  id TEXT PRIMARY KEY,
+  storyboard_id TEXT NOT NULL REFERENCES storyboards(id) ON DELETE CASCADE,
+  panel_id TEXT REFERENCES storyboard_panels(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('sheet', 'panel')),
+  provider_task_id TEXT,
+  status TEXT NOT NULL DEFAULT 'SUBMITTING',
+  request_json TEXT NOT NULL DEFAULT '{}',
+  response_json TEXT,
+  cost_json TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_storyboard_jobs_active ON storyboard_jobs(storyboard_id, status, created_at);
+`,
+  },
+  {
+    version: 16,
+    name: 'storyboard-pages',
+    sql: `
+ALTER TABLE storyboards ADD COLUMN series_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE storyboards ADD COLUMN page_number INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE storyboards ADD COLUMN source_start_index INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE storyboards ADD COLUMN source_end_index INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE storyboards ADD COLUMN source_segment_count INTEGER NOT NULL DEFAULT 0;
+UPDATE storyboards SET series_id = id WHERE series_id = '';
+CREATE INDEX idx_storyboards_series_page ON storyboards(series_id, page_number);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

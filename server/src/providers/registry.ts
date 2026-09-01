@@ -6,7 +6,7 @@
 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, ProviderCapabilities, ProviderStatus } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, ProviderCapabilities, ProviderStatus, StoryboardProviderProfile } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -18,6 +18,29 @@ import { MockProvider } from './mock.js';
 
 export const H3_AI_APP_ID = '2089265538441764866';
 export const H3_AI_APP_URL = `https://www.runninghub.cn/openapi/v2/run/ai-app/${H3_AI_APP_ID}`;
+export const STORYBOARD_AI_APP_ID = '2094638110561886209';
+
+export function defaultStoryboardProviderProfile(): StoryboardProviderProfile {
+  return {
+    provider: 'runninghub_storyboard',
+    enabled: true,
+    appId: STORYBOARD_AI_APP_ID,
+    invokeUrl: `https://www.runninghub.cn/openapi/v2/run/ai-app/${STORYBOARD_AI_APP_ID}`,
+    estimatedCostCny: 0.22,
+    inputs: {
+      prompt: { nodeId: '1', fieldName: 'text' },
+      size: { nodeId: '12', fieldName: 'size' },
+      layoutImage: { nodeId: '16', fieldName: 'image' },
+    },
+    sizeValues: { 3: '2560x1440', 6: '2496x1664', 9: '2048x2048' },
+    nodes: [],
+    verification: {
+      status: 'unconfigured',
+      checkedAt: null,
+      note: 'Storyboard 生图是可选付费功能；请先检测 AI App 节点映射',
+    },
+  };
+}
 
 /** Default profile for the fixed v0.1 AI App (PRD §25.3). Node layout is a
  * heuristic until the user runs "detect & verify" with a real key. */
@@ -426,6 +449,126 @@ export class ProviderRegistry {
       verification: { status: 'verified', checkedAt: new Date().toISOString(), note: 'a real render submission succeeded against this profile' },
     };
     return this.saveProfile(updated);
+  }
+
+  getStoryboardProfile(): StoryboardProviderProfile {
+    const fallback = defaultStoryboardProviderProfile();
+    const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub-storyboard'");
+    return this.sanitizeStoryboardProfile(row ? jget<unknown>(row.profile_json, fallback) : fallback);
+  }
+
+  private sanitizeStoryboardProfile(raw: unknown): StoryboardProviderProfile {
+    const d = defaultStoryboardProviderProfile();
+    const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const inputs = (value.inputs && typeof value.inputs === 'object' ? value.inputs : {}) as Record<string, unknown>;
+    const slot = (key: keyof StoryboardProviderProfile['inputs']) => {
+      const candidate = (inputs[key] && typeof inputs[key] === 'object' ? inputs[key] : {}) as Record<string, unknown>;
+      return {
+        nodeId: typeof candidate.nodeId === 'string' ? candidate.nodeId.trim() : d.inputs[key].nodeId,
+        fieldName: typeof candidate.fieldName === 'string' && candidate.fieldName.trim() ? candidate.fieldName.trim() : d.inputs[key].fieldName,
+      };
+    };
+    const sizes = (value.sizeValues && typeof value.sizeValues === 'object' ? value.sizeValues : {}) as Record<string, unknown>;
+    const appId = typeof value.appId === 'string' && value.appId.trim() ? value.appId.trim() : d.appId;
+    const cost = value.estimatedCostCny === null ? null : Number(value.estimatedCostCny);
+    return {
+      ...d,
+      enabled: value.enabled === undefined ? d.enabled : value.enabled === true,
+      appId,
+      invokeUrl: `https://www.runninghub.cn/openapi/v2/run/ai-app/${appId}`,
+      estimatedCostCny: cost === null || (Number.isFinite(cost) && cost >= 0) ? cost : d.estimatedCostCny,
+      inputs: { prompt: slot('prompt'), size: slot('size'), layoutImage: slot('layoutImage') },
+      sizeValues: {
+        3: typeof sizes[3] === 'string' && sizes[3] ? sizes[3] : d.sizeValues[3],
+        6: typeof sizes[6] === 'string' && sizes[6] ? sizes[6] : d.sizeValues[6],
+        9: typeof sizes[9] === 'string' && sizes[9] ? sizes[9] : d.sizeValues[9],
+      },
+      nodes: Array.isArray(value.nodes) ? value.nodes as StoryboardProviderProfile['nodes'] : d.nodes,
+      verification: value.verification && typeof value.verification === 'object'
+        ? { ...d.verification, ...(value.verification as object) }
+        : d.verification,
+    };
+  }
+
+  saveStoryboardProfile(raw: unknown): StoryboardProviderProfile {
+    const previous = this.getStoryboardProfile();
+    let profile = this.sanitizeStoryboardProfile(raw);
+    const mappingChanged = profile.appId !== previous.appId || JSON.stringify(profile.inputs) !== JSON.stringify(previous.inputs);
+    if (mappingChanged) {
+      profile = {
+        ...profile,
+        nodes: [],
+        verification: { status: 'unconfigured', checkedAt: null, note: 'AI App 或节点映射已修改，请重新检测' },
+      };
+    }
+    return this.persistStoryboardProfile(profile);
+  }
+
+  private persistStoryboardProfile(profile: StoryboardProviderProfile): StoryboardProviderProfile {
+    this.getRegistryDb().run(
+      'INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at',
+      ['runninghub-storyboard', j(profile), new Date().toISOString()],
+    );
+    return profile;
+  }
+
+  async verifyStoryboardProfile(): Promise<StoryboardProviderProfile> {
+    const key = this.getEffectiveApiKey();
+    if (!key) throw new Error('RunningHub API Key 未配置');
+    const current = this.getStoryboardProfile();
+    const url = `https://www.runninghub.cn/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(key)}&webappId=${encodeURIComponent(current.appId)}`;
+    let response: Response;
+    try {
+      response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    } catch (error) {
+      throw new Error(`Storyboard 节点检测失败：${error instanceof Error ? error.message : error}`);
+    }
+    const json = await response.json().catch(() => null) as { code?: number; msg?: string; data?: { nodeInfoList?: Array<Record<string, unknown>> } } | null;
+    const rawNodes = json?.data?.nodeInfoList;
+    if (!response.ok || json?.code !== 0 || !Array.isArray(rawNodes)) {
+      const failed = {
+        ...current,
+        verification: { status: 'failed' as const, checkedAt: new Date().toISOString(), note: json?.msg ?? `HTTP ${response.status}` },
+      };
+      this.persistStoryboardProfile(failed);
+      throw new Error(failed.verification.note);
+    }
+    const nodes = rawNodes.map((node) => ({
+      nodeId: String(node.nodeId ?? ''),
+      nodeName: String(node.nodeName ?? ''),
+      fieldName: String(node.fieldName ?? ''),
+      fieldType: String(node.fieldType ?? 'STRING'),
+      fieldData: node.fieldData == null ? null : String(node.fieldData),
+      description: String(node.description ?? node.descriptionCn ?? node.descriptionEn ?? ''),
+    }));
+    const match = (re: RegExp) => nodes.find((node) => re.test(`${node.fieldName} ${node.nodeName} ${node.description}`));
+    const prompt = match(/prompt|text|提示词/i);
+    const size = match(/size|resolution|分辨率/i);
+    const layoutImage = nodes.find((node) => /image/i.test(node.fieldType) || /image|参考图|图片/i.test(`${node.fieldName} ${node.nodeName} ${node.description}`));
+    if (!prompt || !size || !layoutImage) throw new Error('未识别到完整的 Prompt、分辨率、参考图节点，请检查 AI App');
+    const updated: StoryboardProviderProfile = {
+      ...current,
+      nodes,
+      inputs: {
+        prompt: { nodeId: prompt.nodeId, fieldName: prompt.fieldName },
+        size: { nodeId: size.nodeId, fieldName: size.fieldName },
+        layoutImage: { nodeId: layoutImage.nodeId, fieldName: layoutImage.fieldName },
+      },
+      verification: {
+        status: 'nodes_detected',
+        checkedAt: new Date().toISOString(),
+        note: `已检测 ${nodes.length} 个节点；首次真实生图成功后标记为已验证`,
+      },
+    };
+    return this.persistStoryboardProfile(updated);
+  }
+
+  confirmStoryboardVerified(): StoryboardProviderProfile {
+    const current = this.getStoryboardProfile();
+    return this.persistStoryboardProfile({
+      ...current,
+      verification: { status: 'verified', checkedAt: new Date().toISOString(), note: '真实 Storyboard 任务已成功提交' },
+    });
   }
 
   getComfyUiProfile(): ComfyUiWorkflowProfile {

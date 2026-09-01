@@ -140,6 +140,16 @@ function integratedMultimodalDescription(ctx: CompileContext, num: ReturnType<ty
   const parts = [
     ...(refLines.length ? ['References:\n' + refLines.join('\n')] : []),
     line('Director style', ctx.directorStyle ?? ''),
+    // Shot title/purpose are canonical project facts. Keep them in every base
+    // prompt even when a beginner project has not created a DirectorPlan yet.
+    // Previously the fallback stored the story beat in visualThesis, but this
+    // section never emitted intent fields, producing only "strict realism".
+    line('Shot', ctx.shot.title),
+    line('Narrative intent', ctx.shot.purpose),
+    line('Visual thesis', plan.intent.visualThesis),
+    line('Dramatic goal', plan.intent.dramaticGoal),
+    line('Peak', plan.intent.peak),
+    line('End state', plan.intent.endState),
     line('Subject', plan.subject.primarySubject),
     line('Motion owner', plan.subject.primaryMotionOwner),
     line('Action', plan.subject.action),
@@ -386,7 +396,7 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
   return parts.length ? `detailed_description:\n${parts.join('\n')}` : '';
 }
 
-function line(section: string, value: string): string {
-  const v = value.trim();
+function line(section: string, value: string | null | undefined): string {
+  const v = value?.trim() ?? '';
   return v ? `${section}: ${v}` : '';
 }

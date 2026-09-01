@@ -11,6 +11,7 @@ import { Ffmpeg } from '../src/ffmpeg.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { RenderQueue } from '../src/modules/render.js';
 import { AutoProduceService } from '../src/modules/auto-produce.js';
+import { compilePrompt } from '../src/modules/prompt.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -24,7 +25,7 @@ async function harness(tag: string) {
   registry.refresh();
   const queue = new RenderQueue(() => store, registry, ffmpeg, eventBus, 100);
   const auto = new AutoProduceService(() => store, registry, queue, ffmpeg, eventBus);
-  return { project, auto, queue };
+  return { project, auto, queue, store, registry, ffmpeg, eventBus };
 }
 
 async function waitUntil(check: () => boolean, timeout = 60_000): Promise<void> {
@@ -49,6 +50,9 @@ test('story-only project creates real beats and linked shots before rendering', 
   assert.deepEqual(shots.map((shot) => shot.storyBeatId), beats.map((beat) => beat.id));
   assert.ok(beats.every((beat) => beat.durationSeconds >= 2 && beat.durationSeconds <= 15));
   assert.ok(new Set(beats.map((beat) => beat.durationSeconds)).size > 1, 'beat timing has persisted rhythm variation');
+  const prompts = shots.map((shot) => compilePrompt(project, shot.id, 't2va', shot.durationSeconds));
+  assert.ok(prompts.every((prompt, index) => prompt.text.includes(shots[index]!.purpose)), 'every beginner prompt contains its story beat');
+  assert.ok(prompts.every((prompt) => prompt.text !== 'integrated_multimodal_description:\nReality: strict realism'));
 });
 
 test('mock one-click drives canonical pipeline through export', async () => {
@@ -75,4 +79,22 @@ test('real provider start requires fresh explicit confirmation', async () => {
   const { project, auto } = await harness('auto-paid-confirm');
   updateStory(project, { body: '一个测试镜头。' });
   assert.throws(() => auto.start(project, { providerId: 'runninghub', aspectRatio: '16:9', megapixels: 0.6, skipCompleted: true }), /明确确认/);
+});
+
+test('one-click allows configured node-detected provider without claiming it is verified', async () => {
+  const { project, queue, store, ffmpeg, eventBus } = await harness('auto-node-detected');
+  const detectedRegistry = {
+    statuses: async () => [{
+      id: 'runninghub', name: 'RunningHub AI App', kind: 'runninghub_ai_app', configured: true,
+      verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: '19 nodes detected' },
+      capabilities: { supportedModes: ['t2va'] },
+    }],
+  } as unknown as ProviderRegistry;
+  const auto = new AutoProduceService(() => store, detectedRegistry, queue, ffmpeg, eventBus);
+
+  const plan = await auto.buildPlan(project);
+  assert.equal(plan.providers[0]?.usable, true);
+  assert.equal(plan.providers[0]?.requiresConfirmation, true);
+  assert.match(plan.providers[0]?.note ?? '', /尚未真实验证/);
+  assert.doesNotMatch(plan.providers[0]?.note ?? '', /^已通过真实提交验证/);
 });

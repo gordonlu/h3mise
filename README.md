@@ -88,7 +88,7 @@ pnpm install
 
 # 开发模式
 pnpm dev:server   # API：http://127.0.0.1:4789
-pnpm dev:web      # UI：http://127.0.0.1:5173
+pnpm dev:web      # UI：http://127.0.0.1:5188
 
 # 生产模式
 pnpm --filter @h3mise/web build

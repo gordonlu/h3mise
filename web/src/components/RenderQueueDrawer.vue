@@ -161,7 +161,7 @@ onMounted(() => render.refresh());
             <div class="job-meta muted">
               <button class="shot-link" @click="openShot(job)">{{ job.projectTitle || job.projectId }} · {{ job.shotTitle || job.shotId }}</button>
               <span class="badge no-dot mode-badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
-              <span class="badge no-dot elapsed">{{ active.includes(job) ? '已运行' : '耗时' }} {{ elapsedText(job) }}</span>
+              <span v-if="job.status !== 'LOCAL_QUEUED'" class="badge no-dot elapsed">{{ active.includes(job) ? '已运行' : '耗时' }} {{ elapsedText(job) }}</span>
               <span v-if="costText(job)" class="cost-text">{{ costText(job) }}</span>
             </div>
             <div v-if="job.providerTaskId" class="task-ref">

@@ -63,6 +63,9 @@ export class ProviderError extends Error {
     message: string,
     readonly stage: 'upload' | 'submit' | 'poll' | 'download',
     readonly detail?: unknown,
+    /** A retry hint is only used before a provider task id exists. It must
+     * never cause an already-accepted paid task to be submitted again. */
+    readonly retry?: { reason: 'provider_capacity'; afterMs: number },
   ) {
     super(message);
   }

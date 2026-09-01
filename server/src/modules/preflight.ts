@@ -139,6 +139,20 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
         message: `提示词 ${prompt.text.length} 字符，已接近 MiniMax H3 上限 7000 字符`,
       });
     }
+    // A structurally non-empty compiler result can still contain no story
+    // content (the old fallback was only "Reality: strict realism"). Refuse
+    // paid submission unless the immutable prompt contains this Shot's
+    // canonical title or purpose.
+    if (prompt.source === 'deterministic_compiler') {
+      const narrativeFacts = [shot.purpose.trim(), shot.title.trim()].filter(Boolean);
+      if (narrativeFacts.length > 0 && !narrativeFacts.some((fact) => prompt.text.includes(fact))) {
+        sections[0]!.checks.push({
+          key: 'prompt.missing_narrative',
+          severity: 'error',
+          message: '提示词没有包含当前镜头的故事内容，请重新生成Prompt后再提交',
+        });
+      }
+    }
     // Timeline-vs-duration consistency: a prompt whose internal timeline runs
     // past the requested duration gets its pacing silently compressed by the
     // model — warn so the timeline can be rewritten for the real length.

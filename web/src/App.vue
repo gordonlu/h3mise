@@ -13,6 +13,7 @@ import ConfirmHost from './components/ConfirmHost.vue';
 import type { AppEvent, RenderJob } from '@h3mise/shared';
 import type { ProjectGuideSummary } from '@h3mise/shared';
 import ProjectGuideBar from './components/ProjectGuideBar.vue';
+import WorkspaceNav from './components/WorkspaceNav.vue';
 
 const project = useProjectStore();
 const route = useRoute();
@@ -24,16 +25,6 @@ const projectsOpen = ref(false);
 const projectGuide = ref<ProjectGuideSummary | null>(null);
 const projectsRef = ref<HTMLElement | null>(null);
 let off: (() => void) | null = null;
-
-// Professional IA. Quick Edit is a parallel view over the same project data.
-const nav = [
-  { to: '/production', label: () => '总控台' },
-  { to: '/story', label: () => t('nav.story') },
-  { to: '/storyboard', label: () => 'Storyboard' },
-  { to: '/shots', label: () => t('nav.shots') },
-  { to: '/assets', label: () => t('nav.assets') },
-  { to: '/timeline', label: () => t('nav.timeline') },
-];
 
 function activeJobCount(): number {
   return render.jobs.filter((j: RenderJob) => ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)).length;
@@ -148,23 +139,11 @@ watch(() => route.path, () => void scheduleGuideRefresh());
         <img src="/h3mise-logo.png" alt="H3Mise" class="brand-logo" />
       </router-link>
 
-      <nav v-if="project.current" class="nav">
-        <router-link to="/quick" class="nav-item quick-nav" active-class="active">快速剪辑</router-link>
-        <template v-if="route.path !== '/quick'">
-          <router-link v-for="n in nav" :key="n.to" :to="n.to" class="nav-item" active-class="active">
-            {{ n.label() }}
-          </router-link>
-        </template>
-        <router-link v-else to="/timeline" class="nav-item">专业制作</router-link>
-      </nav>
-
-      <div class="spacer" />
-
       <template v-if="project.current">
         <div ref="projectsRef" class="project-switch" :class="{ open: projectsOpen }">
           <button class="project-switch-btn" @click="projectsOpen = !projectsOpen">
             <span class="project-title" :title="project.current.meta.id">{{ project.current.config.title }}</span>
-            <span class="caret">▾</span>
+            <svg class="caret" aria-hidden="true" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4" /></svg>
           </button>
           <div v-if="projectsOpen" class="project-menu">
             <button
@@ -180,26 +159,20 @@ watch(() => route.path, () => void scheduleGuideRefresh());
             <router-link to="/projects" class="project-menu-link" @click="projectsOpen = false">项目列表…</router-link>
           </div>
         </div>
-        <span v-if="route.path !== '/quick' && !health?.ffmpeg.available" class="badge bad">ffmpeg missing</span>
-        <span
-          v-if="route.path !== '/quick'"
-          :class="['badge', health?.runningHubConfigured ? 'ok' : 'warn']"
-          :title="health?.runningHubConfigured ? 'RUNNINGHUB_API_KEY set' : 'RUNNINGHUB_API_KEY not set'"
-        >
-          RH {{ health?.runningHubConfigured ? '✓' : '—' }}
-        </span>
-        <span
-          v-if="route.path !== '/quick'"
-          :class="['badge', health?.aiConfigured ? 'ok' : 'no-dot muted']"
-          :title="health?.aiConfigured ? 'built-in AI configured' : 'built-in AI not configured (AI-optional)'"
-        >
-          AI {{ health?.aiConfigured ? '✓' : '—' }}
-        </span>
-        <button v-if="route.path !== '/quick'" class="ghost" @click="render.drawerOpen = true">
+        <WorkspaceNav />
+        <div class="spacer" />
+        <button class="ghost queue-button" @click="render.drawerOpen = true">
           {{ t('common.renderQueue') }}
           <span v-if="activeJobCount()" class="badge accent no-dot">{{ activeJobCount() }}</span>
         </button>
-        <router-link to="/settings" class="ghost-link">{{ t('nav.settings') }}</router-link>
+        <router-link
+          to="/settings"
+          class="ghost-link system-link"
+          :title="health?.ffmpeg.available === false ? 'ffmpeg不可用，请先处理设置' : '生成服务、AI与ffmpeg设置'"
+        >
+          <span v-if="health?.ffmpeg.available === false" class="system-alert" />
+          {{ t('nav.settings') }}
+        </router-link>
       </template>
 
       <button class="ghost locale-toggle" :title="locale === 'zh' ? 'Switch to English' : '切换到中文'" @click="setLocale(locale === 'zh' ? 'en' : 'zh')">
@@ -243,27 +216,11 @@ watch(() => route.path, () => void scheduleGuideRefresh());
 .brand { display: flex; align-items: center; text-decoration: none; flex-shrink: 0; }
 .brand-logo { height: 50px; width: auto; display: block; }
 .brand-name { font-size: 18px; font-weight: 600; color: var(--text); font-family: var(--serif); letter-spacing: 0.02em; }
-.nav { display: flex; gap: 4px; }
-.nav-item {
-  padding: 6px 14px;
-  border-radius: 7px;
-  color: var(--text-2);
-  font-size: 13.5px;
-  text-decoration: none;
-  transition: all 0.13s;
-}
-.nav-item:hover { color: var(--text); background: var(--bg-subtle); text-decoration: none; }
-.nav-item.active {
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
 .spacer { flex: 1; }
-.project-switch { position: relative; }
+.project-switch { position: relative; flex-shrink: 1; min-width: 0; }
 .project-switch-btn {
   display: flex; align-items: center; gap: 6px;
-  max-width: 260px;
+  max-width: 190px;
   padding: 5px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -274,7 +231,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
   cursor: pointer;
 }
 .project-switch-btn:hover { border-color: var(--line-2); background: var(--bg-subtle); }
-.caret { font-size: 10px; color: var(--text-3); }
+.caret { width: 14px; height: 14px; fill: none; stroke: var(--text-3); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .project-menu {
   position: absolute; right: 0; top: calc(100% + 6px);
   min-width: 240px;
@@ -312,9 +269,12 @@ watch(() => route.path, () => void scheduleGuideRefresh());
   border-radius: 0 0 7px 7px;
 }
 .project-menu-link:hover { color: var(--text); text-decoration: none; }
-.project-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-title { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ghost-link { color: var(--text-2); font-size: 13px; padding: 6px 9px; border-radius: 7px; }
 .ghost-link:hover { color: var(--text); background: var(--bg-subtle); text-decoration: none; }
+.queue-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.system-link { position: relative; white-space: nowrap; }
+.system-alert { position: absolute; top: 4px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--bg-2); }
 .theme-toggle { font-size: 15px; padding: 5px 9px; }
 .main { flex: 1; overflow: auto; }
 .main :deep(.page) { max-width: 1080px; margin: 0 auto; padding: 18px 22px; }

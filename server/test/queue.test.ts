@@ -14,6 +14,7 @@ import { Ffmpeg } from '../src/ffmpeg.js';
 import type { ProjectStore } from '../src/project-store.js';
 import type { Db } from '../src/db/sqlite.js';
 import { getTimeline } from '../src/modules/timeline.js';
+import { ProviderError } from '../src/providers/types.js';
 import type { RenderJobHandle, RenderRequestInput, RenderResult, RenderStatus, VideoProvider } from '../src/providers/types.js';
 import type { MediaAsset } from '@h3mise/shared';
 
@@ -527,11 +528,82 @@ test('provider concurrency runs independent shots in parallel and keeps overflow
   }));
 
   await waitFor(() => provider.submits.length === 2, 3000);
-  assert.equal(cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [jobs[2]!.id])?.status, 'LOCAL_QUEUED');
+  const activeRows = jobs.slice(0, 2).map((job) => cur.db.get<{ status: string; started_at: string | null }>(
+    'SELECT status, started_at FROM render_jobs WHERE id = ?', [job.id],
+  ));
+  assert.ok(activeRows.every((row) => Boolean(row && row.status !== 'LOCAL_QUEUED' && row.started_at)));
+  const waitingRow = cur.db.get<{ status: string; started_at: string | null }>(
+    'SELECT status, started_at FROM render_jobs WHERE id = ?', [jobs[2]!.id],
+  );
+  assert.equal(waitingRow?.status, 'LOCAL_QUEUED');
+  assert.equal(waitingRow?.started_at, null);
 
   await queue.cancel(jobs[0]!.id, cur.meta.id);
   await waitFor(() => provider.submits.length === 3, 3000);
-  assert.notEqual(cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [jobs[2]!.id])?.status, 'LOCAL_QUEUED');
+  const releasedRow = cur.db.get<{ status: string; started_at: string | null }>(
+    'SELECT status, started_at FROM render_jobs WHERE id = ?', [jobs[2]!.id],
+  );
+  assert.notEqual(releasedRow?.status, 'LOCAL_QUEUED');
+  assert.ok(releasedRow?.started_at);
+  for (const job of jobs) await queue.cancel(job.id, cur.meta.id);
+  await queue.forgetProject(cur.meta.id);
+  cur.close();
+});
+
+class CapacityProvider implements VideoProvider {
+  readonly id = 'capacity';
+  readonly name = 'Capacity';
+  readonly configured = true;
+  submits = 0;
+  async capabilities() { return { supportedModes: ['t2va' as const] }; }
+  async uploadAsset(_a: MediaAsset, _p: string) { return { providerRef: 'x' }; }
+  async submit(): Promise<RenderJobHandle> {
+    this.submits += 1;
+    throw new ProviderError(
+      'submit failed: 421 api queue limit reached',
+      'submit',
+      { errorCode: '421' },
+      { reason: 'provider_capacity', afterMs: 500 },
+    );
+  }
+  async status(): Promise<RenderStatus> { return { status: 'RUNNING' }; }
+  async result(): Promise<RenderResult> { throw new Error('not complete'); }
+  async cancel() {}
+}
+
+test('provider capacity rejection pauses the provider instead of cascading through queued jobs', async () => {
+  const { root, store } = await makeStore('queue-capacity');
+  roots.push(root);
+  const p = await makeProjectDetached(store, 'capacity');
+  const shots = [makeShotWithPrompt(p, 't2va'), makeShotWithPrompt(p, 't2va'), makeShotWithPrompt(p, 't2va')];
+  for (const shot of shots) advanceTo(p, shot.shotId, 'PREFLIGHT_READY');
+  const provider = new CapacityProvider();
+  const registryStub = {
+    get: () => provider,
+    concurrencyLimit: () => 2,
+  } as unknown as ProviderRegistry;
+  const queue = new RenderQueue(() => store, registryStub, new Ffmpeg(), bus(), 20, 500);
+  const cur = await store.open(p.meta.id);
+  p.close();
+
+  const jobs = shots.map((shot, index) => queue.submit({
+    projectId: cur.meta.id,
+    shotId: shot.shotId,
+    promptVersionId: shot.promptVersionId,
+    provider: 'capacity',
+    request: REQUEST(shot.promptVersionId),
+    intentHash: `capacity-${index}`,
+  }));
+
+  await waitFor(() => provider.submits === 2, 3000);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(provider.submits, 2, 'the third job must not be submitted into the same full provider queue');
+  const rows = jobs.map((job) => cur.db.get<{ status: string; error: string | null }>(
+    'SELECT status,error FROM render_jobs WHERE id = ?', [job.id],
+  ));
+  assert.ok(rows.every((row) => row?.status === 'LOCAL_QUEUED'));
+  assert.ok(rows.filter((row) => row?.error?.includes('并发队列已满')).length >= 1);
+
   for (const job of jobs) await queue.cancel(job.id, cur.meta.id);
   await queue.forgetProject(cur.meta.id);
   cur.close();

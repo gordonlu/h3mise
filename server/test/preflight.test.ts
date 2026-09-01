@@ -105,6 +105,23 @@ test('gate passes for a valid mock render (full caps, in-range duration)', async
   assert.equal(report.blocked, false);
 });
 
+test('gate blocks a compiler prompt that dropped the shot narrative', async () => {
+  const { root, store } = await makeStore('preflight-narrative');
+  roots.push(root);
+  const p = await makeProject(store, 'narrative');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  p.db.run(
+    "UPDATE prompt_versions SET source = 'deterministic_compiler', text = ? WHERE id = ?",
+    ['integrated_multimodal_description:\nReality: strict realism', promptVersionId],
+  );
+  const registry = makeRegistry(store.registry);
+  const intent = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock' });
+  const report = await runBasicPreflightIntent(p, registry, intent);
+
+  assert.equal(report.blocked, true);
+  assert.ok(report.basic.find((section) => section.key === 'prompt')?.checks.some((check) => check.key === 'prompt.missing_narrative'));
+});
+
 test('AI continuity result is attached to the existing preflight report', async () => {
   const { root, store } = await makeStore('preflight-semantic');
   roots.push(root);

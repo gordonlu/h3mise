@@ -5,7 +5,16 @@
 
 export const zh = {
   brand: { mark: 'H3', name: 'Mise' },
-  nav: { story: '故事', shots: '镜头', assets: '资产', timeline: '时间线', projects: '项目', settings: '设置' },
+  nav: {
+    story: '故事', shots: '镜头', assets: '资产', timeline: '时间线', projects: '项目', settings: '设置',
+    oneClick: '一键制作', prepare: '创作准备', professional: '专业制作',
+    storyBeats: '故事与节拍', storyBeatsDesc: '整理剧情、结构和Beat',
+    storyboard: 'Storyboard', storyboardDesc: '可选的视觉分镜规划',
+    assetLibrary: '素材库', assetLibraryDesc: '管理角色、场景和参考素材',
+    shotWorkspace: '镜头工作台', shotWorkspaceDesc: '设计Shot、Prompt和Take',
+    quickEdit: '快速剪辑', quickEditDesc: '简化选片和成片整理',
+    timelineExport: '时间线与导出', timelineExportDesc: '微调转场、声音和交付',
+  },
   common: {
     renderQueue: '渲染队列',
     cancel: '取消',
@@ -68,7 +77,16 @@ export const zh = {
 
 export const en: typeof zh = {
   brand: { mark: 'H3', name: 'Mise' },
-  nav: { story: 'Story', shots: 'Shots', assets: 'Assets', timeline: 'Timeline', projects: 'Projects', settings: 'Settings' },
+  nav: {
+    story: 'Story', shots: 'Shots', assets: 'Assets', timeline: 'Timeline', projects: 'Projects', settings: 'Settings',
+    oneClick: 'One-click Production', prepare: 'Create', professional: 'Professional',
+    storyBeats: 'Story & Beats', storyBeatsDesc: 'Shape the plot, structure, and beats',
+    storyboard: 'Storyboard', storyboardDesc: 'Optional visual planning',
+    assetLibrary: 'Asset Library', assetLibraryDesc: 'Characters, scenes, and references',
+    shotWorkspace: 'Shot Workspace', shotWorkspaceDesc: 'Design Shots, Prompts, and Takes',
+    quickEdit: 'Quick Edit', quickEditDesc: 'Simple take selection and assembly',
+    timelineExport: 'Timeline & Export', timelineExportDesc: 'Transitions, sound, and delivery',
+  },
   common: {
     renderQueue: 'Render Queue',
     cancel: 'Cancel',

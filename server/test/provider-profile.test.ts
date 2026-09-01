@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import type { AiAppProfile, ReferenceBinding, Shot } from '@h3mise/shared';
+import { ProviderError } from '../src/providers/types.js';
 import type { RenderRequestInput } from '../src/providers/types.js';
 import { importableKindForMime } from '../src/modules/media.js';
 import { compileDeterministic } from '../src/modules/prompt-templates.js';
-import { defaultAiAppProfile, inferSupportedModes, mapDiscoveredNodes } from '../src/providers/registry.js';
+import { defaultAiAppProfile, inferSupportedModes, mapDiscoveredNodes, mapStoryboardProviderNodes } from '../src/providers/registry.js';
 import { RunningHubAiAppProvider } from '../src/providers/runninghub.js';
 
 function node(nodeId: string, fieldName: string, description: string): AiAppProfile['nodes'][number] {
@@ -55,6 +56,20 @@ test('node discovery maps aspect ratio and megapixels to different workflow fiel
   assert.deepEqual(inputs.megapixels, { nodeId: 'shape', fieldName: 'megapixels' });
 });
 
+test('storyboard discovery maps LoadImage instead of an image model size field', () => {
+  const inputs = mapStoryboardProviderNodes([
+    { nodeId: '1', nodeName: 'CR Text', fieldName: 'text', fieldType: 'STRING', fieldData: '["STRING"]', description: 'Prompt' },
+    { nodeId: '12', nodeName: 'RH_Jimeng4_Image2Image', fieldName: 'size', fieldType: 'LIST', fieldData: '[["2K","4K"]]', description: '分辨率' },
+    { nodeId: '16', nodeName: 'LoadImage', fieldName: 'image', fieldType: 'IMAGE', fieldData: '[["example.png"],{"image_upload":true}]', description: '参考图' },
+  ]);
+
+  assert.deepEqual(inputs, {
+    prompt: { nodeId: '1', fieldName: 'text' },
+    size: { nodeId: '12', fieldName: 'size' },
+    layoutImage: { nodeId: '16', fieldName: 'image' },
+  });
+});
+
 test('RunningHub submission payload sends the selected megapixels value to its workflow node', () => {
   const profile = defaultAiAppProfile();
   profile.nodes = [
@@ -79,6 +94,33 @@ test('RunningHub submission payload sends the selected megapixels value to its w
   }).buildNodeInfoList(request);
 
   assert.ok(nodeInfoList.some((item) => item.nodeId === 'shape' && item.fieldName === 'megapixels' && item.fieldValue === '1.2'));
+});
+
+test('RunningHub refuses an empty prompt before any network request', () => {
+  const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile: defaultAiAppProfile() });
+  assert.throws(() => provider.submit({
+    mode: 't2va', prompt: '   ', durationSeconds: 5, aspectRatio: '16:9', references: [], providerParams: {},
+  }), /prompt is empty/);
+});
+
+test('RunningHub marks error 421 as provider-capacity backoff before a task id exists', async () => {
+  const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile: defaultAiAppProfile() });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ errorCode: '421', errorMessage: 'api queue limit reached' }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+  try {
+    await assert.rejects(
+      provider.submit({ mode: 't2va', prompt: '有效镜头提示词', durationSeconds: 5, aspectRatio: '16:9', references: [], providerParams: {} }),
+      (error: unknown) => error instanceof ProviderError
+        && error.stage === 'submit'
+        && error.retry?.reason === 'provider_capacity'
+        && error.retry.afterMs === 30_000,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('reference media import accepts images and audio but routes video through Shot Takes', () => {

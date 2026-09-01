@@ -109,12 +109,30 @@ export class AutoProduceService {
     const segments = beats.length ? [] : storySegments(story.body, shots.length || undefined);
     const previewShots = shots.map((shot) => this.planShot(p, shot));
     const statuses = await this.registry.statuses();
-    const providers: AutoProduceProviderOption[] = statuses.map((status) => ({
-      id: status.id as AutoProduceProviderOption['id'], name: status.name, kind: status.kind,
-      configured: status.configured, usable: status.id === 'mock' || status.verification.status === 'verified',
-      requiresConfirmation: status.id !== 'mock',
-      note: status.id === 'mock' ? '离线免费，适合完整验收' : status.verification.status === 'verified' ? '已验证，开始后可能产生真实费用' : '尚未验证，不能用于一键制作',
-    }));
+    const providers: AutoProduceProviderOption[] = statuses.map((status) => {
+      const isMock = status.id === 'mock';
+      const verified = status.verification.status === 'verified';
+      // Node detection gives Preflight a real capability/mapping snapshot. It
+      // is not the same as verification, but after the user explicitly accepts
+      // the paid batch it is safe to submit the first task. The render queue
+      // only promotes the profile to verified after that submission returns a
+      // provider task id; a failed first task stops one-click at the real stage.
+      const detectedReady = status.configured && status.verification.status === 'nodes_detected';
+      return {
+        id: status.id as AutoProduceProviderOption['id'], name: status.name, kind: status.kind,
+        configured: status.configured, usable: isMock || verified || detectedReady,
+        requiresConfirmation: !isMock,
+        note: isMock
+          ? '离线免费，适合完整验收'
+          : verified
+            ? '已通过真实提交验证，开始后可能产生真实费用'
+            : detectedReady
+              ? '节点已检测，尚未真实验证；开始后首个任务将验证映射并可能产生费用'
+              : status.verification.status === 'failed'
+                ? `检测失败：${status.verification.note || '请到设置中重新检测'}`
+                : '尚未完成节点检测，不能用于一键制作',
+      };
+    });
     const blockers: string[] = [];
     if (!shots.length && !story.body.trim()) blockers.push('故事正文和镜头都为空，请先写故事或建立镜头。');
     const missingRefs = previewShots.filter((shot) => shot.willRender && !shot.refReady);

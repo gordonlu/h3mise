@@ -164,12 +164,21 @@ export class RunningHubAiAppProvider implements VideoProvider {
 
   /** Map business references to profile slots, then build nodeInfoList. */
   submit(request: RenderRequestInput): Promise<RenderJobHandle> {
+    if (!request.prompt.trim()) {
+      throw new ProviderError('prompt is empty; refusing to submit a paid task', 'submit');
+    }
     const nodeInfoList = this.buildNodeInfoList(request);
     const body: Record<string, unknown> = { nodeInfoList };
     return this.v2(`/openapi/v2/run/ai-app/${this.profile.appId}`, body).then((raw) => {
       const r = raw as { taskId?: string; status?: string; errorCode?: string; errorMessage?: string; results?: unknown };
       if (!r.taskId || (r.errorCode && r.errorCode !== '')) {
-        throw new ProviderError(`submit failed: ${r.errorCode ?? '?'} ${r.errorMessage ?? JSON.stringify(raw)?.slice(0, 300)}`, 'submit', raw);
+        const capacity = String(r.errorCode ?? '') === '421';
+        throw new ProviderError(
+          `submit failed: ${r.errorCode ?? '?'} ${r.errorMessage ?? JSON.stringify(raw)?.slice(0, 300)}`,
+          'submit',
+          raw,
+          capacity ? { reason: 'provider_capacity', afterMs: 30_000 } : undefined,
+        );
       }
       return { providerTaskId: String(r.taskId), raw: raw as Record<string, unknown> };
     });

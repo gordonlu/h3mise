@@ -86,6 +86,11 @@ export class RenderQueue {
   private readonly deferredClose = new Set<string>();
   private readonly stoppedProjects = new Set<string>();
   private readonly waiters = new Map<string, Set<() => void>>();
+  /** Provider-wide cooldown after a capacity rejection. Without this, the
+   * failed slot was immediately handed to the next LOCAL_QUEUED job and a
+   * whole batch could be rejected in a few milliseconds. */
+  private readonly providerCooldownUntil = new Map<string, number>();
+  private readonly capacityRetries = new Map<string, number>();
   private readonly pollMs: number;
   /** Detached contexts for projects with active jobs (never `store.current`). */
   private readonly detached = new Map<string, ProjectContext>();
@@ -99,6 +104,7 @@ export class RenderQueue {
     private readonly ffmpeg: Ffmpeg,
     private readonly bus: EventBus,
     pollMs = 10_000,
+    private readonly capacityRetryBaseMs = 30_000,
   ) {
     this.pollMs = pollMs;
   }
@@ -184,7 +190,10 @@ export class RenderQueue {
       this.detached.delete(projectId);
     }
     for (const k of [...this.pending.keys()]) {
-      if (k.startsWith(`${projectId}/`)) this.pending.delete(k);
+      if (k.startsWith(`${projectId}/`)) {
+        this.pending.delete(k);
+        this.capacityRetries.delete(k);
+      }
     }
     for (const k of [...this.handles.keys()]) {
       if (k.startsWith(`${projectId}/`)) this.handles.delete(k);
@@ -441,6 +450,7 @@ export class RenderQueue {
       const { job, projectId: ownerProjectId } = found;
       const key = runKey(ownerProjectId, jobId);
       this.pending.delete(key);
+      this.capacityRetries.delete(key);
       const handle = this.handles.get(key);
       if (handle) {
         const provider = this.registry.get(job.provider);
@@ -592,6 +602,9 @@ export class RenderQueue {
     // poll occupies only that Provider's slot and no longer blocks unrelated
     // providers or independent projects.
     for (const [key, provider] of [...this.pending]) {
+      const cooldownUntil = this.providerCooldownUntil.get(provider) ?? 0;
+      if (cooldownUntil > Date.now()) continue;
+      if (cooldownUntil) this.providerCooldownUntil.delete(provider);
       const used = [...this.active.values()].filter((id) => id === provider).length;
       if (used >= this.providerLimit(provider)) continue;
       this.pending.delete(key);
@@ -640,7 +653,11 @@ export class RenderQueue {
       if (this.stoppedProjects.has(job.projectId)) return;
       // 1) Upload references if we have a fresh job (no handle yet).
       if (!this.handles.has(runKey(job.projectId, job.id)) && job.requestSnapshot) {
-        this.saveStatus(job.projectId, job.id, 'UPLOADING');
+        // LOCAL_QUEUED is only waiting for a provider slot. Start elapsed
+        // execution time when the worker actually owns that slot, before the
+        // first upload/provider call, and keep this timestamp for all later
+        // stages.
+        this.saveStatus(job.projectId, job.id, 'UPLOADING', { startedAt: job.startedAt ?? new Date().toISOString(), error: null });
         this.bus.emit({ type: 'render.job.updated', projectId: job.projectId, jobId: job.id, shotId: job.shotId, status: 'UPLOADING' });
         const uploads: Record<string, string> = {};
         for (const ref of job.requestSnapshot.references) {
@@ -670,6 +687,7 @@ export class RenderQueue {
           providerParams: job.requestSnapshot.providerParams,
         });
         this.handles.set(runKey(job.projectId, job.id), handle);
+        this.capacityRetries.delete(runKey(job.projectId, job.id));
         this.saveStatus(job.projectId, job.id, 'QUEUED', { providerTaskId: handle.providerTaskId, providerResponseSnapshot: handle.raw });
         // P0-6: a real submission that returned a taskId confirms the node
         // mapping is executable 鈫?profile becomes 'verified'.
@@ -691,11 +709,41 @@ export class RenderQueue {
       }
     } catch (e) {
       if (e instanceof ProviderError) {
+        if (e.retry?.reason === 'provider_capacity' && !this.handles.has(runKey(job.projectId, job.id))) {
+          this.deferForProviderCapacity(job, e);
+          return;
+        }
         await this.fail(job, `${e.stage}: ${e.message}`);
       } else {
         await this.fail(job, e instanceof Error ? e.message : String(e));
       }
     }
+  }
+
+  /** A capacity rejection has no provider task id and therefore no paid task
+   * to reconcile. Put the same job back in the local queue and pause the whole
+   * provider before trying again; never drain the rest of the batch into the
+   * same full remote queue. */
+  private deferForProviderCapacity(job: RenderJob, error: ProviderError): void {
+    const key = runKey(job.projectId, job.id);
+    const attempt = (this.capacityRetries.get(key) ?? 0) + 1;
+    this.capacityRetries.set(key, attempt);
+    const requested = Math.max(this.capacityRetryBaseMs, error.retry?.afterMs ?? 0);
+    const delay = Math.min(120_000, requested * 2 ** Math.min(2, attempt - 1));
+    const until = Date.now() + delay;
+    this.providerCooldownUntil.set(job.provider, Math.max(this.providerCooldownUntil.get(job.provider) ?? 0, until));
+    this.saveStatus(job.projectId, job.id, 'LOCAL_QUEUED', {
+      startedAt: null,
+      error: `生成服务并发队列已满，已保留任务，将在${Math.ceil(delay / 1000)}秒后自动继续（未产生新的付费任务）`,
+    });
+    this.pending.set(key, job.provider);
+    this.bus.emit({ type: 'render.job.updated', projectId: job.projectId, jobId: job.id, shotId: job.shotId, status: 'LOCAL_QUEUED' });
+    const timer = setTimeout(() => {
+      const current = this.providerCooldownUntil.get(job.provider) ?? 0;
+      if (current <= Date.now()) this.providerCooldownUntil.delete(job.provider);
+      this.pump();
+    }, delay + 10);
+    timer.unref();
   }
 
   private async pollUntilDone(job: RenderJob): Promise<void> {
@@ -749,7 +797,7 @@ export class RenderQueue {
       }
       const mapped: RenderJobStatus = st.status === 'SUCCEEDED' ? 'SUCCEEDED' : st.status === 'FAILED' ? 'FAILED' : st.status === 'EXPIRED' ? 'EXPIRED' : 'RUNNING';
       if (mapped === 'SUCCEEDED') {
-        this.saveStatus(job.projectId, job.id, 'DOWNLOADING', { startedAt: new Date().toISOString() });
+        this.saveStatus(job.projectId, job.id, 'DOWNLOADING', { startedAt: cur.startedAt ?? new Date().toISOString() });
         this.bus.emit({ type: 'render.job.updated', projectId: job.projectId, jobId: job.id, shotId: cur.shotId, status: 'DOWNLOADING' });
         const res = await provider.result(handle);
         await this.downloadAndCreateTake(cur, res.url, res.cost);

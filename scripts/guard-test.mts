@@ -20,7 +20,7 @@ const app = buildApp({ store, bus, ffmpeg, providers: registry, queue, ai, jobs,
 
 const r1 = await app.request('/api/health', { headers: { host: '127.0.0.1:4789', origin: 'https://evil.example' } });
 console.log('evil origin:', r1.status);
-const r2 = await app.request('/api/health', { headers: { host: '127.0.0.1:4789', origin: 'http://localhost:5173' } });
+const r2 = await app.request('/api/health', { headers: { host: '127.0.0.1:4789', origin: 'http://localhost:5188' } });
 console.log('localhost origin:', r2.status);
 const r3 = await app.request('/api/health', { headers: { host: '127.0.0.1:4789' } });
 console.log('no origin:', r3.status);

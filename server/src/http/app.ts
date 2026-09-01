@@ -29,8 +29,8 @@ export function buildApp(services: AppServices, webDist: string | null): Hono<{ 
       c.json({
         ok: true,
         api: 'H3Mise API server (dev)',
-        ui: 'http://localhost:5173',
-        note: 'In dev the UI runs on Vite (5173); this port serves API only. `pnpm start` serves the built UI.',
+        ui: 'http://localhost:5188',
+        note: 'In dev the UI runs on Vite (5188); this port serves API only. `pnpm start` serves the built UI.',
       }),
     );
   }

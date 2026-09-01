@@ -42,6 +42,41 @@ export function defaultStoryboardProviderProfile(): StoryboardProviderProfile {
   };
 }
 
+/** Map the three Storyboard business inputs without confusing an image model
+ * node (for example `RH_Jimeng4_Image2Image.size`) with the actual uploaded
+ * image input (`LoadImage.image`). apiCallDemo order is not semantic, so the
+ * image slot must be selected by field type/upload metadata first. */
+export function mapStoryboardProviderNodes(
+  nodes: StoryboardProviderProfile['nodes'],
+): StoryboardProviderProfile['inputs'] | null {
+  const text = (node: StoryboardProviderProfile['nodes'][number]) =>
+    `${node.fieldName} ${node.nodeName} ${node.description}`;
+  const prompt = nodes.find((node) => /prompt|text|提示词/i.test(text(node)));
+  const size = nodes.find((node) => /size|resolution|分辨率/i.test(text(node)));
+  const layoutImage = nodes
+    .map((node, index) => {
+      let score = 0;
+      if (/^image$/i.test(node.fieldType)) score += 100;
+      if (/image_upload/i.test(node.fieldData ?? '')) score += 80;
+      if (/^image$/i.test(node.fieldName)) score += 40;
+      if (/load.?image/i.test(node.nodeName)) score += 30;
+      if (/参考图|layout.?image|reference.?image/i.test(text(node))) score += 20;
+      // A LIST/string option on an image-generation node is commonly the size
+      // selector. Never let the word "Image" in its node name outrank a real
+      // upload field.
+      if (/^(list|string)$/i.test(node.fieldType) && !/image_upload/i.test(node.fieldData ?? '')) score -= 100;
+      return { node, score, index };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.node;
+  if (!prompt || !size || !layoutImage) return null;
+  return {
+    prompt: { nodeId: prompt.nodeId, fieldName: prompt.fieldName },
+    size: { nodeId: size.nodeId, fieldName: size.fieldName },
+    layoutImage: { nodeId: layoutImage.nodeId, fieldName: layoutImage.fieldName },
+  };
+}
+
 /** Default profile for the fixed v0.1 AI App (PRD §25.3). Node layout is a
  * heuristic until the user runs "detect & verify" with a real key. */
 export function defaultAiAppProfile(): AiAppProfile {
@@ -541,19 +576,12 @@ export class ProviderRegistry {
       fieldData: node.fieldData == null ? null : String(node.fieldData),
       description: String(node.description ?? node.descriptionCn ?? node.descriptionEn ?? ''),
     }));
-    const match = (re: RegExp) => nodes.find((node) => re.test(`${node.fieldName} ${node.nodeName} ${node.description}`));
-    const prompt = match(/prompt|text|提示词/i);
-    const size = match(/size|resolution|分辨率/i);
-    const layoutImage = nodes.find((node) => /image/i.test(node.fieldType) || /image|参考图|图片/i.test(`${node.fieldName} ${node.nodeName} ${node.description}`));
-    if (!prompt || !size || !layoutImage) throw new Error('未识别到完整的 Prompt、分辨率、参考图节点，请检查 AI App');
+    const inputs = mapStoryboardProviderNodes(nodes);
+    if (!inputs) throw new Error('未识别到完整的 Prompt、分辨率、参考图节点，请检查 AI App');
     const updated: StoryboardProviderProfile = {
       ...current,
       nodes,
-      inputs: {
-        prompt: { nodeId: prompt.nodeId, fieldName: prompt.fieldName },
-        size: { nodeId: size.nodeId, fieldName: size.fieldName },
-        layoutImage: { nodeId: layoutImage.nodeId, fieldName: layoutImage.fieldName },
-      },
+      inputs,
       verification: {
         status: 'nodes_detected',
         checkedAt: new Date().toISOString(),

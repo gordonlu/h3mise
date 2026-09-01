@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   const server = serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' });
   console.log(`\n  H3Mise API server running at http://127.0.0.1:${config.port}`);
   if (!config.webDist) {
-    console.log('  (API only — UI runs on Vite: http://localhost:5173)');
+    console.log('  (API only — UI runs on Vite: http://localhost:5188)');
   } else {
     console.log('  (serving built UI — disable with H3MISE_SERVE_WEB=0)');
   }

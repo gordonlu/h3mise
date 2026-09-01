@@ -93,9 +93,8 @@ onUnmounted(() => stopEvents?.());
   <div class="production-page">
     <header class="page-head">
       <div>
-        <p class="eyebrow">PRODUCTION CONTROL</p>
-        <h1>制片总控台</h1>
-        <p class="muted">不是多一个编辑器，而是告诉你项目卡在哪里、现在最该做什么。</p>
+        <h1>一键制作</h1>
+        <p class="muted">确认一次制作设置，然后等待完整成片；所有结果仍可在专业工作台继续编辑。</p>
       </div>
       <button class="sm" :disabled="loading" @click="load()">{{ loading ? '检查中…' : '重新检查' }}</button>
     </header>
@@ -106,8 +105,7 @@ onUnmounted(() => stopEvents?.());
     <template v-else-if="overview">
       <section class="auto-card">
         <div class="auto-copy">
-          <p class="eyebrow">BEGINNER MODE</p>
-          <h2>一键制作</h2>
+          <h2>制作设置</h2>
           <p>确认一次设置，系统会在当前项目里完成Beat、Shot、Prompt、生成、选片、时间线、成片检查和导出。完成后仍可回到专业工作台继续编辑。</p>
           <p v-if="autoPlan?.storyPreparation.note" class="prep-note">{{ autoPlan.storyPreparation.note }}</p>
         </div>
@@ -121,6 +119,7 @@ onUnmounted(() => stopEvents?.());
           <label>生成服务<select v-model="providerId">
             <option v-for="provider in autoPlan?.providers" :key="provider.id" :value="provider.id" :disabled="!provider.usable">{{ provider.name }}{{ provider.usable ? '' : '（不可用）' }}</option>
           </select></label>
+          <small v-if="chosenProvider" class="provider-note" :class="{ caution: chosenProvider.requiresConfirmation && !chosenProvider.note.startsWith('已通过') }">{{ chosenProvider.note }}</small>
           <label>清晰度<select v-model.number="megapixels"><option :value="0.6">0.6MP（推荐）</option><option :value="0.8">0.8MP</option><option :value="1">1.0MP</option><option :value="1.2">1.2MP</option></select></label>
           <div class="estimate">预计{{ autoPlan?.renderCount ?? 0 }}个新生成 · {{ seconds(autoPlan?.estimatedDurationSeconds ?? 0) }}成片</div>
           <label v-if="chosenProvider?.requiresConfirmation" class="paid-confirm"><input v-model="realConfirmed" type="checkbox"> 我确认本次会向{{ chosenProvider.name }}提交{{ autoPlan?.renderCount }}个真实任务，可能产生费用；失败不会自动重投</label>
@@ -197,7 +196,7 @@ onUnmounted(() => stopEvents?.());
 .production-page { max-width: 1320px; margin: 0 auto; padding: 26px 28px 64px; display: grid; gap: 24px; }
 .auto-card { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(360px, .9fr); gap: 28px; padding: 22px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: linear-gradient(135deg, var(--accent-soft), var(--bg-2) 60%); box-shadow: var(--shadow-1); }
 .auto-copy h2 { margin: 2px 0 8px; font-size: 24px; }.auto-copy > p:not(.eyebrow) { max-width: 660px; margin: 0; color: var(--text-2); line-height: 1.7; }.prep-note { margin-top: 10px !important; color: var(--accent-text) !important; font-size: 12px; }
-.auto-settings, .run-box { display: grid; gap: 10px; align-content: start; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2); }.auto-settings label { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 8px; font-size: 12px; }.auto-settings select { min-width: 0; }.estimate { color: var(--text-3); font-size: 11px; }.auto-settings .paid-confirm { grid-template-columns: auto 1fr; padding: 9px; background: var(--warn-soft); color: var(--warn); line-height: 1.5; }.paid-confirm input { margin: 0; }.auto-blocker { color: var(--bad); font-size: 11px; line-height: 1.5; }.auto-success { color: var(--ok); font-size: 12px; }.run-head { display: flex; justify-content: space-between; gap: 12px; }.run-head span { font: 700 11px var(--mono); color: var(--accent-text); }.progress { height: 7px; overflow: hidden; border-radius: 99px; background: var(--bg-subtle); }.progress i { display: block; height: 100%; background: var(--accent); transition: width .25s; }.run-box small { color: var(--text-3); }
+.auto-settings, .run-box { display: grid; gap: 10px; align-content: start; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2); }.auto-settings label { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 8px; font-size: 12px; }.auto-settings select { min-width: 0; }.provider-note, .estimate { color: var(--text-3); font-size: 11px; line-height: 1.5; }.provider-note.caution { color: var(--warn); }.auto-settings .paid-confirm { grid-template-columns: auto 1fr; padding: 9px; background: var(--warn-soft); color: var(--warn); line-height: 1.5; }.paid-confirm input { margin: 0; }.auto-blocker { color: var(--bad); font-size: 11px; line-height: 1.5; }.auto-success { color: var(--ok); font-size: 12px; }.run-head { display: flex; justify-content: space-between; gap: 12px; }.run-head span { font: 700 11px var(--mono); color: var(--accent-text); }.progress { height: 7px; overflow: hidden; border-radius: 99px; background: var(--bg-subtle); }.progress i { display: block; height: 100%; background: var(--accent); transition: width .25s; }.run-box small { color: var(--text-3); }
 .page-head, .section-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 h1 { margin: 1px 0 4px; font: 600 30px/1.25 var(--serif); } h2 { margin: 0; font: 600 20px/1.3 var(--serif); }
 .eyebrow { margin: 0; color: var(--accent-text); font: 700 10px/1.5 var(--mono); letter-spacing: .16em; }

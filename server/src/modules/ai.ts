@@ -4,10 +4,11 @@
 // All actions return suggestions the user applies explicitly.
 
 import { readFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SERVER_DIR = resolve(fileURLToPath(import.meta.url), '..', '..');
+// Works from both server/src/modules/ai.ts (tsx) and server/dist/modules/ai.js.
+const BUNDLED_SKILLS_DIR = fileURLToPath(new URL('../../skills/', import.meta.url));
 
 export type DirectorContentPart =
   | { type: 'text'; text: string }
@@ -218,12 +219,12 @@ export class AIService {
     }
   }
 
-  /** Load local Director Skills (PRD §23). Falls back to bundled starter skills. */
+  /** Load the local H3 Director Skill package (PRD §23), with per-file bundled fallback. */
   async loadSkills(): Promise<Array<{ id: string; title: string; content: string }>> {
     const bundled = [
-      { id: 'h3-micro-cinematic-director', title: 'H3 Micro Cinematic Director', file: 'h3-micro-cinematic-director.md' },
-      { id: 'h3-shot-pattern-library', title: 'H3 Shot Pattern Library', file: 'h3-shot-pattern-library.md' },
-      { id: 'h3-performance-director', title: 'H3 Performance Director', file: 'h3-performance-director.md' },
+      { id: 'minimax-h3-video-director', title: 'MiniMax H3 Video Director', file: join('minimax-h3-video-director', 'SKILL.md') },
+      { id: 'minimax-h3-director-patterns', title: 'MiniMax H3 Director Patterns', file: join('minimax-h3-video-director', 'references', 'director-patterns.md') },
+      { id: 'minimax-h3-storyboard-patterns', title: 'MiniMax H3 Storyboard Patterns', file: join('minimax-h3-video-director', 'references', 'storyboard-patterns.md') },
     ];
     const dir = this.skillsDir;
     const out: Array<{ id: string; title: string; content: string }> = [];
@@ -238,7 +239,7 @@ export class AIService {
         }
       }
       if (!content) {
-        content = await readFile(join(SERVER_DIR, 'skills', b.file), 'utf8').catch(() => null);
+        content = await readFile(join(BUNDLED_SKILLS_DIR, b.file), 'utf8').catch(() => null);
       }
       out.push({ id: b.id, title: b.title, content: content ?? `(skill file ${b.file} not found)` });
     }

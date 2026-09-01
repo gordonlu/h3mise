@@ -325,7 +325,7 @@ export async function runAction(
     case 'improve_camera': {
       if (!shotId) throw new Error('shotId required');
       const raw = await ai.model.structured<unknown>({
-        system: `你是 H3 镜头设计模式库。只改进给定方案的 camera 块，其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。\n${PLAN_SCHEMA_HINT}`,
+        system: `你是 H3 镜头设计模式库。只改进给定方案的 camera 块，其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}\n\n只有实际看见附图时才能修正空间方位；看不到图时不得猜测。`) }],
         temperature: 0.5,
         onVisionStatus: trackVision,
@@ -336,7 +336,7 @@ export async function runAction(
     case 'improve_performance': {
       if (!shotId) throw new Error('shotId required');
       const raw = await ai.model.structured<unknown>({
-        system: `你是 H3 表演导演。只改进给定方案的 performance 块（objective/obstacle/tactic/turn、movement quality、anticipation、primaryAction、followThrough、recovery、gaze、endPose），其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。动作描述必须确定性完整：身体部位＋方向＋先后顺序＋空间参照，展开压缩动作为连续动作链，杜绝左右侧/主体/顺序歧义。\n${PLAN_SCHEMA_HINT}`,
+        system: `你是 H3 表演导演。只改进给定方案的 performance 块（objective/obstacle/tactic/turn、movement quality、anticipation、primaryAction、followThrough、recovery、gaze、endPose），其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。动作描述必须确定性完整：身体部位＋方向＋先后顺序＋空间参照，展开压缩动作为连续动作链，杜绝左右侧/主体/顺序歧义。\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}\n\n只有实际看见附图时才能描述身体与物体的空间关系；看不到图时不得猜测。`) }],
         temperature: 0.5,
         onVisionStatus: trackVision,
@@ -385,7 +385,10 @@ Ref2VA 专项规则：
 7. 帧模式（I2VA/L2VA/FL2VA）首帧/尾帧内容锚定：请求附带且你确实能读取帧图时，先描述图内可见的主体、构图、场景层次（前景/中景/背景）与关键物体，再展开动作；主体外观、服装、颜色、关键物体与空间关系全程与帧图保持一致。若没有收到或无法读取图片，只保留当前提示词已有事实，严禁新增左右方位或空间关系。
 8. 动作因果与对象被动性：明确谁是运动的发出者。涉及主体作用于物体的动作（拿取/推动/碰撞）时：(a) 把主体的运动过程按时间段写满整个时长（如“视频前两秒 <Subject 1> 迈步靠近；随后双手接触并拾起”），不给模型留空白时间片；(b) 被动物体用【正向描述】锁定——“<Subject n> 是桌面上的静物，保持位置不变”，禁止用否定句（“不会滑动不滚动”——否定句遵循度低）；(c) 写明“画面中唯一的位移来自 <Subject 1> 的身体”。
 动作确定性规则：每个动作必须写全“身体部位＋方向＋先后顺序＋空间参照”，把压缩动作展开为不可歧义的连续动作链。例如不写“打开车门并上车”，而写“他走到驾驶座一侧，左手拉开左侧车门，先迈右腿坐进座位，收左腿后用左手关上车门”。杜绝左右侧、主体归属、动作顺序的一切误判空间。
-其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。正文保持中文（<Subject n>/<Picture n> 等标签和任务类型前缀等结构性标记除外）。只输出提示词正文，不要解释。`,
+其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。正文保持中文（<Subject n>/<Picture n> 等标签和任务类型前缀等结构性标记除外）。只输出提示词正文，不要解释。
+
+专业导演方法参考：
+${skillText}`,
         messages: [{
           role: 'user',
           content: await shotMultimodalContent(ctx, shotId, `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}\n\n视觉输入规则：只有实际看见下方附图时才能修正画面位置；若接口降级为纯文字或图片不可见，保留原有空间描述，缺失信息不要补写。`),
@@ -448,7 +451,7 @@ Empty output shape: ${JSON.stringify(empty)}`),
       if (!promptId) throw new Error('promptId required');
       const pv = promptMod.getPrompt(ctx, promptId);
       const text = await ai.model.complete({
-        system: `你是 H3 提示词修复器。只修复指出的问题，其余内容保持不变；输出语言与原提示词一致（原文无英文必要时用中文）。只输出修复后的提示词正文。`,
+        system: `你是 H3 提示词修复器。只修复指出的问题，其余内容保持不变；输出语言与原提示词一致（原文无英文必要时用中文）。只输出修复后的提示词正文。\n\n专业导演方法参考：\n${skillText}`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, pv.shotId, `Prompt:\n${pv.text}\n\nProblems: ${String(body.problems ?? '')}\n\n空间位置只能依据实际可见附图修复；图片不可见时不得猜测。`) }],
         temperature: 0.3,
         onVisionStatus: trackVision,

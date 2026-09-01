@@ -209,7 +209,9 @@ export async function recoverTimelineExports(p: ProjectContext): Promise<number>
 export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: string, onProgress?: (done: number, total: number) => void): Promise<TimelineExportResult> {
   const tl = getTimeline(p);
   if (tl.clips.length === 0) throw new Error('timeline is empty');
-  const outName = `${sanitize(title ?? tl.title ?? 'timeline')}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.mp4`;
+  // Milliseconds prevent rapid repeat exports (for example one-click reruns)
+  // from colliding with the UNIQUE persisted rel_path in the same second.
+  const outName = `${sanitize(title ?? tl.title ?? 'timeline')}-${new Date().toISOString().slice(0, 23).replace(/[:T.]/g, '-')}.mp4`;
   const outPath = join(p.paths.exports, outName);
   const clips: string[] = [];
   let total = 0;

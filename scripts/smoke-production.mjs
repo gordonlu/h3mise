@@ -2,13 +2,14 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const home = await mkdtemp(join(tmpdir(), 'h3mise-smoke-'));
 const port = 4790;
 // `pnpm start` runs this entry through tsx. Invoke the same Node loader
 // directly so Windows does not leave a pnpm.cmd child process behind.
 const tsxLoader = resolve('server/node_modules/tsx/dist/loader.mjs');
-const child = spawn(process.execPath, ['--import', tsxLoader, resolve('server/src/index.ts')], {
+const child = spawn(process.execPath, ['--import', pathToFileURL(tsxLoader).href, resolve('server/src/index.ts')], {
   env: {
     ...process.env,
     H3MISE_HOME: home,

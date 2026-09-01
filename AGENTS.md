@@ -9,6 +9,8 @@ This file tells coding assistants how to help a user run and configure H3Mise sa
 - The built-in Mock Provider is the safe fallback for learning and offline testing.
 - ComfyUI Local is a separate render provider. Its workflow mapping and safe Agent procedure are documented in `ComfyUI.md`; read that file before importing or editing a ComfyUI profile.
 - A `Shot` is the plan; a `Take` is a generated result. Never overwrite a Take to represent a new render.
+- Storyboard is an optional visual planning layer before Shot design. Creating or editing its text panels is free; generating a sheet or regenerating one panel through RunningHub is a separate paid image task.
+- Story skeletons and director-style presets are planning aids, not story facts. Applying a skeleton appends editable StoryBeat drafts; it must not silently create renders or overwrite existing beats.
 
 ## Help a first-time user
 
@@ -61,6 +63,34 @@ RunningHub AI Apps are not assumed to share fixed node IDs or field names. Treat
 
 If detection fails or the workflow cannot express a requested H3 mode, keep that mode disabled and fall back to Mock or a supported mode. Do not bypass capability checks.
 
+## Use optional Storyboards safely
+
+- Do not tell a user that Storyboard generation is required. They can continue directly from Story to Shotboard without spending anything.
+- H3Mise selects a `3`, `6`, or `9` panel layout from narrative-segment count, not total video duration. Stories with more than nine segments become multiple ordered pages.
+- Text planning, fixed black-frame templates, sheet splitting, and sheet recomposition run locally. Each page generation and each single-panel regeneration is its own RunningHub paid task and requires explicit confirmation.
+- The Storyboard Provider reuses the account-level RunningHub API Key, but has its own AI App ID, node mapping, verification state, size values, and cost estimate under **Settings → Provider — Storyboard 生图（可选付费）**.
+- Treat a changed Storyboard App ID or mapping as unverified. Save it, run its node detection, and inspect the detected Prompt, Size, and Layout Image fields before the first paid submission.
+- `nodes_detected` means only that the three inputs were discovered. A returned real task ID promotes the profile to `verified`.
+- Never start Storyboard generation to test connectivity. Never prepare a replacement Storyboard series while one of its paid tasks is active; reconcile the existing provider task instead.
+- Whole-sheet results are split into panel assets with local FFmpeg. Regenerating one panel creates a new version and recomposes the sheet; do not overwrite or delete the earlier asset version.
+- For more than nine narrative segments, approve only after every page has a generated asset for every panel.
+
+Useful non-secret checks:
+
+```bash
+curl -sS http://127.0.0.1:4789/api/providers/runninghub/storyboard-profile
+curl -sS http://127.0.0.1:4789/api/storyboard/pages
+```
+
+## Assist story structure and director style
+
+- Built-in narrative skeletons work without AI. Theme matching is deterministic; when AI ranking fails or is unavailable, keep the local recommendations usable and say that fallback occurred.
+- A skeleton has `3`, `6`, and `9` segment variants. Applying one appends editable StoryBeats only; it does not create Shots, submit jobs, or replace the user's story.
+- Familiar style phrases such as a film, series, genre, or era name are lookup intent only. Resolve them to generic, observable direction for medium, production design, lighting, performance, camera, editing, and sound.
+- Do not retain an imitated work name in the final H3 prompt. Do not reproduce recognizable characters, locations, dialogue, costumes, plots, or signature shots.
+- Director style is subordinate to project facts, bound assets, continuity, explicit shot instructions, and physical plausibility. Inject only the attributes relevant to the current Shot and keep at most one dominant camera behavior.
+- The resolved director style must reach built-in AI actions, external context packages, Storyboard prompts, and deterministic H3 compilation, including Ref2VA. If built-in AI is unavailable, deterministic style directives must still work.
+
 ## Connect ComfyUI
 
 - Use a workflow exported in ComfyUI **API Format**, never a UI-only workflow JSON.
@@ -96,5 +126,9 @@ If detection fails or the workflow cannot express a requested H3 mode, keep that
 - `server/src/providers/runninghub.ts`: upload, workflow input mapping, submission, polling, and download.
 - `server/src/modules/preflight.ts`: deterministic checks before paid submission.
 - `server/src/modules/render.ts`: persistent queue and reconciliation.
+- `server/src/modules/storyboard.ts`: optional text boards, paid image jobs, reconciliation, splitting, and panel versioning.
+- `server/src/modules/story-skeletons.ts`: built-in narrative structures, local matching, AI ranking fallback, and Beat creation.
+- `server/src/modules/director-styles.ts`: style aliases, generic presets, AI context, and deterministic H3 directives.
 - `web/src/pages/SettingsPage.vue`: user-facing provider setup.
+- `web/src/pages/StoryboardPage.vue`: optional multi-page Storyboard planning and paid-generation confirmation UI.
 - `shared/src/provider.ts`: provider profile and capability contract.

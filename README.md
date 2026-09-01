@@ -8,6 +8,10 @@
   <img src="https://img.shields.io/badge/local--first-yes-f4511e" alt="Local-first">
 </p>
 
+<p align="center">
+  <strong>中文</strong> · <a href="README.en.md">English</a> · <a href="README.ja.md">日本語</a>
+</p>
+
 # H3Mise — 本地 AI 视频项目管理工作台
 
 > **mise** 来自电影术语 *mise-en-scène*（场面调度）。

@@ -26,7 +26,9 @@ const bindings = ref<ReferenceBinding[]>([]);
 const kindFilter = ref('');
 
 const KINDS = ['character', 'scene', 'prop', 'vehicle', 'creature'];
-const KIND_LABEL: Record<string, string> = { character: '角色', scene: '场景', prop: '道具', vehicle: '载具', creature: '生物' };
+function kindLabel(kind: string): string {
+  return ({ character: t('workflow.assets.character'), scene: t('workflow.assets.scene'), prop: t('workflow.assets.prop'), vehicle: t('workflow.assets.vehicle'), creature: t('workflow.assets.creature') } as Record<string, string>)[kind] ?? kind;
+}
 const KIND_COLOR: Record<string, string> = { character: '#5ab0ff', scene: '#4ec9a0', prop: '#e8a85a', vehicle: '#b48bf0', creature: '#e06c75' };
 
 const newEntity = ref({ kind: 'character', name: '', description: '', traits: '' });
@@ -376,30 +378,30 @@ onMounted(load);
 
     <!-- Entities -->
     <section v-if="tab === 'entities'" class="panel">
-      <div class="panel-title">实体</div>
+      <div class="panel-title">{{ t('workflow.assets.entities') }}</div>
       <div class="panel-body">
         <form class="toolbar" @submit.prevent="createEntity">
           <select v-model="newEntity.kind">
-            <option v-for="k in KINDS" :key="k" :value="k">{{ KIND_LABEL[k] }}</option>
+            <option v-for="k in KINDS" :key="k" :value="k">{{ kindLabel(k) }}</option>
           </select>
-          <input v-model="newEntity.name" placeholder="名称" @keyup.enter="createEntity" />
-          <input v-model="newEntity.description" placeholder="描述（可选）" class="grow" @keyup.enter="createEntity" />
-          <input v-model="newEntity.traits" placeholder="特征（可选，键=值，逗号分隔，如 costume=白衬衫, build=高挑）" class="grow traits-input" @keyup.enter="createEntity" />
-          <button class="primary" :disabled="!newEntity.name">创建实体</button>
+          <input v-model="newEntity.name" :placeholder="t('workflow.assets.name')" @keyup.enter="createEntity" />
+          <input v-model="newEntity.description" :placeholder="t('workflow.assets.descriptionOptional')" class="grow" @keyup.enter="createEntity" />
+          <input v-model="newEntity.traits" :placeholder="t('workflow.assets.traitsOptionalKeyValueCommaSeparatedE')" class="grow traits-input" @keyup.enter="createEntity" />
+          <button class="primary" :disabled="!newEntity.name">{{ t('workflow.assets.createEntity') }}</button>
         </form>
         <div class="kind-filter">
-          <span class="filter-label">筛选</span>
-          <span class="tag" :class="{ active: !kindFilter }" @click="kindFilter = ''">全部</span>
+          <span class="filter-label">{{ t('workflow.assets.filter') }}</span>
+          <span class="tag" :class="{ active: !kindFilter }" @click="kindFilter = ''">{{ t('workflow.assets.all') }}</span>
           <span v-for="k in KINDS" :key="k" class="tag" :class="{ active: kindFilter === k }" @click="kindFilter = kindFilter === k ? '' : k">
-            {{ KIND_LABEL[k] }}
+            {{ kindLabel(k) }}
           </span>
         </div>
-        <EmptyState v-if="!entities.length" icon="❖" title="还没有实体" desc="先创建角色与场景 — Shot 的主角色、场景与连续性都引用这里的实体。" />
+        <EmptyState v-if="!entities.length" icon="❖" :title="t('workflow.assets.noEntitiesYet')" :desc="t('workflow.assets.createCharactersAndScenesFirstShotSubjects')" />
         <div v-else class="grid list">
           <article v-for="e in filteredEntities" :key="e.id" class="card visual-card">
             <img v-if="entityImage(e)" class="linked-image" :src="mediaUrl(entityImage(e)!.id)" :alt="`${e.name} 主图`" />
             <div class="card-top">
-              <span class="kind-badge" :style="{ color: KIND_COLOR[e.kind], background: `${KIND_COLOR[e.kind]}1a`, borderColor: `${KIND_COLOR[e.kind]}55` }">{{ KIND_LABEL[e.kind] ?? e.kind }}</span>
+              <span class="kind-badge" :style="{ color: KIND_COLOR[e.kind], background: `${KIND_COLOR[e.kind]}1a`, borderColor: `${KIND_COLOR[e.kind]}55` }">{{ kindLabel(e.kind) }}</span>
               <h3 class="card-name" :title="e.name">{{ e.name }}</h3>
               <div class="card-actions">
                 <button class="icon-btn" title="编辑" @click="editing = { kind: 'entity', item: e }">✎</button>

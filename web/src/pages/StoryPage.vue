@@ -22,16 +22,12 @@ const skeletonRecommendations = ref<SkeletonRecommendation[]>([]);
 const skeletonMode = ref<SkeletonRecommendationResult['mode']>('local');
 
 const CATEGORIES = ['setup', 'inciting_incident', 'rising_action', 'climax', 'falling_action', 'resolution', 'transition', 'other'];
-const CATEGORY_LABEL: Record<string, string> = {
-  setup: '铺垫',
-  inciting_incident: '激励事件',
-  rising_action: '上升行动',
-  climax: '高潮',
-  falling_action: '下降行动',
-  resolution: '收束',
-  transition: '过渡',
-  other: '其他',
-};
+function categoryLabel(category: string): string {
+  return ({
+    setup: t('workflow.story.setup'), inciting_incident: t('workflow.story.incitingIncident'), rising_action: t('workflow.story.risingAction'), climax: t('workflow.story.climax'),
+    falling_action: t('workflow.story.fallingAction'), resolution: t('workflow.story.resolution'), transition: t('workflow.story.transition'), other: t('workflow.story.other'),
+  } as Record<string, string>)[category] ?? category;
+}
 
 /** Beat → linked shots. */
 const beatShots = computed(() => {
@@ -286,9 +282,9 @@ onMounted(load);
     <div class="spread page-head">
       <h1>{{ t('pages.story.title') }}</h1>
       <div class="row">
-        <button class="sm" @click="openSkeletons">{{ skeletonOpen ? '收起灵感' : '找节奏灵感' }}</button>
-        <button v-if="uncoveredBeatCount" class="sm" @click="materializeMissingShots">补齐 {{ uncoveredBeatCount }} 个 Shot</button>
-        <RouterLink class="button-link sm" to="/storyboard">可选：生成 Storyboard →</RouterLink>
+        <button class="sm" @click="openSkeletons">{{ skeletonOpen ? t('workflow.story.hideIdeas') : t('workflow.story.findPacingIdeas') }}</button>
+        <button v-if="uncoveredBeatCount" class="sm" @click="materializeMissingShots">{{ t('workflow.story.createValueMissingShots', { v0: uncoveredBeatCount }) }}</button>
+        <RouterLink class="button-link sm" to="/storyboard">{{ t('workflow.story.optionalGenerateStoryboard') }}</RouterLink>
         <button
           v-if="aiEnabled"
           class="primary sm"
@@ -302,26 +298,26 @@ onMounted(load);
     </div>
 
     <section v-if="skeletonOpen" class="panel skeleton-browser">
-      <div class="panel-title spread"><span>短剧叙事骨架</span><span class="muted">骨架免费内置，AI 只增强推荐</span></div>
+      <div class="panel-title spread"><span>{{ t('workflow.story.shortFormStoryStructures') }}</span><span class="muted">{{ t('workflow.story.structuresAreBuiltInAndFreeAI') }}</span></div>
       <div class="panel-body col">
         <div class="skeleton-search">
-          <label class="field grow">你的主题或冲突<input v-model="skeletonTheme" placeholder="例如：职场新人被领导抢功，最后拿出证据" @keyup.enter="recommendSkeletons" /></label>
-          <label class="field count-field">Beat 数<select v-model="skeletonCount"><option :value="3">3 段</option><option :value="6">6 段</option><option :value="9">9 段</option></select></label>
-          <button class="primary" :disabled="skeletonBusy" @click="recommendSkeletons">{{ skeletonBusy ? '匹配中…' : '推荐骨架' }}</button>
+          <label class="field grow">{{ t('workflow.story.yourThemeOrConflict') }}<input v-model="skeletonTheme" :placeholder="t('workflow.story.eGAJuniorEmployeeHasTheir')" @keyup.enter="recommendSkeletons" /></label>
+          <label class="field count-field">{{ t('workflow.story.beatCount') }}<select v-model="skeletonCount"><option :value="3">3</option><option :value="6">6</option><option :value="9">9</option></select></label>
+          <button class="primary" :disabled="skeletonBusy" @click="recommendSkeletons">{{ skeletonBusy ? t('workflow.story.matching') : t('workflow.story.recommendStructures') }}</button>
         </div>
         <div class="spread">
-          <span class="muted">{{ skeletonMode === 'ai' ? 'AI 语义推荐' : skeletonMode === 'local_fallback' ? 'AI 不可用，已回退本地匹配' : '本地标签匹配' }}</span>
-          <button class="sm ghost" @click="skeletonRecommendations = skeletons.map((skeleton, index) => ({ skeleton, score: 1 - index * 0.01, reason: '全部骨架' }))">查看全部</button>
+          <span class="muted">{{ skeletonMode === 'ai' ? t('workflow.story.aiSemanticRanking') : skeletonMode === 'local_fallback' ? t('workflow.story.aiUnavailableUsingLocalMatching') : t('workflow.story.localTagMatching') }}</span>
+          <button class="sm ghost" @click="skeletonRecommendations = skeletons.map((skeleton, index) => ({ skeleton, score: 1 - index * 0.01, reason: t('workflow.story.allStructures') }))">{{ t('workflow.story.viewAll') }}</button>
         </div>
         <div class="skeleton-grid">
           <article v-for="item in skeletonRecommendations" :key="item.skeleton.id" class="skeleton-card">
-            <div class="spread"><strong>{{ item.skeleton.name }}</strong><span class="badge">{{ item.skeleton.group === 'high_tension' ? '高压兑现' : item.skeleton.group === 'comedy' ? '喜剧' : item.skeleton.group === 'suspense' ? '悬疑' : '情感' }}</span></div>
+            <div class="spread"><strong>{{ item.skeleton.name }}</strong><span class="badge">{{ item.skeleton.group === 'high_tension' ? t('workflow.story.highTensionPayoff') : item.skeleton.group === 'comedy' ? t('workflow.story.comedy') : item.skeleton.group === 'suspense' ? t('workflow.story.suspense') : t('workflow.story.emotion') }}</span></div>
             <p>{{ item.skeleton.description }}</p>
             <div class="muted match-reason">{{ item.reason }}</div>
             <ol class="skeleton-preview">
               <li v-for="segment in item.skeleton.variants[skeletonCount]" :key="segment.title"><strong>{{ segment.title }}</strong><span>{{ segment.purpose }}</span></li>
             </ol>
-            <button class="sm primary" @click="applyStorySkeleton(item.skeleton)">{{ beats.length ? '重整当前' : '建立' }} {{ skeletonCount }} 个 Beat</button>
+            <button class="sm primary" @click="applyStorySkeleton(item.skeleton)">{{ beats.length ? t('workflow.story.restructureCurrent') : t('workflow.story.create') }} {{ skeletonCount }} Beats</button>
           </article>
         </div>
       </div>
@@ -332,34 +328,34 @@ onMounted(load);
         <div class="panel-title">{{ t('pages.story.subtitle') }}</div>
         <div class="panel-body col facts-body">
           <div class="spread">
-            <span class="muted">修改后点击「保存」提交</span>
-            <button class="primary sm" :disabled="!storyDirty" @click="saveStoryDraft">保存故事</button>
+            <span class="muted">{{ t('workflow.story.clickSaveAfterMakingChanges') }}</span>
+            <button class="primary sm" :disabled="!storyDirty" @click="saveStoryDraft">{{ t('workflow.story.saveStory') }}</button>
           </div>
           <div class="grid two">
           <label class="field">
             {{ t('pages.story.titleField') }}
-            <input v-model="storyDraft.title" :disabled="aiBusy" placeholder="故事标题" />
+            <input v-model="storyDraft.title" :disabled="aiBusy" :placeholder="t('workflow.story.storyTitle')" />
           </label>
           <label class="field">
-            规划总时长 (s)
-            <input v-model="storyDraft.plannedDurationSeconds" :disabled="aiBusy" type="number" min="0" max="900" placeholder="如 90（AI 拆解按此分配节拍时长）" />
+            {{ t('workflow.story.plannedTotalDurationS') }}
+            <input v-model="storyDraft.plannedDurationSeconds" :disabled="aiBusy" type="number" min="0" max="900" :placeholder="t('workflow.story.eG90AIUsesThisTo')" />
           </label>
         </div>
           <label class="field">
             {{ t('pages.story.synopsis') }}
-            <textarea v-model="storyDraft.synopsis" :disabled="aiBusy" class="field-synopsis" rows="6" placeholder="剧情梗概：主角是谁、发生什么、如何收场（供 AI 拆解使用）"></textarea>
+            <textarea v-model="storyDraft.synopsis" :disabled="aiBusy" class="field-synopsis" rows="6" :placeholder="t('workflow.story.synopsisProtagonistWhatHappensAndHowIt')"></textarea>
           </label>
           <div class="script-frame">
             <div class="script-head">
-              <span>正文稿</span>
-              <span class="script-count mono">{{ storyDraft.body.length }} 字</span>
+              <span>{{ t('workflow.story.scriptBody') }}</span>
+              <span class="script-count mono">{{ storyDraft.body.length }} {{ t('workflow.story.characters') }}</span>
             </div>
             <textarea
               v-model="storyDraft.body"
               class="script-body"
               rows="16"
               :disabled="aiBusy"
-              placeholder="在此粘贴剧本 / 小说片段…"
+              :placeholder="t('workflow.story.pasteAScriptOrStoryExcerptHere')"
             ></textarea>
           </div>
         </div>
@@ -368,7 +364,7 @@ onMounted(load);
       <div class="panel beats-panel">
         <div class="panel-title spread">
           <span>{{ t('pages.story.beats') }} <span class="muted">{{ beats.length }}</span>
-            <span v-if="story?.plannedDurationSeconds" class="muted plan-hint">{{ beats.reduce((acc, b) => acc + (b.durationSeconds || 0), 0) }} / {{ story.plannedDurationSeconds }}s 已规划</span>
+            <span v-if="story?.plannedDurationSeconds" class="muted plan-hint">{{ beats.reduce((acc, b) => acc + (b.durationSeconds || 0), 0) }} / {{ story.plannedDurationSeconds }}s {{ t('workflow.story.planned') }}</span>
           </span>
           <button class="sm" :disabled="aiBusy" @click="addBeat">{{ t('pages.story.newBeat') }}</button>
         </div>
@@ -385,16 +381,16 @@ onMounted(load);
             <div class="spread">
               <div class="row beat-head">
                 <span class="mono muted beat-idx">{{ String(i + 1).padStart(2, '0') }}</span>
-                <input :value="beatValue(b).title" :disabled="aiBusy" class="beat-title" placeholder="Beat 标题" @input="setBeatDraft(b.id, { title: ($event.target as HTMLInputElement).value })" />
-                <input :value="beatValue(b).durationSeconds" :disabled="aiBusy" type="number" min="1" max="60" class="beat-dur" title="节拍时长（秒）" @input="setBeatDraft(b.id, { durationSeconds: Number(($event.target as HTMLInputElement).value) || 5 })" />
-                <button v-if="beatDirty(b.id)" class="sm primary" @click="saveBeatDraft(b.id)">保存</button>
+                <input :value="beatValue(b).title" :disabled="aiBusy" class="beat-title" :placeholder="t('workflow.story.beatTitle')" @input="setBeatDraft(b.id, { title: ($event.target as HTMLInputElement).value })" />
+                <input :value="beatValue(b).durationSeconds" :disabled="aiBusy" type="number" min="1" max="60" class="beat-dur" :title="t('workflow.story.beatDurationSeconds')" @input="setBeatDraft(b.id, { durationSeconds: Number(($event.target as HTMLInputElement).value) || 5 })" />
+                <button v-if="beatDirty(b.id)" class="sm primary" @click="saveBeatDraft(b.id)">{{ t('common.save') }}</button>
                 <select :value="beatValue(b).category" :disabled="aiBusy" @change="setBeatDraft(b.id, { category: ($event.target as HTMLSelectElement).value as never })">
-                  <option v-for="c in CATEGORIES" :key="c" :value="c">{{ CATEGORY_LABEL[c] ?? c }}</option>
+                  <option v-for="c in CATEGORIES" :key="c" :value="c">{{ categoryLabel(c) }}</option>
                 </select>
               </div>
               <div class="row">
-                <button class="sm ghost" :disabled="aiBusy" title="上移" @click="moveBeat(b.id, -1)">↑</button>
-                <button class="sm ghost" :disabled="aiBusy" title="下移" @click="moveBeat(b.id, 1)">↓</button>
+                <button class="sm ghost" :disabled="aiBusy" :title="t('workflow.story.moveUp')" @click="moveBeat(b.id, -1)">↑</button>
+                <button class="sm ghost" :disabled="aiBusy" :title="t('workflow.story.moveDown')" @click="moveBeat(b.id, 1)">↓</button>
                 <button class="sm danger ghost" :disabled="aiBusy" @click="removeBeat(b.id)">{{ t('common.delete') }}</button>
               </div>
             </div>

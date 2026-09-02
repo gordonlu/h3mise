@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { del, fileUrl, get, post, takeVideoUrl } from '../api/client';
 import { useToastStore } from '../stores/toast';
+import { t } from '../stores/locale';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import type { TimelineClip } from '@h3mise/shared';
 
@@ -84,7 +85,7 @@ async function prepareTimeline() {
   try {
     const result = await post<{ added: number }>('/api/timeline/quick-build', {});
     await load();
-    toasts.push({ kind: 'ok', text: result.added ? `已把 ${result.added} 个片段放入成片` : '所有已选片段都在成片里' });
+    toasts.push({ kind: 'ok', text: result.added ? t('workflow.quickedit.addedValueClipsToTheVideo', { v0: result.added }) : t('workflow.quickedit.allSelectedClipsAreAlreadyInThe') });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   } finally {
@@ -111,7 +112,7 @@ async function removeClip(clip: TimelineClip) {
   try {
     await del(`/api/timeline/clips/${clip.id}`);
     await load();
-    toasts.push({ kind: 'info', text: '已从成片移除，可随时重新加入' });
+    toasts.push({ kind: 'info', text: t('workflow.quickedit.removedFromTheVideoYouCanAdd') });
   } finally {
     busy.value = '';
   }
@@ -122,7 +123,7 @@ async function exportVideo() {
   try {
     const started = await post<{ jobId: string }>('/api/timeline/export', {});
     exportJob.value = { id: started.jobId, status: 'running', progress: 0 };
-    toasts.push({ kind: 'info', text: '正在合成长视频，可以留在此页查看进度' });
+    toasts.push({ kind: 'info', text: t('workflow.quickedit.buildingTheFullVideoStayOnThis') });
     for (let i = 0; i < 600; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       const job = await get<Omit<ExportJob, 'id'>>(`/api/jobs/${started.jobId}`);
@@ -130,12 +131,12 @@ async function exportVideo() {
       if (job.status === 'done') {
         activeTakeId.value = null;
         await load();
-        toasts.push({ kind: 'ok', text: '长视频制作完成' });
+        toasts.push({ kind: 'ok', text: t('workflow.quickedit.fullVideoCompleted') });
         return;
       }
-      if (job.status === 'failed') throw new Error(job.error ?? '导出失败');
+      if (job.status === 'failed') throw new Error(job.error ?? t('workflow.quickedit.exportFailed'));
     }
-    throw new Error('导出等待超时，任务可能仍在后台运行');
+    throw new Error(t('workflow.quickedit.exportWaitTimedOutTheTaskMay'));
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   } finally {
@@ -150,55 +151,55 @@ onMounted(load);
   <div class="quick-page">
     <header class="quick-head">
       <div>
-        <div class="eyebrow">新手路径</div>
-        <h1>快速剪辑</h1>
-        <p>选好每个镜头喜欢的片段，排一下顺序，然后生成长视频。</p>
+        <div class="eyebrow">{{ t('workflow.quickedit.beginnerPath') }}</div>
+        <h1>{{ t('workflow.quickedit.quickEdit') }}</h1>
+        <p>{{ t('workflow.quickedit.chooseATakeForEachShotArrange') }}</p>
       </div>
-      <router-link to="/timeline" class="pro-link">专业微调：裁切、转场、声音 →</router-link>
+      <router-link to="/timeline" class="pro-link">{{ t('workflow.quickedit.professionalEditTrimTransitionsAudio') }}</router-link>
     </header>
 
-    <div class="same-data-note">快速剪辑和专业制作使用同一份项目。你可以随时来回切换，修改不会丢失。</div>
+    <div class="same-data-note">{{ t('workflow.quickedit.quickEditAndProfessionalUseTheSame') }}</div>
 
-    <div class="steps" aria-label="快速剪辑进度">
+    <div class="steps" :aria-label="t('workflow.quickedit.quickEditProgress')">
       <div :class="['step', { done: currentStep > 1, current: currentStep === 1 }]">
-        <span>1</span><div><strong>选好片段</strong><small>{{ selectedShots.length }} / {{ shots.length }} 个镜头</small></div>
+        <span>1</span><div><strong>{{ t('workflow.quickedit.selectTakes') }}</strong><small>{{ selectedShots.length }} / {{ shots.length }} {{ t('workflow.quickedit.shots') }}</small></div>
       </div>
       <div :class="['step', { done: currentStep > 2, current: currentStep === 2 }]">
-        <span>2</span><div><strong>排列顺序</strong><small>{{ clips.length }} 个片段</small></div>
+        <span>2</span><div><strong>{{ t('workflow.quickedit.arrangeOrder') }}</strong><small>{{ clips.length }} {{ t('workflow.quickedit.clips') }}</small></div>
       </div>
       <div :class="['step', { done: currentStep > 3, current: currentStep === 3 }]">
-        <span>3</span><div><strong>生成长视频</strong><small>{{ latestExport ? '已经完成' : '等待开始' }}</small></div>
+        <span>3</span><div><strong>{{ t('workflow.quickedit.buildFullVideo') }}</strong><small>{{ latestExport ? t('workflow.quickedit.completed') : t('workflow.quickedit.notStarted') }}</small></div>
       </div>
     </div>
 
     <div v-if="error" class="panel error-card">{{ error }}</div>
-    <div v-if="loading" class="panel loading-card">正在读取项目…</div>
+    <div v-if="loading" class="panel loading-card">{{ t('workflow.quickedit.loadingProject') }}</div>
 
     <template v-else>
       <section class="quick-section">
         <div class="section-head">
-          <div><span class="section-number">1</span><h2>每个镜头选一个喜欢的片段</h2></div>
-          <span :class="['status-pill', waitingShots.length ? 'waiting' : 'ready']">{{ waitingShots.length ? `还有 ${waitingShots.length} 个没选` : '全部选好了' }}</span>
+          <div><span class="section-number">1</span><h2>{{ t('workflow.quickedit.chooseOneTakeForEachShot') }}</h2></div>
+          <span :class="['status-pill', waitingShots.length ? 'waiting' : 'ready']">{{ waitingShots.length ? t('workflow.quickedit.valueStillNeedSelection', { v0: waitingShots.length }) : t('workflow.quickedit.allSelected') }}</span>
         </div>
         <div v-if="!shots.length" class="empty-card">
-          <strong>项目里还没有镜头</strong>
-          <p>先进入专业制作添加或生成镜头，完成后再回来快速剪辑。</p>
-          <router-link to="/shots" class="button-link primary-link">去添加镜头</router-link>
+          <strong>{{ t('workflow.quickedit.noShotsInThisProject') }}</strong>
+          <p>{{ t('workflow.quickedit.addOrGenerateShotsInProfessionalThen') }}</p>
+          <router-link to="/shots" class="button-link primary-link">{{ t('workflow.quickedit.addShots') }}</router-link>
         </div>
         <div v-else class="shot-grid">
           <article v-for="shot in shots" :key="shot.id" :class="['shot-card', { ready: shot.selectedTakeId }]">
             <div class="shot-cover">
               <img v-if="shot.cover" :src="fileUrl(shot.cover)" :alt="shot.title" />
               <span v-else>{{ String(shot.order).padStart(2, '0') }}</span>
-              <i>{{ shot.selectedTakeId ? '✓ 已选好' : shot.takeCount ? '等你选择' : '还没生成' }}</i>
+              <i>{{ shot.selectedTakeId ? t('workflow.quickedit.selected') : shot.takeCount ? t('workflow.quickedit.chooseATake') : t('workflow.quickedit.notGenerated') }}</i>
             </div>
             <div class="shot-copy">
-              <strong>{{ shot.title || `镜头 ${shot.order}` }}</strong>
-              <small>{{ shot.durationSeconds }} 秒</small>
+              <strong>{{ shot.title || t('workflow.quickedit.shotValue', { v0: shot.order }) }}</strong>
+              <small>{{ shot.durationSeconds }} {{ t('workflow.quickedit.sec') }}</small>
               <router-link v-if="!shot.selectedTakeId" :to="`/shots/${shot.id}#takes`" class="button-link">
-                {{ shot.takeCount ? '去选择喜欢的片段' : '去生成片段' }}
+                {{ shot.takeCount ? t('workflow.quickedit.chooseATake2') : t('workflow.quickedit.generateATake') }}
               </router-link>
-              <button v-else class="sm" @click="activeTakeId = shot.selectedTakeId">播放看看</button>
+              <button v-else class="sm" @click="activeTakeId = shot.selectedTakeId">{{ t('workflow.quickedit.preview') }}</button>
             </div>
           </article>
         </div>
@@ -206,52 +207,52 @@ onMounted(load);
 
       <section class="quick-section">
         <div class="section-head">
-          <div><span class="section-number">2</span><h2>把片段放进长视频</h2></div>
+          <div><span class="section-number">2</span><h2>{{ t('workflow.quickedit.addClipsToTheFullVideo') }}</h2></div>
           <button class="primary" :disabled="busy !== '' || !selectedShots.length" @click="prepareTimeline">
-            {{ busy === 'prepare' ? '正在准备…' : clips.length ? '补齐缺少的片段' : '自动按镜头顺序排列' }}
+            {{ busy === 'prepare' ? t('workflow.quickedit.preparing') : clips.length ? t('workflow.quickedit.addMissingClips') : t('workflow.quickedit.arrangeAutomaticallyByShotOrder') }}
           </button>
         </div>
-        <p class="section-help">这里只调整先后顺序。想裁掉一小段、添加转场或调声音，可以随时进入专业微调。</p>
+        <p class="section-help">{{ t('workflow.quickedit.thisPageOnlyChangesOrderUseProfessional') }}</p>
         <div v-if="clips.length" class="clip-list">
           <article v-for="(clip, index) in clips" :key="clip.id" class="clip-row">
             <span class="clip-index">{{ index + 1 }}</span>
             <button class="clip-play" @click="activeTakeId = clip.takeId">▶</button>
-            <div class="clip-name"><strong>{{ clipShot.get(clip.shotId)?.title ?? clip.shotId }}</strong><small>点击播放检查</small></div>
+            <div class="clip-name"><strong>{{ clipShot.get(clip.shotId)?.title ?? clip.shotId }}</strong><small>{{ t('workflow.quickedit.clickToPreview') }}</small></div>
             <div class="clip-actions">
-              <button class="sm" :disabled="index === 0 || busy !== ''" @click="moveClip(index, -1)">往前</button>
-              <button class="sm" :disabled="index === clips.length - 1 || busy !== ''" @click="moveClip(index, 1)">往后</button>
-              <button class="sm danger" :disabled="busy !== ''" @click="removeClip(clip)">移除</button>
+              <button class="sm" :disabled="index === 0 || busy !== ''" @click="moveClip(index, -1)">{{ t('workflow.quickedit.earlier') }}</button>
+              <button class="sm" :disabled="index === clips.length - 1 || busy !== ''" @click="moveClip(index, 1)">{{ t('workflow.quickedit.later') }}</button>
+              <button class="sm danger" :disabled="busy !== ''" @click="removeClip(clip)">{{ t('workflow.quickedit.remove') }}</button>
             </div>
           </article>
         </div>
-        <div v-else class="empty-card compact">选好片段后，点击“自动按镜头顺序排列”。</div>
+        <div v-else class="empty-card compact">{{ t('workflow.quickedit.afterSelectingTakesClickArrangeAutomaticallyBy') }}</div>
       </section>
 
       <section v-if="previewUrl" class="quick-section preview-section">
         <div class="section-head">
-          <div><span class="section-number">▶</span><h2>{{ activeTakeId ? '检查这个片段' : '最新长视频' }}</h2></div>
-          <button v-if="activeTakeId" class="sm" @click="activeTakeId = null">关闭片段预览</button>
+          <div><span class="section-number">▶</span><h2>{{ activeTakeId ? t('workflow.quickedit.reviewThisClip') : t('workflow.quickedit.latestFullVideo') }}</h2></div>
+          <button v-if="activeTakeId" class="sm" @click="activeTakeId = null">{{ t('workflow.quickedit.closeClipPreview') }}</button>
         </div>
         <VideoPlayer :src="previewUrl" :poster="previewPoster" preload="auto" :max-height="520" />
       </section>
 
       <section class="quick-section finish-section">
         <div class="section-head">
-          <div><span class="section-number">3</span><h2>生成长视频</h2></div>
-          <span v-if="latestExport" class="status-pill ready">✓ 已有成片</span>
+          <div><span class="section-number">3</span><h2>{{ t('workflow.quickedit.buildFullVideo2') }}</h2></div>
+          <span v-if="latestExport" class="status-pill ready">{{ t('workflow.quickedit.videoReady') }}</span>
         </div>
-        <p class="section-help">这一步只合并本地片段，不会创建新的 AI 视频，也不会产生 RunningHub 费用。</p>
+        <p class="section-help">{{ t('workflow.quickedit.thisOnlyJoinsLocalClipsItCreates') }}</p>
         <div v-if="exportJob?.status === 'running'" class="export-progress">
-          <div><strong>正在制作…</strong><span>{{ Math.round((exportJob.progress ?? 0) * 100) }}%</span></div>
+          <div><strong>{{ t('workflow.quickedit.building') }}</strong><span>{{ Math.round((exportJob.progress ?? 0) * 100) }}%</span></div>
           <div class="progress-track"><i :style="{ width: `${Math.round((exportJob.progress ?? 0) * 100)}%` }" /></div>
         </div>
         <div class="finish-actions">
           <button class="primary big-action" :disabled="!clips.length || busy !== ''" @click="exportVideo">
-            {{ busy === 'export' ? '正在制作长视频…' : latestExport ? '重新生成长视频' : '生成长视频' }}
+            {{ busy === 'export' ? t('workflow.quickedit.buildingFullVideo') : latestExport ? t('workflow.quickedit.rebuildFullVideo') : t('workflow.quickedit.buildFullVideo3') }}
           </button>
-          <router-link to="/timeline" class="button-link">进入专业微调</router-link>
+          <router-link to="/timeline" class="button-link">{{ t('workflow.quickedit.openProfessionalEdit') }}</router-link>
         </div>
-        <div v-if="latestExport" class="latest-path">最近成片：<span class="mono">{{ latestExport.relPath }}</span></div>
+        <div v-if="latestExport" class="latest-path">{{ t('workflow.quickedit.latestVideo') }}<span class="mono">{{ latestExport.relPath }}</span></div>
       </section>
     </template>
   </div>

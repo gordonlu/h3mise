@@ -5,6 +5,7 @@ import { recommendedStoryboardPanelCount } from '@h3mise/shared';
 import { get, mediaUrl, patch, post } from '../api/client';
 import { confirmDialog } from '../stores/confirm';
 import { useToastStore } from '../stores/toast';
+import { t } from '../stores/locale';
 
 const storyboard = ref<Storyboard | null>(null);
 const pages = ref<Storyboard[]>([]);
@@ -76,7 +77,7 @@ async function prepare() {
     selectedPageId.value = storyboard.value.id;
     pages.value = await get<Storyboard[]>('/api/storyboard/pages');
     syncDrafts();
-    toasts.push({ kind: 'ok', text: `已免费生成 ${selectedCount.value} 格文字规划，尚未调用生图 API` });
+    toasts.push({ kind: 'ok', text: t('workflow.storyboard.createdAFreeValuePanelTextPlan', { v0: selectedCount.value }) });
   } catch (error) {
     toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
   } finally {
@@ -94,28 +95,28 @@ async function savePanel(panelId: string) {
   try {
     storyboard.value = await patch<Storyboard>(`/api/storyboard/panels/${panelId}`, { description: panelDrafts.value[panelId] });
     syncDrafts();
-    toasts.push({ kind: 'ok', text: '分格描述已保存' });
+    toasts.push({ kind: 'ok', text: t('workflow.storyboard.panelDescriptionSaved') });
   } catch (error) {
     toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
   }
 }
 
 function costText(): string {
-  return provider.value?.estimatedCostCny == null ? '费用以 RunningHub 返回为准' : `预估约 ¥${provider.value.estimatedCostCny.toFixed(2)} / 次`;
+  return provider.value?.estimatedCostCny == null ? t('workflow.storyboard.costIsDeterminedByRunningHub') : t('workflow.storyboard.estimatedValuePerRun', { v0: provider.value.estimatedCostCny.toFixed(2) });
 }
 
 async function generateSheet() {
   if (!storyboard.value || busy.value || active.value) return;
   const ok = await confirmDialog({
-    title: `生成 ${storyboard.value.panelCount} 宫格 Storyboard`,
-    message: `${costText()}。这会创建真实的 RunningHub 付费任务；拆图由本地 FFmpeg 完成，不另收费。`,
-    confirmLabel: '确认付费生成',
+    title: t('workflow.storyboard.generateAValuePanelStoryboard', { v0: storyboard.value.panelCount }),
+    message: t('workflow.storyboard.valueThisCreatesARealPaidRunningHub', { v0: costText() }),
+    confirmLabel: t('workflow.storyboard.confirmPaidGeneration'),
   });
   if (!ok) return;
   busy.value = true;
   try {
     storyboard.value = await post<Storyboard>(`/api/storyboard/${storyboard.value.id}/generate`, { confirmed: true });
-    toasts.push({ kind: 'info', text: 'Storyboard 生图已提交，可离开此页稍后查看' });
+    toasts.push({ kind: 'info', text: t('workflow.storyboard.storyboardGenerationSubmittedYouMayLeaveAnd') });
     schedulePoll();
   } catch (error) {
     toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
@@ -127,9 +128,9 @@ async function generateSheet() {
 async function regeneratePanel(panelId: string, order: number) {
   if (!storyboard.value || busy.value || active.value) return;
   const ok = await confirmDialog({
-    title: `单独重生第 ${order} 格`,
-    message: `${costText()}。旧版本会保留；成功后只替换这一格，并在本地重组黑边框宫格。`,
-    confirmLabel: '确认付费重生',
+    title: t('workflow.storyboard.regeneratePanelValue', { v0: order }),
+    message: t('workflow.storyboard.valueTheOldVersionIsKeptOnly', { v0: costText() }),
+    confirmLabel: t('workflow.storyboard.confirmPaidRegeneration'),
   });
   if (!ok) return;
   busy.value = true;
@@ -152,8 +153,8 @@ async function approve() {
     toasts.push({
       kind: 'ok',
       text: sync
-        ? `Storyboard 已批准并接入 Shotboard：新建 ${sync.shotsCreated} 个 Shot，更新 ${sync.shotsUpdated} 个，绑定 ${sync.bindingsCreated} 张分格参考图`
-        : 'Storyboard 已批准并接入 Shotboard',
+        ? t('workflow.storyboard.storyboardApprovedAndSyncedToShotboardValue', { v0: sync.shotsCreated, v1: sync.shotsUpdated, v2: sync.bindingsCreated })
+        : t('workflow.storyboard.storyboardApprovedAndSyncedToShotboard'),
     });
   } catch (error) {
     toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
@@ -164,7 +165,7 @@ function actualCost(): string | null {
   const cost = storyboard.value?.activeJob?.cost;
   if (!cost) return null;
   const money = cost.thirdPartyConsumeMoney ?? cost.consumeMoney;
-  return [money != null ? `金额 ¥${money}` : null, cost.consumeCoins != null ? `${cost.consumeCoins} 币` : null, cost.taskCostTime != null ? `${cost.taskCostTime}s` : null].filter(Boolean).join(' · ');
+  return [money != null ? t('workflow.storyboard.amountValue', { v0: money }) : null, cost.consumeCoins != null ? t('workflow.storyboard.valueCoins', { v0: cost.consumeCoins }) : null, cost.taskCostTime != null ? `${cost.taskCostTime}s` : null].filter(Boolean).join(' · ');
 }
 
 onMounted(() => void load());
@@ -174,21 +175,21 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); });
 <template>
   <div class="page storyboard-page">
     <div class="spread page-head">
-      <div><h1>Storyboard（可选）</h1><p class="muted">先免费检查文字分格，再决定是否付费生图；不会改变现有 Shot / Take 流程。</p></div>
-      <div class="row"><RouterLink class="button-link sm" to="/story">← 故事</RouterLink><RouterLink class="button-link sm" to="/shots">继续到 Shotboard →</RouterLink></div>
+      <div><h1>{{ t('workflow.storyboard.storyboardOptional') }}</h1><p class="muted">{{ t('workflow.storyboard.reviewTheTextPanelsForFreeBefore') }}</p></div>
+      <div class="row"><RouterLink class="button-link sm" to="/story">← {{ t('workflow.storyboard.story') }}</RouterLink><RouterLink class="button-link sm" to="/shots">{{ t('workflow.storyboard.continueToShotboard') }}</RouterLink></div>
     </div>
 
     <div v-if="!storyboard" class="panel setup-panel">
-      <div class="panel-title">先生成文字分格（免费）</div>
+      <div class="panel-title">{{ t('workflow.storyboard.createTextPanelsFirstFree') }}</div>
       <div class="panel-body col">
-        <p>当前约 <strong>{{ segmentCount }} 个叙事段</strong>（项目约 {{ duration }} 秒），推荐首张使用 <strong>{{ recommended }} 格</strong>。每个 Shot 仍是独立的 2–15 秒视频。</p>
-        <p v-if="segmentCount > 9" class="muted">超过 9 段会自动拆成多张 Storyboard，每一页单独确认、单独付费生成。</p>
+        <p>{{ t('workflow.storyboard.about') }} <strong>{{ segmentCount }} {{ t('workflow.storyboard.narrativeSegments') }}</strong>（{{ t('workflow.storyboard.projectApprox') }} {{ duration }} {{ t('workflow.storyboard.sec') }}），{{ t('workflow.storyboard.recommendedFirstPage') }} <strong>{{ recommended }} {{ t('workflow.storyboard.panels') }}</strong>。{{ t('workflow.storyboard.eachShotRemainsAnIndependent215') }}</p>
+        <p v-if="segmentCount > 9" class="muted">{{ t('workflow.storyboard.moreThanNineSegmentsAreSplitAcross') }}</p>
         <div class="count-options">
           <label v-for="count in ([3, 6, 9] as const)" :key="count" :class="{ selected: selectedCount === count }">
-            <input v-model="selectedCount" type="radio" :value="count" /><strong>{{ count }} 格</strong><span>{{ count === recommended ? '按段数推荐' : count === 3 ? '1–3 段' : count === 6 ? '4–6 段' : '7–9 段 / 每页' }}</span>
+            <input v-model="selectedCount" type="radio" :value="count" /><strong>{{ count }} {{ t('workflow.storyboard.panels2') }}</strong><span>{{ count === recommended ? t('workflow.storyboard.recommended') : count === 3 ? t('workflow.storyboard.13Segments') : count === 6 ? t('workflow.storyboard.46Segments') : t('workflow.storyboard.79SegmentsPage') }}</span>
           </label>
         </div>
-        <button class="primary" :disabled="busy" @click="prepare">{{ busy ? '准备中…' : '生成文字 Storyboard（免费）' }}</button>
+        <button class="primary" :disabled="busy" @click="prepare">{{ busy ? t('workflow.storyboard.preparing') : t('workflow.storyboard.createTextStoryboardFree') }}</button>
       </div>
     </div>
 
@@ -196,20 +197,20 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); });
       <div class="panel status-panel">
         <div class="panel-body spread">
           <div class="row wrap">
-            <span class="badge">第 {{ storyboard.pageNumber }}/{{ storyboard.totalPages }} 页 · {{ storyboard.panelCount }} 格</span>
-            <span class="muted">覆盖叙事段 {{ storyboard.sourceStartIndex + 1 }}–{{ storyboard.sourceEndIndex }} · 项目约 {{ storyboard.sourceDurationSeconds }}s</span>
-            <span class="badge" :class="storyboard.status === 'failed' ? 'bad' : storyboard.status === 'approved' ? 'ok' : active ? 'warn' : ''">{{ active ? 'AI 正在生成…' : storyboard.status === 'approved' ? '已批准' : storyboard.status === 'failed' ? '生成失败' : storyboard.status === 'ready' ? '图片已就绪' : '文字规划' }}</span>
-            <span v-if="actualCost()" class="muted">本次消耗：{{ actualCost() }}</span>
+            <span class="badge">{{ t('workflow.storyboard.page') }} {{ storyboard.pageNumber }}/{{ storyboard.totalPages }} · {{ storyboard.panelCount }} {{ t('workflow.storyboard.panels3') }}</span>
+            <span class="muted">{{ t('workflow.storyboard.coversSegments') }} {{ storyboard.sourceStartIndex + 1 }}–{{ storyboard.sourceEndIndex }} · {{ t('workflow.storyboard.projectApprox2') }} {{ storyboard.sourceDurationSeconds }}s</span>
+            <span class="badge" :class="storyboard.status === 'failed' ? 'bad' : storyboard.status === 'approved' ? 'ok' : active ? 'warn' : ''">{{ active ? t('workflow.storyboard.aiGenerating') : storyboard.status === 'approved' ? t('workflow.storyboard.approved') : storyboard.status === 'failed' ? t('workflow.storyboard.generationFailed') : storyboard.status === 'ready' ? t('workflow.storyboard.imagesReady') : t('workflow.storyboard.textPlan') }}</span>
+            <span v-if="actualCost()" class="muted">{{ t('workflow.storyboard.thisRun') }}{{ actualCost() }}</span>
             <span v-if="storyboard.activeJob?.error" class="bad-text">{{ storyboard.activeJob.error }}</span>
           </div>
-          <div class="row"><select v-model="selectedCount"><option :value="3">3 格</option><option :value="6">6 格</option><option :value="9">9 格</option></select><button class="sm" :disabled="busy || active" @click="prepare">重新准备</button></div>
+          <div class="row"><select v-model="selectedCount"><option :value="3">3</option><option :value="6">6</option><option :value="9">9</option></select><button class="sm" :disabled="busy || active" @click="prepare">{{ t('workflow.storyboard.prepareAgain') }}</button></div>
         </div>
       </div>
 
       <nav v-if="pages.length > 1" class="page-tabs" aria-label="Storyboard pages">
         <button v-for="page in pages" :key="page.id" class="page-tab" :class="{ active: page.id === storyboard.id }" @click="selectPage(page.id)">
-          第 {{ page.pageNumber }} 页
-          <span :class="page.status === 'failed' ? 'bad-text' : 'muted'">{{ page.status === 'approved' ? '已批准' : page.panels.every(panel => panel.assetId) ? '已生成' : page.status === 'generating' ? '生成中' : '待生成' }}</span>
+          {{ t('workflow.storyboard.page2') }} {{ page.pageNumber }}
+          <span :class="page.status === 'failed' ? 'bad-text' : 'muted'">{{ page.status === 'approved' ? t('workflow.storyboard.approved2') : page.panels.every(panel => panel.assetId) ? t('workflow.storyboard.generated') : page.status === 'generating' ? t('workflow.storyboard.generating') : t('workflow.storyboard.pending') }}</span>
         </button>
       </nav>
 
@@ -217,16 +218,16 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); });
         <article v-for="panel in storyboard.panels" :key="panel.id" class="storyboard-panel">
           <div class="panel-image"><img v-if="panel.assetId" :src="mediaUrl(panel.assetId)" :alt="`Storyboard ${panel.order}`" /><span v-else>{{ panel.order }}</span></div>
           <div class="panel-editor">
-            <div class="spread"><strong>第 {{ storyboard.pageNumber }} 页 · 第 {{ panel.order }} 格</strong><span class="muted">v{{ panel.version }}</span></div>
+            <div class="spread"><strong>{{ t('workflow.storyboard.page3') }} {{ storyboard.pageNumber }} · {{ t('workflow.storyboard.panel') }} {{ panel.order }}</strong><span class="muted">v{{ panel.version }}</span></div>
             <textarea v-model="panelDrafts[panel.id]" rows="4" :disabled="active"></textarea>
-            <div class="row"><button class="sm" :disabled="panelDrafts[panel.id]?.trim() === panel.description" @click="savePanel(panel.id)">保存描述</button><button v-if="panel.assetId" class="sm" :disabled="busy || active || !providerReady" @click="regeneratePanel(panel.id, panel.order)">AI 单独重生</button></div>
+            <div class="row"><button class="sm" :disabled="panelDrafts[panel.id]?.trim() === panel.description" @click="savePanel(panel.id)">{{ t('workflow.storyboard.saveDescription') }}</button><button v-if="panel.assetId" class="sm" :disabled="busy || active || !providerReady" @click="regeneratePanel(panel.id, panel.order)">{{ t('workflow.storyboard.regenerateThisPanel') }}</button></div>
           </div>
         </article>
       </div>
 
       <div class="action-bar panel">
-        <div><strong>{{ providerReady ? costText() : '生图 Provider 尚未检测' }}</strong><p class="muted">固定黑边框；整张生成后在本地按 3×1 / 3×2 / 3×3 精确拆分。</p></div>
-        <div class="row wrap"><RouterLink v-if="!providerReady" class="button-link sm" to="/settings">去设置生图 API</RouterLink><button class="primary" :disabled="busy || active || !providerReady" @click="generateSheet">{{ active ? 'AI 正在生成…' : storyboard.sheetAssetId ? '重新生成本页' : `付费生成第 ${storyboard.pageNumber} 页` }}</button><button v-if="nextPage && storyboard.panels.every(panel => panel.assetId)" class="sm" :disabled="active" @click="selectPage(nextPage.id)">进入下一页 →</button><button v-if="allPagesReady" class="sm" :disabled="active" @click="approve">批准全部并继续</button></div>
+        <div><strong>{{ providerReady ? costText() : t('workflow.storyboard.imageProviderNotDetected') }}</strong><p class="muted">{{ t('workflow.storyboard.fixedBlackFramesTheGeneratedSheetIs') }}</p></div>
+        <div class="row wrap"><RouterLink v-if="!providerReady" class="button-link sm" to="/settings">{{ t('workflow.storyboard.setUpImageAPI') }}</RouterLink><button class="primary" :disabled="busy || active || !providerReady" @click="generateSheet">{{ active ? t('workflow.storyboard.aiGenerating2') : storyboard.sheetAssetId ? t('workflow.storyboard.regenerateThisPage') : t('workflow.storyboard.generatePageValuePaid', { v0: storyboard.pageNumber }) }}</button><button v-if="nextPage && storyboard.panels.every(panel => panel.assetId)" class="sm" :disabled="active" @click="selectPage(nextPage.id)">{{ t('workflow.storyboard.nextPage') }}</button><button v-if="allPagesReady" class="sm" :disabled="active" @click="approve">{{ t('workflow.storyboard.approveAllAndContinue') }}</button></div>
       </div>
     </template>
   </div>

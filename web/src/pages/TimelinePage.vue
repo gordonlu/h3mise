@@ -85,7 +85,7 @@ async function addClip(shotId: string, takeId: string) {
   try {
     await post('/api/timeline/clips', { shotId, takeId });
     await load();
-    toasts.push({ kind: 'ok', text: '已加入时间线' });
+    toasts.push({ kind: 'ok', text: t('workflow.timeline.addedToTimeline') });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   }
@@ -153,13 +153,13 @@ async function exportTimeline() {
   try {
     filmCheck.value = await get<FilmCheckResult>('/api/film-check');
     if (!filmCheck.value.canExport) {
-      toasts.push({ kind: 'err', text: `成片检查未通过：${filmCheck.value.errors[0]?.message ?? '请查看问题列表'}` });
+      toasts.push({ kind: 'err', text: t('workflow.timeline.finalCheckFailedMessage', { message: filmCheck.value.errors[0]?.message ?? t('workflow.timeline.seeIssueList') }) });
       return;
     }
     exportJob.value = { id: '', status: 'running' };
     const res = await post<{ jobId: string }>('/api/timeline/export', {});
     exportJob.value = { id: res.jobId, status: 'running', result: undefined, error: null };
-    toasts.push({ kind: 'info', text: `导出任务 ${res.jobId} 已启动（后台运行）` });
+    toasts.push({ kind: 'info', text: t('workflow.timeline.exportJobValueStartedInTheBackground', { v0: res.jobId }) });
     void pollExport(res.jobId);
   } catch (error) {
     exportJob.value = null;
@@ -175,11 +175,11 @@ async function pollExport(jobId: string) {
     if (job.status === 'done') {
       playUrl.value = job.result?.url ?? '';
       await load();
-      toasts.push({ kind: 'ok', text: `导出完成：${job.result?.relPath}` });
+      toasts.push({ kind: 'ok', text: t('workflow.timeline.exportCompleteValue', { v0: job.result?.relPath }) });
       return;
     }
     if (job.status === 'failed') {
-      toasts.push({ kind: 'err', text: `导出失败：${job.error}` });
+      toasts.push({ kind: 'err', text: t('workflow.timeline.exportFailedValue', { v0: job.error }) });
       return;
     }
   }
@@ -208,12 +208,12 @@ onUnmounted(() => off?.());
     </div>
 
     <div v-if="filmCheck && (filmCheck.errors.length || filmCheck.warnings.length)" class="panel film-check" :class="{ blocked: !filmCheck.canExport }">
-      <div class="panel-title">成片检查 · {{ filmCheck.canExport ? '可以导出' : `${filmCheck.errors.length}项需要处理` }}</div>
-      <p v-for="issue in [...filmCheck.errors, ...filmCheck.warnings]" :key="issue.code + issue.message">{{ issue.severity === 'error' ? '阻塞' : '提醒' }}：{{ issue.message }}</p>
+      <div class="panel-title">{{ t('workflow.timeline.finalCheck') }} · {{ filmCheck.canExport ? t('workflow.timeline.readyToExport') : t('workflow.timeline.valueIssuesNeedAttention', { v0: filmCheck.errors.length }) }}</div>
+      <p v-for="issue in [...filmCheck.errors, ...filmCheck.warnings]" :key="issue.code + issue.message">{{ issue.severity === 'error' ? t('workflow.timeline.blocker') : t('workflow.timeline.notice') }}：{{ issue.message }}</p>
     </div>
 
     <div v-if="exportJob && exportJob.status === 'running'" class="panel progress-panel">
-      <div class="panel-title">导出中… {{ exportJob.progress != null ? Math.round(exportJob.progress * 100) + '%' : '' }}</div>
+      <div class="panel-title">{{ t('workflow.timeline.exporting') }} {{ exportJob.progress != null ? Math.round(exportJob.progress * 100) + '%' : '' }}</div>
       <div class="progress-track">
         <div class="progress-fill" :style="{ width: `${Math.round((exportJob.progress ?? 0) * 100)}%` }"></div>
       </div>
@@ -223,10 +223,10 @@ onUnmounted(() => off?.());
     <div class="panel strip-panel filmstrip">
       <div v-if="clips.length" class="strip-guide">
         <div>
-          <strong>选择片段进行裁切和转场</strong>
-          <span>也可以拖动片段调整顺序</span>
+          <strong>{{ t('workflow.timeline.selectAClipToTrimOrChange') }}</strong>
+          <span>{{ t('workflow.timeline.dragClipsToReorderThem') }}</span>
         </div>
-        <span class="muted">当前选中：第 {{ activeClipIndex + 1 }} 个片段</span>
+        <span class="muted">{{ t('workflow.timeline.selectedClipValue', { v0: activeClipIndex + 1 }) }}</span>
       </div>
       <div class="strip" v-if="clips.length">
         <div
@@ -247,17 +247,17 @@ onUnmounted(() => off?.());
             <span class="strip-idx mono">{{ String(i + 1).padStart(2, '0') }}</span>
             <span class="strip-dur mono">{{ clipDuration(c).toFixed(1) }}s</span>
           </div>
-          <div v-if="c.transition !== 'cut' && c.transition !== 'none' && i > 0" class="strip-trans" :title="`转场：${c.transition}`">◧</div>
+          <div v-if="c.transition !== 'cut' && c.transition !== 'none' && i > 0" class="strip-trans" :title="t('workflow.timeline.transitionValue', { v0: c.transition })">◧</div>
           <button
             type="button"
             class="strip-edit"
             :class="{ current: activeClipId === c.id }"
-            :aria-label="`裁切与转场：第 ${i + 1} 个片段`"
-            title="打开裁切与转场"
+            :aria-label="t('workflow.timeline.trimAndTransitionClipValue', { v0: i + 1 })"
+            :title="t('workflow.timeline.openTrimAndTransition')"
             @click.stop="activeClipId = c.id"
           >
             <span aria-hidden="true">✂</span>
-            {{ activeClipId === c.id ? '编辑中' : '编辑' }}
+            {{ activeClipId === c.id ? t('workflow.timeline.editing') : t('workflow.timeline.edit') }}
           </button>
         </div>
         <div class="strip-end mono muted">{{ totalSeconds.toFixed(1) }}s</div>
@@ -265,16 +265,16 @@ onUnmounted(() => off?.());
       <EmptyState
         v-else
         icon="▤"
-        title="时间线为空"
-        desc="只接受 Selected Take。先在 Shot 里选片，再从下方把镜头加入时间线。"
+        :title="t('workflow.timeline.timelineIsEmpty')"
+        :desc="t('workflow.timeline.onlySelectedTakesCanBeUsedSelect')"
       />
     </div>
 
     <!-- trim editor for active clip -->
     <div v-if="activeClip" class="panel trim-panel">
       <div class="panel-title spread">
-        <span>裁切与转场 · 第 {{ activeClipIndex + 1 }} 个片段</span>
-        <button class="sm ghost" @click="activeClipId = null">关闭</button>
+        <span>{{ t('workflow.timeline.trimTransitionClipValue', { v0: activeClipIndex + 1 }) }}</span>
+        <button class="sm ghost" @click="activeClipId = null">{{ t('common.close') }}</button>
       </div>
       <div class="panel-body trim-body">
         <div class="trim-player">
@@ -288,29 +288,29 @@ onUnmounted(() => off?.());
         </div>
         <div class="col trim-controls">
           <div class="control-help">
-            播放视频，在想要的位置点击“设为入点”或“设为出点”。导出时只保留两点之间的内容。
+            {{ t('workflow.timeline.playTheVideoAndMarkInAnd') }}
           </div>
           <div class="row">
-            <button class="sm" title="把当前播放位置设为入点" @click="markTrim('in')">⇤ 设为入点</button>
-            <button class="sm" title="把当前播放位置设为出点" @click="markTrim('out')">设为出点 ⇥</button>
+            <button class="sm" :title="t('workflow.timeline.setTheCurrentPlayheadAsIn')" @click="markTrim('in')">⇤ {{ t('workflow.timeline.setIn') }}</button>
+            <button class="sm" :title="t('workflow.timeline.setTheCurrentPlayheadAsOut')" @click="markTrim('out')">{{ t('workflow.timeline.setOut') }} ⇥</button>
           </div>
           <div class="row trim-io">
             <label class="muted">in</label>
             <input type="number" step="0.1" min="0" :value="activeClip.trimIn" class="trim-input" placeholder="0" @change="updateClip(activeClip.id, { trimIn: Number(($event.target as HTMLInputElement).value) })" />
             <label class="muted">out</label>
-            <input type="number" step="0.1" min="0" :value="activeClip.trimOut ?? undefined" class="trim-input" placeholder="尾" @change="updateClip(activeClip.id, { trimOut: Number(($event.target as HTMLInputElement).value) || null })" />
+            <input type="number" step="0.1" min="0" :value="activeClip.trimOut ?? undefined" class="trim-input" :placeholder="t('workflow.timeline.end')" @change="updateClip(activeClip.id, { trimOut: Number(($event.target as HTMLInputElement).value) || null })" />
           </div>
           <div v-if="activeClipIndex > 0" class="row">
-            <label class="muted">与上一个片段的转场</label>
+            <label class="muted">{{ t('workflow.timeline.transitionFromPreviousClip') }}</label>
             <select :value="activeClip.transition" @change="changeTransition(activeClip, ($event.target as HTMLSelectElement).value as TimelineClip['transition'])">
-              <option value="cut">cut（硬切）</option>
-              <option value="fade">fade（淡入淡出）</option>
-              <option value="dissolve">dissolve（叠化）</option>
+              <option value="cut">cut ({{ t('workflow.timeline.hardCut') }})</option>
+              <option value="fade">fade ({{ t('workflow.timeline.fade') }})</option>
+              <option value="dissolve">dissolve ({{ t('workflow.timeline.dissolve') }})</option>
             </select>
           </div>
-          <div v-else class="first-clip-note">这是第一个片段，前面没有片段，因此不需要设置转场。</div>
+          <div v-else class="first-clip-note">{{ t('workflow.timeline.thisIsTheFirstClipSoNo') }}</div>
           <label v-if="activeClipIndex > 0 && (activeClip.transition === 'fade' || activeClip.transition === 'dissolve')" class="row muted">
-            转场时长
+            {{ t('workflow.timeline.transitionDuration') }}
             <input
               type="number"
               class="trim-input"
@@ -318,10 +318,10 @@ onUnmounted(() => off?.());
               step="0.1"
               :value="activeClip.transitionDuration"
               @change="updateClip(activeClip.id, { transitionDuration: Number(($event.target as HTMLInputElement).value) })"
-            /> 秒
+            /> {{ t('workflow.timeline.sec') }}
           </label>
           <div class="audio-controls">
-            <div class="audio-title">声音</div>
+            <div class="audio-title">{{ t('workflow.timeline.audio') }}</div>
             <label class="audio-option">
               <input
                 type="checkbox"
@@ -329,7 +329,7 @@ onUnmounted(() => off?.());
                 :disabled="activeClip.audio.mute"
                 @change="updateClip(activeClip.id, { audio: { ...activeClip.audio, normalize: ($event.target as HTMLInputElement).checked } })"
               />
-              <span><strong>统一片段响度（推荐）</strong><small>导出时按对白标准归一到 -16 LUFS，避免不同 Take 忽大忽小。</small></span>
+              <span><strong>{{ t('workflow.timeline.normalizeClipLoudnessRecommended') }}</strong><small>{{ t('workflow.timeline.normalizeTo16LUFSForDialogueOn') }}</small></span>
             </label>
             <label class="audio-option compact">
               <input
@@ -337,10 +337,10 @@ onUnmounted(() => off?.());
                 :checked="activeClip.audio.mute"
                 @change="updateClip(activeClip.id, { audio: { ...activeClip.audio, mute: ($event.target as HTMLInputElement).checked } })"
               />
-              静音此片段
+              {{ t('workflow.timeline.muteThisClip') }}
             </label>
             <label class="row muted">
-              手动音量
+              {{ t('workflow.timeline.manualVolume') }}
               <input
                 type="range"
                 min="0"
@@ -353,14 +353,14 @@ onUnmounted(() => off?.());
               <span class="mono volume-value">{{ Math.round(activeClip.audio.volume * 100) }}%</span>
             </label>
           </div>
-          <div class="muted">片段时长 {{ clipDuration(activeClip).toFixed(1) }}s · 原始 {{ (takeDuration.get(activeClip.takeId) ?? 0).toFixed(1) }}s</div>
-          <button class="sm danger" @click="removeClip(activeClip.id)">从时间线移除</button>
+          <div class="muted">{{ t('workflow.timeline.clipDuration') }} {{ clipDuration(activeClip).toFixed(1) }}s · {{ t('workflow.timeline.original') }} {{ (takeDuration.get(activeClip.takeId) ?? 0).toFixed(1) }}s</div>
+          <button class="sm danger" @click="removeClip(activeClip.id)">{{ t('workflow.timeline.removeFromTimeline') }}</button>
         </div>
       </div>
     </div>
 
     <div class="panel">
-      <div class="panel-title">添加 Clip（只接受 Selected Take）</div>
+      <div class="panel-title">{{ t('workflow.timeline.addClipSelectedTakesOnly') }}</div>
       <div class="panel-body col">
         <div v-for="s in shotsWithTakes" :key="s.takeId" class="row add-row">
           <div class="add-thumb">
@@ -369,15 +369,15 @@ onUnmounted(() => off?.());
           </div>
           <span class="grow">{{ s.shotTitle }} · <span class="mono muted">{{ s.takeId }}</span> ({{ s.duration.toFixed(1) }}s)</span>
           <button class="sm" :disabled="clips.some((c) => c.takeId === s.takeId)" @click="addClip(s.shotId, s.takeId)">
-            {{ clips.some((c) => c.takeId === s.takeId) ? '已在时间线' : '＋ 添加' }}
+            {{ clips.some((c) => c.takeId === s.takeId) ? t('workflow.timeline.onTimeline') : t('workflow.timeline.add') }}
           </button>
         </div>
-        <div v-if="!shotsWithTakes.length" class="muted">还没有 Selected Take。先到 Shot 里 Select。</div>
+        <div v-if="!shotsWithTakes.length" class="muted">{{ t('workflow.timeline.noSelectedTakesYetSelectOneIn') }}</div>
       </div>
     </div>
 
     <div v-if="playUrl" class="panel export-panel">
-      <div class="panel-title">导出预览 <span v-if="exports[0]" class="muted mono">{{ exports[0].relPath }}</span></div>
+      <div class="panel-title">{{ t('workflow.timeline.exportPreview') }} <span v-if="exports[0]" class="muted mono">{{ exports[0].relPath }}</span></div>
       <div class="panel-body">
         <VideoPlayer :src="playUrl" :label="playUrl" :max-height="480" />
       </div>

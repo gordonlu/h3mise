@@ -40,17 +40,16 @@ const batchOpen = ref(false);
 
 const batchProviderId = computed(() => project.current?.config.default_provider ?? 'runninghub');
 const batchMegapixels = computed(() => batchProviderId.value === 'runninghub' ? 0.6 : undefined);
-const BATCH_STAGE: Record<RenderBatchShotStage, { label: string; cls: string }> = {
-  ready: { label: '可生成', cls: 'ok' },
-  active: { label: '进行中', cls: 'warn' },
-  done: { label: '已完成', cls: 'ok' },
-  needs_selection: { label: '待选片', cls: 'violet' },
-  waiting_dependency: { label: '等上一镜', cls: 'warn' },
-  needs_assets: { label: '缺素材', cls: 'bad' },
-  needs_prompt: { label: '待生成 Prompt', cls: 'info' },
-  needs_preflight: { label: '待检查', cls: 'info' },
-  blocked: { label: '被阻塞', cls: 'bad' },
-};
+const BATCH_CLASS: Record<RenderBatchShotStage, string> = { ready: 'ok', active: 'warn', done: 'ok', needs_selection: 'violet', waiting_dependency: 'warn', needs_assets: 'bad', needs_prompt: 'info', needs_preflight: 'info', blocked: 'bad' };
+function batchStageLabel(stage: RenderBatchShotStage): string {
+  return ({ ready: t('workflow.shots.ready'), active: t('workflow.shots.active'), done: t('workflow.shots.complete'), needs_selection: t('workflow.shots.selectTake'), waiting_dependency: t('workflow.shots.waitingUpstream'), needs_assets: t('workflow.shots.missingAssets'), needs_prompt: t('workflow.shots.needsPrompt'), needs_preflight: t('workflow.shots.needsCheck'), blocked: t('workflow.shots.blocked') })[stage];
+}
+function modeLabel(mode: string): string {
+  return ({ t2va: t('workflow.shots.textToVideoT2VA'), i2va: t('workflow.shots.imageToVideoI2VA'), fl2va: t('workflow.shots.firstLastFrameVideoFL2VA'), ref2va: t('workflow.shots.referenceVideoRef2VA') } as Record<string, string>)[mode] ?? H3_MODE_LABEL[mode as keyof typeof H3_MODE_LABEL] ?? mode;
+}
+function statusLabel(status: string): string {
+  return ({ draft: t('workflow.shots.needsDirection'), ready: t('workflow.shots.ready2'), rendering: t('workflow.shots.generating'), review: t('workflow.shots.selectTake2'), selected: t('workflow.shots.complete2') } as Record<string, string>)[status] ?? status;
+}
 
 /** PRD §15: only expose modes the active provider profile supports.
  * Unknown capability = nothing offered (P1), never a theoretical fallback. */
@@ -224,44 +223,44 @@ onMounted(load);
     <div class="spread page-head">
       <h1>{{ t('pages.shots.title') }} <span class="muted">{{ t('pages.shots.shotsCount', { n: shots.length }) }}</span></h1>
       <div class="row">
-        <select v-model="statusFilter" class="status-filter" title="按状态筛选">
-          <option value="">全部状态</option>
-          <option v-for="(label, key) in SHOT_USER_STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
+        <select v-model="statusFilter" class="status-filter" :title="t('workflow.shots.filterByStatus')">
+          <option value="">{{ t('workflow.shots.allStatuses') }}</option>
+          <option v-for="(_, key) in SHOT_USER_STATUS_LABEL" :key="key" :value="key">{{ statusLabel(String(key)) }}</option>
         </select>
-        <input v-model="filter" placeholder="搜索 Shot…" class="search" />
-        <button @click="batchOpen ? batchOpen = false : analyzeBatch()">{{ batchOpen ? '收起批量生成' : '批量生成' }}</button>
-        <button @click="showPaste = !showPaste; showCreate = false">粘贴 Shot List</button>
-        <button class="primary" @click="showCreate = !showCreate; showPaste = false">+ 新建 Shot</button>
+        <input v-model="filter" :placeholder="t('workflow.shots.searchShots')" class="search" />
+        <button @click="batchOpen ? batchOpen = false : analyzeBatch()">{{ batchOpen ? t('workflow.shots.hideBatchGeneration') : t('workflow.shots.batchGeneration') }}</button>
+        <button @click="showPaste = !showPaste; showCreate = false">{{ t('workflow.shots.pasteShotList') }}</button>
+        <button class="primary" @click="showCreate = !showCreate; showPaste = false">{{ t('workflow.shots.newShot') }}</button>
       </div>
     </div>
 
     <div v-if="batchOpen" class="panel batch-panel">
       <div class="panel-title spread">
-        <span>项目生成调度 · {{ batchProviderId }}</span>
-        <span v-if="batchPlan" class="muted">Provider 并发 {{ batchPlan.providerConcurrency }}{{ batchMegapixels !== undefined ? ` · ${batchMegapixels} MP` : '' }}</span>
+        <span>{{ t('workflow.shots.projectGenerationScheduler') }} · {{ batchProviderId }}</span>
+        <span v-if="batchPlan" class="muted">Provider {{ t('workflow.shots.concurrency') }} {{ batchPlan.providerConcurrency }}{{ batchMegapixels !== undefined ? ` · ${batchMegapixels} MP` : '' }}</span>
       </div>
       <div class="panel-body col">
-        <p class="muted">先分析依赖并准备 Prompt / Preflight；只有点击最后的确认按钮才会提交视频生成。</p>
-        <div v-if="batchBusy && !batchPlan" class="muted">正在分析镜头…</div>
+        <p class="muted">{{ t('workflow.shots.analyzeDependenciesAndPreparePromptPreflightFirst') }}</p>
+        <div v-if="batchBusy && !batchPlan" class="muted">{{ t('workflow.shots.analyzingShots') }}</div>
         <template v-if="batchPlan">
           <div class="row wrap batch-counts">
-            <span v-for="(meta, stage) in BATCH_STAGE" :key="stage" v-show="batchPlan.counts[stage]" :class="['badge', meta.cls]">
-              {{ meta.label }} {{ batchPlan.counts[stage] }}
+            <span v-for="(cls, stage) in BATCH_CLASS" :key="stage" v-show="batchPlan.counts[stage]" :class="['badge', cls]">
+              {{ batchStageLabel(stage) }} {{ batchPlan.counts[stage] }}
             </span>
           </div>
           <div class="batch-list">
             <div v-for="item in batchPlan.shots" :key="item.shotId" class="batch-row">
               <span class="mono muted">{{ String(item.order).padStart(2, '0') }}</span>
               <router-link :to="`/shots/${item.shotId}`">{{ item.title || item.shotId }}</router-link>
-              <span :class="['badge', BATCH_STAGE[item.stage].cls]">{{ BATCH_STAGE[item.stage].label }}</span>
+              <span :class="['badge', BATCH_CLASS[item.stage]]">{{ batchStageLabel(item.stage) }}</span>
               <span class="muted batch-reason" :title="item.reason">{{ item.reason }}</span>
             </div>
           </div>
           <div class="row batch-actions">
-            <button :disabled="batchBusy" @click="analyzeBatch">重新分析</button>
-            <button :disabled="batchBusy" @click="prepareBatch">{{ batchBusy ? '处理中…' : '批量准备（不生成视频）' }}</button>
+            <button :disabled="batchBusy" @click="analyzeBatch">{{ t('workflow.shots.analyzeAgain') }}</button>
+            <button :disabled="batchBusy" @click="prepareBatch">{{ batchBusy ? t('workflow.shots.processing') : t('workflow.shots.batchPrepareNoVideoGeneration') }}</button>
             <button class="primary" :disabled="batchBusy || !batchPlan.counts.ready" @click="submitReadyBatch">
-              确认并生成 {{ batchPlan.counts.ready }} 个 Ready Shot
+              {{ t('workflow.shots.confirmAndGenerateValueReadyShots', { v0: batchPlan.counts.ready }) }}
             </button>
           </div>
         </template>
@@ -269,50 +268,50 @@ onMounted(load);
     </div>
 
     <div v-if="showCreate" class="panel create-panel">
-      <div class="panel-title">新建 Shot（一个 Shot = 一个连续电影事件）</div>
+      <div class="panel-title">{{ t('workflow.shots.newShotOneShotOneContinuousCinematic') }}</div>
       <div class="panel-body col">
         <div class="row">
           <label class="field grow">
-            标题
-            <input v-model="newShot.title" placeholder="Shot 标题" @keyup.enter="createShot" />
+            {{ t('workflow.shots.title') }}
+            <input v-model="newShot.title" :placeholder="t('workflow.shots.shotTitle')" @keyup.enter="createShot" />
           </label>
           <label class="field mode-field">
             H3 Mode
             <select v-model="newShot.h3Mode">
-              <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
+              <option v-for="m in availableModes" :key="m" :value="m">{{ modeLabel(m) }}</option>
             </select>
           </label>
           <label class="field">
-            时长
-            <input v-model.number="newShot.durationSeconds" type="number" min="1" max="15" title="时长（秒，1–15）" placeholder="5" />
+            {{ t('workflow.shots.duration') }}
+            <input v-model.number="newShot.durationSeconds" type="number" min="1" max="15" :title="t('workflow.shots.durationSeconds115')" placeholder="5" />
           </label>
         </div>
         <label class="field">
-          目的
-          <textarea v-model="newShot.purpose" rows="2" placeholder="这个镜头要完成什么？"></textarea>
+          {{ t('workflow.shots.purpose') }}
+          <textarea v-model="newShot.purpose" rows="2" :placeholder="t('workflow.shots.whatShouldThisShotAccomplish')"></textarea>
         </label>
         <div class="row">
-          <button class="primary" :disabled="busy || !newShot.title.trim()" @click="createShot">创建并打开</button>
-          <button @click="showCreate = false">取消</button>
+          <button class="primary" :disabled="busy || !newShot.title.trim()" @click="createShot">{{ t('workflow.shots.createAndOpen') }}</button>
+          <button @click="showCreate = false">{{ t('common.cancel') }}</button>
         </div>
       </div>
     </div>
 
     <div v-if="showPaste" class="panel create-panel">
-      <div class="panel-title">粘贴外部 AI / 手工 Shot List（每行一个，或 JSON 数组）</div>
+      <div class="panel-title">{{ t('workflow.shots.pasteExternalAIManualShotListOne') }}</div>
       <div class="panel-body col">
         <textarea v-model="pasteText" rows="6" placeholder="1. 雨夜小巷，女子走入镜头&#10;2. 她在路灯下停步&#10;…"></textarea>
         <div class="row">
-          <button class="primary" :disabled="busy || !pasteText.trim()" @click="pasteShots">导入 Shots</button>
-          <button @click="showPaste = false">取消</button>
+          <button class="primary" :disabled="busy || !pasteText.trim()" @click="pasteShots">{{ t('workflow.shots.importShots') }}</button>
+          <button @click="showPaste = false">{{ t('common.cancel') }}</button>
         </div>
       </div>
     </div>
 
     <div v-if="!shots.length" class="panel">
-      <EmptyState icon="🎬" title="还没有 Shot" desc="Shot 是导演的第一等公民 — 新建一个，或从外部 AI 粘贴 Shot List 批量创建。">
-        <button class="primary sm" @click="showCreate = true">+ 新建 Shot</button>
-        <button class="sm" @click="showPaste = true">粘贴 Shot List</button>
+      <EmptyState icon="🎬" :title="t('workflow.shots.noShotsYet')" :desc="t('workflow.shots.shotsAreTheDirectorSPrimaryUnit')">
+        <button class="primary sm" @click="showCreate = true">{{ t('workflow.shots.newShot2') }}</button>
+        <button class="sm" @click="showPaste = true">{{ t('workflow.shots.pasteShotList2') }}</button>
       </EmptyState>
     </div>
 
@@ -321,35 +320,35 @@ onMounted(load);
         <div class="cover" :class="{ 'no-cover': !s.cover }">
           <img v-if="s.cover" :src="fileUrl(s.cover)" :alt="s.title" />
           <span v-else class="cover-idx">SHOT<br />{{ String(i + 1).padStart(2, '0') }}</span>
-          <span v-if="s.activeJobs > 0" class="badge warn render-badge">生成中…</span>
-          <span v-else-if="SHOT_USER_STATUS[s.status] === 'review'" class="badge violet review-badge">待选片</span>
+          <span v-if="s.activeJobs > 0" class="badge warn render-badge">{{ t('workflow.shots.generating2') }}</span>
+          <span v-else-if="SHOT_USER_STATUS[s.status] === 'review'" class="badge violet review-badge">{{ t('workflow.shots.selectTake3') }}</span>
         </div>
         <div class="card-body">
           <div class="spread">
             <span class="card-title">{{ s.title || s.id }}</span>
             <span :class="['st', `st-${SHOT_USER_STATUS[s.status]}`]" :title="`内部状态：${SHOT_STATUS_LABEL[s.status]}`">
-              <i />{{ SHOT_USER_STATUS_LABEL[SHOT_USER_STATUS[s.status]] }}
+              <i />{{ statusLabel(SHOT_USER_STATUS[s.status]) }}
             </span>
-            <button class="sm danger shot-delete" title="删除 Shot（含其计划、Prompt、Takes 与任务）" @click.stop.prevent="deleteShot(s)">删除</button>
+            <button class="sm danger shot-delete" :title="t('workflow.shots.deleteShotIncludingItsPlanPromptsTakes')" @click.stop.prevent="deleteShot(s)">{{ t('common.delete') }}</button>
           </div>
           <div class="row wrap">
-            <span class="badge accent no-dot">{{ H3_MODE_LABEL[s.h3Mode ?? 't2va'] }}</span>
+            <span class="badge accent no-dot">{{ modeLabel(s.h3Mode ?? 't2va') }}</span>
             <span class="badge no-dot">{{ s.durationSeconds }}s</span>
             <span class="badge no-dot">{{ s.shotFunction }}</span>
             <span v-if="entityName(s.primaryCharacterId)" class="badge no-dot">{{ entityName(s.primaryCharacterId) }}</span>
             <span v-if="entityName(s.sceneId)" class="badge info no-dot">{{ entityName(s.sceneId) }}</span>
             <span :class="['badge', s.renderReadiness.ready ? 'ok' : 'warn']" :title="s.renderReadiness.reason">
-              {{ s.renderReadiness.ready ? (s.renderReadiness.effectiveMode === 'previous_take' ? '尾帧已接通' : '可并行') : s.renderReadiness.reason }}
+              {{ s.renderReadiness.ready ? (s.renderReadiness.effectiveMode === 'previous_take' ? t('workflow.shots.tailFrameConnected') : t('workflow.shots.parallelReady')) : s.renderReadiness.reason }}
             </span>
           </div>
           <div class="muted purpose">{{ s.purpose || '—' }}</div>
           <!-- PRD §9 card fields: missing assets + risk flag -->
           <div v-if="s.missing?.length" class="missing-row">
-            <span class="badge bad no-dot">⚠ 缺资产</span>
+            <span class="badge bad no-dot">⚠ {{ t('workflow.shots.missingAssets2') }}</span>
             <span class="muted">{{ s.missing.join('、') }}</span>
           </div>
           <div class="spread card-foot">
-            <span class="muted">{{ s.takeCount }} Takes · {{ s.selectedTakeId ? '已选片' : '未选片' }}</span>
+            <span class="muted">{{ s.takeCount }} Takes · {{ s.selectedTakeId ? t('workflow.shots.selected') : t('workflow.shots.notSelected') }}</span>
             <span v-if="s.risk" :class="['badge', RISK_BADGE[s.risk]]" title="最近一次 Preflight 风险">Risk {{ s.risk }}</span>
           </div>
         </div>

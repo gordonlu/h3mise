@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { confirmDialog } from '../stores/confirm';
 import { post } from '../api/client';
+import { t } from '../stores/locale';
 
 const project = useProjectStore();
 const router = useRouter();
@@ -15,27 +16,36 @@ const form = ref({ title: '', format: 'single_shot', defaultAspectRatio: '16:9',
 const error = ref('');
 
 const FORMATS = [
-  { value: 'single_shot', label: 'Single Shot', desc: '单镜头项目，不需要 Story' },
-  { value: 'sequence', label: 'Short Sequence', desc: '短片序列，可拆多个 Shot' },
-  { value: 'story', label: 'Story / Episode', desc: '完整故事 / 剧集' },
+  { value: 'single_shot', label: 'Single Shot', desc: () => t('workflow.projects.aSingleShotProjectWithoutAStory') },
+  { value: 'sequence', label: 'Short Sequence', desc: () => t('workflow.projects.aShortSequenceWithMultipleShots') },
+  { value: 'story', label: 'Story / Episode', desc: () => t('workflow.projects.aCompleteStoryOrEpisode') },
 ];
 
 const DEMOS = [
-  { id: 'last-film-reel', title: '最后一卷胶片', desc: '完整长视频示例：故事、镜头设计、参考图、Prompt、Take 与成片。', start: '/quick' },
-  { id: 'good-boy', title: 'Good Boy', desc: '30 秒情景喜剧示例：完整剧本、人物、生物、场景和角色状态。', start: '/story' },
+  { id: 'last-film-reel', title: () => t('workflow.projects.theLastFilmReel'), desc: () => t('workflow.projects.aCompleteLongVideoExampleWithStory'), start: '/quick' },
+  { id: 'good-boy', title: () => 'Good Boy', desc: () => t('workflow.projects.a30SecondSitcomExampleWithA'), start: '/story' },
 ];
+
+function localizeAttention(title: string): string {
+  const exact: Record<string, string> = {
+    '进入成片编排': 'workflow.projects.attentionOpenTimeline',
+    '导出成片': 'workflow.projects.attentionExport',
+    '成片已导出': 'workflow.projects.attentionComplete',
+  };
+  return exact[title] ? t(exact[title]) : title;
+}
 
 async function createProject() {
   error.value = '';
   if (!form.value.title.trim()) {
-    error.value = '请输入项目名称';
+    error.value = t('workflow.projects.enterAProjectName');
     return;
   }
   creating.value = true;
   try {
     const created = await project.createProject({ ...form.value, format: form.value.format as never });
     if (!created) return;
-    toasts.push({ kind: 'ok', text: `项目「${form.value.title}」已创建` });
+    toasts.push({ kind: 'ok', text: t('workflow.projects.projectValueCreated', { v0: form.value.title }) });
     router.push(form.value.format === 'story' ? '/story' : '/shots');
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -49,7 +59,7 @@ async function installDemo(demo: typeof DEMOS[number]) {
   try {
     const installed = await project.installDemo(demo.id);
     if (!installed) return;
-    toasts.push({ kind: 'ok', text: `Demo「${demo.title}」已安装为本地副本，可以自由修改` });
+    toasts.push({ kind: 'ok', text: t('workflow.projects.demoValueInstalledAsAnEditableLocal', { v0: demo.title() }) });
     router.push(demo.start);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -75,14 +85,14 @@ async function quickEditProject(id: string) {
 
 async function removeProject(id: string, title: string) {
   const ok = await confirmDialog({
-    title: `删除项目「${title}」？`,
-    message: '将移除本地项目目录（含媒体资产、全部 Take、Prompt 与连续性记录）。此操作不可恢复。',
-    confirmLabel: '永久删除',
+    title: t('workflow.projects.deleteProjectValue', { v0: title }),
+    message: t('workflow.projects.thisRemovesTheLocalProjectDirectoryIncluding'),
+    confirmLabel: t('workflow.projects.deletePermanently'),
     danger: true,
   });
   if (!ok) return;
   await post(`/api/projects/${id}/delete`);
-  toasts.push({ kind: 'ok', text: `项目「${title}」已删除` });
+  toasts.push({ kind: 'ok', text: t('workflow.projects.projectValueDeleted', { v0: title }) });
   await project.refreshProjects();
 }
 
@@ -91,28 +101,28 @@ onMounted(() => project.refreshProjects());
 
 <template>
   <div class="page">
-    <h1>项目</h1>
-    <p class="muted">H3Mise 是本地导演工作台 — 项目、资产、Prompt、Take、连续性全部保存在本地。RunningHub 仅作为渲染后端。</p>
+    <h1>{{ t('workflow.projects.projects') }}</h1>
+    <p class="muted">{{ t('workflow.projects.h3miseIsALocalDirectorWorkstationProjects') }}</p>
 
     <div class="grid create">
       <div class="panel">
-        <div class="panel-title">新建项目</div>
+        <div class="panel-title">{{ t('workflow.projects.newProject') }}</div>
         <div class="panel-body col">
           <label class="field">
-            项目名称
-            <input v-model="form.title" placeholder="例如：雨夜小巷" @keyup.enter="createProject" />
+            {{ t('workflow.projects.projectName') }}
+            <input v-model="form.title" :placeholder="t('workflow.projects.eGRainyNightAlley')" @keyup.enter="createProject" />
           </label>
-          <label class="field">项目类型</label>
+          <label class="field">{{ t('workflow.projects.projectType') }}</label>
           <div class="col">
             <label v-for="f in FORMATS" :key="f.value" class="format-opt" :class="{ on: form.format === f.value }">
               <input v-model="form.format" type="radio" :value="f.value" />
               <span class="format-label">{{ f.label }}</span>
-              <span class="muted">{{ f.desc }}</span>
+              <span class="muted">{{ f.desc() }}</span>
             </label>
           </div>
           <div class="row">
             <label class="field grow">
-              画幅
+              {{ t('workflow.projects.aspectRatio') }}
               <select v-model="form.defaultAspectRatio">
                 <option>16:9</option>
                 <option>9:16</option>
@@ -121,29 +131,29 @@ onMounted(() => project.refreshProjects());
               </select>
             </label>
             <label class="field grow">
-              默认单镜头时长 (s)
-              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" title="每个新镜头（含 AI 拆解生成的镜头）的默认时长（1–15 秒）" placeholder="5" />
+              {{ t('workflow.projects.defaultShotDurationS') }}
+              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" :title="t('workflow.projects.defaultDurationForEachNewShotIncluding')" placeholder="5" />
             </label>
           </div>
           <p v-if="error" class="badge bad">{{ error }}</p>
-          <button class="primary" :disabled="creating" @click="createProject">创建项目</button>
+          <button class="primary" :disabled="creating" @click="createProject">{{ creating ? t('workflow.projects.creating') : t('workflow.projects.createProject') }}</button>
           <div class="demo-entry">
             <div>
-              <strong>第一次使用？</strong>
-              <div class="muted">安装一个可自由修改的完整示例。</div>
+              <strong>{{ t('workflow.projects.firstTimeHere') }}</strong>
+              <div class="muted">{{ t('workflow.projects.installACompleteExampleYouCanFreely') }}</div>
             </div>
             <div v-for="demo in DEMOS" :key="demo.id" class="demo-option">
-              <div><strong>{{ demo.title }}</strong><span class="muted">{{ demo.desc }}</span></div>
-              <button :disabled="Boolean(installingDemo)" @click="installDemo(demo)">{{ installingDemo === demo.id ? '安装中…' : '安装 Demo' }}</button>
+              <div><strong>{{ demo.title() }}</strong><span class="muted">{{ demo.desc() }}</span></div>
+              <button :disabled="Boolean(installingDemo)" @click="installDemo(demo)">{{ installingDemo === demo.id ? t('workflow.projects.installing') : t('workflow.projects.installDemo') }}</button>
             </div>
           </div>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-title">已有项目</div>
+        <div class="panel-title">{{ t('workflow.projects.existingProjects') }}</div>
         <div class="panel-body col">
-          <div v-if="!project.projects.length" class="muted">还没有项目。新建一个开始。</div>
+          <div v-if="!project.projects.length" class="muted">{{ t('workflow.projects.noProjectsYetCreateOneToBegin') }}</div>
           <div v-for="p in project.projects" :key="p.id" class="proj-row">
             <div class="grow" @dblclick="openProject(p.id)">
               <div class="row">
@@ -154,15 +164,15 @@ onMounted(() => project.refreshProjects());
               <div class="project-progress" role="progressbar" :aria-valuenow="p.guide?.selectedTakeCount ?? 0" :aria-valuemax="p.guide?.shotCount ?? 0">
                 <span :style="{ width: `${p.guide?.shotCount ? (p.guide.selectedTakeCount / p.guide.shotCount) * 100 : 0}%` }" />
               </div>
-              <div class="muted">{{ p.guide?.selectedTakeCount ?? p.selectedTakeCount ?? 0 }} / {{ p.guide?.shotCount ?? p.shotCount ?? 0 }} Shots 已选片 · {{ new Date(p.updatedAt).toLocaleString() }}</div>
+              <div class="muted">{{ p.guide?.selectedTakeCount ?? p.selectedTakeCount ?? 0 }} / {{ p.guide?.shotCount ?? p.shotCount ?? 0 }} Shots {{ t('workflow.projects.selected') }} · {{ new Date(p.updatedAt).toLocaleString() }}</div>
               <div v-if="p.guide" class="resume-copy">
-                <span class="resume-label">{{ p.guide.attention.kind === 'complete' ? '项目状态' : '当前需要' }}</span>
-                <span>{{ p.guide.attention.title }}</span>
+                <span class="resume-label">{{ p.guide.attention.kind === 'complete' ? t('workflow.projects.projectStatus') : t('workflow.projects.nextAction') }}</span>
+                <span>{{ localizeAttention(p.guide.attention.title) }}</span>
               </div>
             </div>
-            <button class="sm" @click="quickEditProject(p.id)">快速剪辑</button>
-            <button class="primary sm" @click="continueProject(p.id, p.guide?.attention.to)">继续制作</button>
-            <button class="danger sm" title="删除项目" @click="removeProject(p.id, p.title)">删除</button>
+            <button class="sm" @click="quickEditProject(p.id)">{{ t('workflow.projects.quickEdit') }}</button>
+            <button class="primary sm" @click="continueProject(p.id, p.guide?.attention.to)">{{ t('workflow.projects.continue') }}</button>
+            <button class="danger sm" :title="t('workflow.projects.deleteProject')" @click="removeProject(p.id, p.title)">{{ t('workflow.projects.delete') }}</button>
           </div>
         </div>
       </div>

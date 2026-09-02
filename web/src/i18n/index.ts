@@ -1,5 +1,5 @@
 // H3Mise i18n — zero-dependency, dictionary-based. zh-CN is the default
-// authoring language; en is a growing backfill. UI strings should prefer t()
+// authoring language; English and Japanese are growing backfills. UI strings should prefer t()
 // here; product terms (Take / Prompt / DirectorPlan / CharacterState /
 // StoryBeat / Preflight…) stay romanized by design.
 
@@ -70,7 +70,25 @@ export const zh = {
       export: 'Export（ffmpeg）',
       exporting: '导出中…',
     },
-    settings: { title: '设置' },
+    settings: {
+      title: '设置',
+      runningHubProvider: 'Provider — RunningHub AI App',
+      region: 'RunningHub 站点',
+      regionCn: '中国大陆（runninghub.cn）',
+      regionGlobal: '海外 / Global（runninghub.ai）',
+      regionHelp: '账号、API Key、视频 AI App 和 Storyboard AI App 必须属于同一站点。切换站点后需要重新检测节点。',
+      regionSaved: 'RunningHub 站点已切换，请使用该站点的 API Key 和 App ID，并重新检测节点',
+      regionSaveFailed: 'RunningHub 站点切换失败：{msg}',
+      regionSaving: '切换中…',
+      mainlandSite: '大陆官网',
+      globalSite: 'Global site',
+      apiKeyChecking: 'API Key：检测中…', apiKeySettings: 'API Key：已设置（设置页）', apiKeyEnv: 'API Key：已配置（环境变量）', apiKeyMissing: 'API Key：未配置（Mock 可离线渲染）',
+      apiKeyLabel: 'API Key（RunningHub 控制台 → 设置 → API Token）', apiKeyPlaceholder: '留空则沿用环境变量 RUNNINGHUB_API_KEY', saveApiKey: '保存 API Key', saving: '保存中…',
+      aiAppHelp: '可换成你自己的 H3 工作流：复制同站点的 AI App ID，保存后重新检测节点。', concurrency: '同时生成任务数（1–4）', concurrencyHelp: '按所选站点账户的并发额度设置；提高后可能同时创建多个付费任务。',
+      detectNodes: '检测并获取节点映射（apiCallDemo）', detecting: '检测中…', editProfile: '编辑 Profile（JSON）', lastDetection: '上次检测：{note}', saveProfile: '保存 Profile',
+      storyboardProvider: 'Provider — Storyboard 生图（可选付费）', enabled: '启用', storyboardHelp: '复用所选站点的 RunningHub API Key，但与视频 AI App 分开；只有明确确认后才创建付费任务。',
+      storyboardAppId: '生图 AI App ID', estimatedCost: '单次预估费用（仅用于确认提示）', panelSize: '{n} 格输出尺寸', saveAndDetect: '保存并检测节点',
+    },
     projects: { title: '项目' },
   },
 };
@@ -142,13 +160,89 @@ export const en: typeof zh = {
       export: 'Export (ffmpeg)',
       exporting: 'Exporting…',
     },
-    settings: { title: 'Settings' },
+    settings: {
+      title: 'Settings',
+      runningHubProvider: 'Provider — RunningHub AI App',
+      region: 'RunningHub region',
+      regionCn: 'Mainland China (runninghub.cn)',
+      regionGlobal: 'Global (runninghub.ai)',
+      regionHelp: 'The account, API Key, video AI App, and Storyboard AI App must belong to the same site. Detect the nodes again after switching regions.',
+      regionSaved: 'RunningHub region changed. Use an API Key and App IDs from this site, then detect the nodes again.',
+      regionSaveFailed: 'Could not change the RunningHub region: {msg}',
+      regionSaving: 'Switching…',
+      mainlandSite: 'Mainland site',
+      globalSite: 'Global site',
+      apiKeyChecking: 'API Key: checking…', apiKeySettings: 'API Key: saved in Settings', apiKeyEnv: 'API Key: configured by environment', apiKeyMissing: 'API Key: not configured (Mock works offline)',
+      apiKeyLabel: 'API Key (RunningHub Console → Settings → API Token)', apiKeyPlaceholder: 'Leave empty to keep RUNNINGHUB_API_KEY', saveApiKey: 'Save API Key', saving: 'Saving…',
+      aiAppHelp: 'You can use your own H3 workflow: copy an AI App ID from the selected site, save it, then detect the nodes again.', concurrency: 'Concurrent generation tasks (1–4)', concurrencyHelp: 'Match the selected site account quota. Higher values may create several paid tasks at once.',
+      detectNodes: 'Detect and map nodes (apiCallDemo)', detecting: 'Detecting…', editProfile: 'Edit Profile (JSON)', lastDetection: 'Last detection: {note}', saveProfile: 'Save Profile',
+      storyboardProvider: 'Provider — Storyboard images (optional paid)', enabled: 'Enabled', storyboardHelp: 'Reuses the RunningHub API Key from the selected site but keeps a separate video AI App. A paid task starts only after explicit confirmation.',
+      storyboardAppId: 'Storyboard AI App ID', estimatedCost: 'Estimated cost per run (confirmation only)', panelSize: '{n}-panel output size', saveAndDetect: 'Save and detect nodes',
+    },
     projects: { title: 'Projects' },
   },
 };
 
-export type Locale = 'zh' | 'en';
-export const dictionaries: Record<Locale, typeof zh> = { zh, en };
+export const ja: typeof zh = {
+  ...zh,
+  nav: {
+    story: 'ストーリー', shots: 'Shot', assets: 'アセット', timeline: 'タイムライン', projects: 'プロジェクト', settings: '設定',
+    oneClick: 'ワンクリック制作', prepare: '制作準備', professional: 'プロ制作',
+    storyBeats: 'ストーリーと Beats', storyBeatsDesc: '物語、構成、Beat を整理',
+    storyboard: 'Storyboard', storyboardDesc: '任意のビジュアル絵コンテ',
+    assetLibrary: 'アセットライブラリ', assetLibraryDesc: 'キャラクター、シーン、参考素材を管理',
+    shotWorkspace: 'Shot ワークスペース', shotWorkspaceDesc: 'Shot、Prompt、Take を設計',
+    quickEdit: 'クイック編集', quickEditDesc: '選択と成片整理を簡略化',
+    timelineExport: 'タイムラインと書き出し', timelineExportDesc: 'トランジション、音声、納品',
+  },
+  common: {
+    renderQueue: 'レンダーキュー', cancel: 'キャンセル', confirm: '確認', delete: '削除', create: '作成', save: '保存',
+    close: '閉じる', add: '追加', remove: '取り除く', loading: '読み込み中…', empty: '空',
+  },
+  pages: {
+    ...zh.pages,
+    story: {
+      ...zh.pages.story,
+      title: 'ストーリー', subtitle: 'ストーリーの事実層（Prompt ではありません）', beats: 'StoryBeats',
+      aiSplit: 'AI 分解', aiSplitting: 'AI 分解中…', aiSplitEmpty: 'AI 分解には先に本文を入力してください',
+      aiSplitConfirm: '本文を StoryBeat に分解します。後から手動調整できます。続行しますか？', newBeat: '＋ Beat',
+      noBeatsTitle: 'Beat はまだありません', noBeatsDesc: 'Beat を手動追加するか、内蔵 AI の設定後に自動分解できます。',
+      beatSummary: 'Beat 要約 / 物語の事実', location: '場所', timeOfDay: '時間', weather: '天気', splitShots: '関連 Shot',
+      deleteBeatTitle: 'StoryBeat を削除しますか？', deleteBeatLinked: 'この Beat は {n} 個の Shot に関連しています（関連だけ解除し、Shot は残します）。',
+      deleteBeatMsg: '削除は元に戻せません。', beatDeleted: 'Beat を削除しました', aiDone: 'AI 分解完了：{n} 個の StoryBeat を追加しました',
+      aiFailed: 'AI 分解に失敗しました：{msg}', titleField: 'タイトル', synopsis: 'Synopsis 概要', body: '本文 / 脚本 / 小説断片（分解・外部 AI 用）',
+    },
+    shots: { title: 'Shotboard', shotsCount: '{n} Shots' },
+    assets: {
+      title: 'アセット', subtitle: 'アセットは Shot 要件に基づきます。Entity は「誰 / 何」、CharacterState は「現在の物語状態」、MediaAsset は ReferenceBinding で用途を持ちます。',
+      tabs: { entities: 'Entity', states: 'CharacterState', media: 'メディア', bindings: '全体バインド' },
+    },
+    timeline: { title: 'タイムライン', clipsCount: '{n} clips · {s}s', export: '書き出し（ffmpeg）', exporting: '書き出し中…' },
+    settings: {
+      title: '設定',
+      runningHubProvider: 'Provider — RunningHub AI App',
+      region: 'RunningHub 地域',
+      regionCn: '中国大陸（runninghub.cn）',
+      regionGlobal: '海外 / Global（runninghub.ai）',
+      regionHelp: 'アカウント、API Key、動画 AI App、Storyboard AI App は同じサイトに属する必要があります。地域を切り替えた後はノードを再検出してください。',
+      regionSaved: 'RunningHub 地域を切り替えました。このサイトの API Key と App ID を使用し、ノードを再検出してください。',
+      regionSaveFailed: 'RunningHub 地域の切り替えに失敗しました：{msg}',
+      regionSaving: '切り替え中…',
+      mainlandSite: '中国大陸サイト',
+      globalSite: 'Global site',
+      apiKeyChecking: 'API Key：確認中…', apiKeySettings: 'API Key：設定画面で保存済み', apiKeyEnv: 'API Key：環境変数で設定済み', apiKeyMissing: 'API Key：未設定（Mock はオフライン利用可）',
+      apiKeyLabel: 'API Key（RunningHub Console → Settings → API Token）', apiKeyPlaceholder: '空欄なら RUNNINGHUB_API_KEY を継続使用', saveApiKey: 'API Key を保存', saving: '保存中…',
+      aiAppHelp: '自分の H3 ワークフローを利用できます。選択したサイトの AI App ID をコピーし、保存後にノードを再検出してください。', concurrency: '同時生成タスク数（1–4）', concurrencyHelp: '選択サイトのアカウント上限に合わせます。増やすと複数の有料タスクが同時作成される場合があります。',
+      detectNodes: 'ノードを検出してマッピング（apiCallDemo）', detecting: '検出中…', editProfile: 'Profile を編集（JSON）', lastDetection: '前回の検出：{note}', saveProfile: 'Profile を保存',
+      storyboardProvider: 'Provider — Storyboard 画像（任意・有料）', enabled: '有効', storyboardHelp: '選択サイトの RunningHub API Key を再利用しますが、動画 AI App とは分離されています。明示確認後にのみ有料タスクを作成します。',
+      storyboardAppId: 'Storyboard AI App ID', estimatedCost: '1 回の推定費用（確認表示のみ）', panelSize: '{n} コマ出力サイズ', saveAndDetect: '保存してノード検出',
+    },
+    projects: { title: 'プロジェクト' },
+  },
+};
+
+export type Locale = 'zh' | 'en' | 'ja';
+export const dictionaries: Record<Locale, typeof zh> = { zh, en, ja };
 
 /** Flat lookup with {placeholder} substitution. */
 export function translate(locale: Locale, path: string, vars?: Record<string, string | number>): string {

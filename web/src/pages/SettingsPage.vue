@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
-import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, StoryboardProviderProfile } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, RunningHubRegion, StoryboardProviderProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
 const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; comfyUiConfigured: boolean; aiConfigured: boolean } | null>(null);
@@ -22,15 +22,16 @@ const editingComfyProfile = ref(false);
 const verifyingComfy = ref(false);
 const storyboardProfile = ref<StoryboardProviderProfile | null>(null);
 const verifyingStoryboard = ref(false);
+const savingRegion = ref(false);
 const directorStyles = ref<DirectorStylePreset[]>([]);
 
 // P0-6 semantics: only a successful real submit marks the profile verified;
 // discovery alone only ever reaches "nodes_detected".
-const VERIF: Record<string, { cls: string; cn: string; en: string }> = {
-  unconfigured: { cls: 'muted', cn: '未配置', en: 'Unconfigured' },
-  nodes_detected: { cls: 'warn', cn: '已探测节点（未确认）', en: 'Nodes detected (unverified)' },
-  verified: { cls: 'ok', cn: '已验证（真实渲染成功）', en: 'Verified (real render ok)' },
-  failed: { cls: 'bad', cn: '检测失败', en: 'Detection failed' },
+const VERIF: Record<string, { cls: string; cn: string; en: string; ja: string }> = {
+  unconfigured: { cls: 'muted', cn: '未配置', en: 'Unconfigured', ja: '未設定' },
+  nodes_detected: { cls: 'warn', cn: '已探测节点（未确认）', en: 'Nodes detected (unverified)', ja: 'ノード検出済み（未検証）' },
+  verified: { cls: 'ok', cn: '已验证（真实渲染成功）', en: 'Verified (real render ok)', ja: '検証済み（実レンダー成功）' },
+  failed: { cls: 'bad', cn: '检测失败', en: 'Detection failed', ja: '検出失敗' },
 };
 function verifClass(s: string | undefined): string {
   return VERIF[s ?? 'unconfigured']?.cls ?? 'muted';
@@ -38,7 +39,25 @@ function verifClass(s: string | undefined): string {
 function verifLabel(s: string | undefined): string {
   const v = VERIF[s ?? 'unconfigured'];
   if (!v) return '';
-  return locale.value === 'en' ? v.en : v.cn;
+  return locale.value === 'en' ? v.en : locale.value === 'ja' ? v.ja : v.cn;
+}
+
+async function saveRunningHubRegion(region: RunningHubRegion) {
+  if (!profile.value || profile.value.region === region || savingRegion.value) return;
+  savingRegion.value = true;
+  try {
+    const result = await put<{ profile: AiAppProfile; storyboardProfile: StoryboardProviderProfile }>('/api/providers/runninghub/region', { region });
+    profile.value = result.profile;
+    storyboardProfile.value = result.storyboardProfile;
+    profileJson.value = JSON.stringify(result.profile, null, 2);
+    apiKeyInfo.value = await get<{ source: 'settings' | 'env' | 'none'; configured: boolean }>('/api/providers/runninghub/apikey');
+    await project.refreshProviders();
+    notice.value = t('pages.settings.regionSaved');
+  } catch (e) {
+    notice.value = t('pages.settings.regionSaveFailed', { msg: e instanceof Error ? e.message : String(e) });
+  } finally {
+    savingRegion.value = false;
+  }
 }
 
 async function load() {
@@ -254,65 +273,76 @@ async function verifyStoryboardProfile() {
       </div>
 
       <div class="panel">
-        <div class="panel-title">Provider — RunningHub AI App</div>
+        <div class="panel-title">{{ t('pages.settings.runningHubProvider') }}</div>
         <div class="panel-body col">
           <div class="row">
             <span class="badge" :class="health === null || apiKeyInfo === null ? 'muted' : apiKeyInfo?.configured ? 'ok' : 'warn'">
-              <template v-if="health === null || apiKeyInfo === null">API Key: 检测中…</template>
-              <template v-else-if="apiKeyInfo?.source === 'settings'">API Key: 已设置（设置页）</template>
-              <template v-else-if="apiKeyInfo?.source === 'env'">API Key: 已配置（环境变量）</template>
-              <template v-else>API Key: 未配置（mock 模式可离线渲染）</template>
+              <template v-if="health === null || apiKeyInfo === null">{{ t('pages.settings.apiKeyChecking') }}</template>
+              <template v-else-if="apiKeyInfo?.source === 'settings'">{{ t('pages.settings.apiKeySettings') }}</template>
+              <template v-else-if="apiKeyInfo?.source === 'env'">{{ t('pages.settings.apiKeyEnv') }}</template>
+              <template v-else>{{ t('pages.settings.apiKeyMissing') }}</template>
             </span>
             <span class="badge" :class="verifClass(profile?.verification.status)">
               {{ verifLabel(profile?.verification.status) }}
             </span>
           </div>
+          <label v-if="profile" class="field">
+            {{ t('pages.settings.region') }}
+            <select :value="profile.region" :disabled="savingRegion" @change="saveRunningHubRegion(($event.target as HTMLSelectElement).value as RunningHubRegion)">
+              <option value="cn">{{ t('pages.settings.regionCn') }}</option>
+              <option value="global">{{ t('pages.settings.regionGlobal') }}</option>
+            </select>
+            <span class="muted">{{ savingRegion ? t('pages.settings.regionSaving') : t('pages.settings.regionHelp') }}</span>
+          </label>
+          <div class="row wrap">
+            <a class="sm button-link" href="https://www.runninghub.cn/" target="_blank" rel="noreferrer">{{ t('pages.settings.mainlandSite') }}</a>
+            <a class="sm button-link" href="https://www.runninghub.ai/" target="_blank" rel="noreferrer">{{ t('pages.settings.globalSite') }}</a>
+          </div>
           <label class="field">
-            API Key（RunningHub 控制台 → 设置 → API Token）
-            <input v-model="apiKeyInput" type="password" autocomplete="off" placeholder="留空则沿用环境变量 RUNNINGHUB_API_KEY" />
+            {{ t('pages.settings.apiKeyLabel') }}
+            <input v-model="apiKeyInput" type="password" autocomplete="off" :placeholder="t('pages.settings.apiKeyPlaceholder')" />
           </label>
           <div class="row">
-            <button class="sm" :disabled="savingKey" @click="saveApiKey">{{ savingKey ? '保存中…' : '保存 API Key' }}</button>
+            <button class="sm" :disabled="savingKey" @click="saveApiKey">{{ savingKey ? t('pages.settings.saving') : t('pages.settings.saveApiKey') }}</button>
           </div>
           <p class="muted">
-            AI App: <span class="mono">{{ profile?.appId }}</span> — 可换成你自己的 H3 工作流：在 RunningHub 控制台复制
-            AI App ID 粘贴到下方 Profile 的 <span class="mono">appId</span>，保存后点「检测并获取节点映射」即可自动适配新工作流。
+            AI App: <span class="mono">{{ profile?.appId }}</span> — {{ t('pages.settings.aiAppHelp') }}
           </p>
           <label class="field">
-            同时生成任务数（1–4）
+            {{ t('pages.settings.concurrency') }}
             <input type="number" min="1" max="4" :value="profile?.concurrency ?? 1" @change="saveProviderConcurrency('runninghub', Number(($event.target as HTMLInputElement).value))" />
-            <span class="muted">按你的 RunningHub 账户并发额度设置。提高后可能同时创建多个付费任务。</span>
+            <span class="muted">{{ t('pages.settings.concurrencyHelp') }}</span>
           </label>
           <div class="row">
-            <button class="sm" :disabled="verifying" @click="verify">{{ verifying ? '检测中…' : '检测并获取节点映射（apiCallDemo）' }}</button>
-            <button class="sm" @click="editingProfile = !editingProfile">编辑 Profile（JSON）</button>
+            <button class="sm" :disabled="verifying" @click="verify">{{ verifying ? t('pages.settings.detecting') : t('pages.settings.detectNodes') }}</button>
+            <button class="sm" @click="editingProfile = !editingProfile">{{ t('pages.settings.editProfile') }}</button>
           </div>
-          <div v-if="profile?.verification.note" class="muted">上次检测：{{ profile.verification.note }}</div>
+          <div v-if="profile?.verification.note" class="muted">{{ t('pages.settings.lastDetection', { note: profile.verification.note }) }}</div>
           <textarea v-if="editingProfile" v-model="profileJson" rows="12" class="mono" placeholder="在此粘贴 / 编辑 RunningHub AI App Profile JSON（appId、节点映射 inputs、成本、能力）"></textarea>
-          <button v-if="editingProfile" class="primary sm" @click="saveProfile">保存 Profile</button>
+          <button v-if="editingProfile" class="primary sm" @click="saveProfile">{{ t('pages.settings.saveProfile') }}</button>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-title">Provider — Storyboard 生图（可选付费）</div>
+        <div class="panel-title">{{ t('pages.settings.storyboardProvider') }}</div>
         <div v-if="storyboardProfile" class="panel-body col">
           <div class="row">
             <span class="badge" :class="verifClass(storyboardProfile.verification.status)">{{ verifLabel(storyboardProfile.verification.status) }}</span>
-            <label class="row"><input v-model="storyboardProfile.enabled" type="checkbox" /> 启用</label>
+            <label class="row"><input v-model="storyboardProfile.enabled" type="checkbox" /> {{ t('pages.settings.enabled') }}</label>
           </div>
-          <p class="muted">复用 RunningHub API Key，但与视频 AI App 完全分开。只有在 Storyboard 页明确确认后才创建付费任务。</p>
-          <label class="field">生图 AI App ID<input v-model="storyboardProfile.appId" class="mono" /></label>
-          <label class="field">单次预估费用（CNY，仅用于确认提示）<input v-model.number="storyboardProfile.estimatedCostCny" type="number" min="0" step="0.01" /></label>
+          <p class="muted">{{ t('pages.settings.storyboardHelp') }}</p>
+          <label class="field">{{ t('pages.settings.storyboardAppId') }}<input v-model="storyboardProfile.appId" class="mono" /></label>
+          <label class="field">{{ t('pages.settings.estimatedCost') }}<input v-model.number="storyboardProfile.estimatedCostCny" type="number" min="0" step="0.01" /></label>
           <div class="grid two">
-            <label class="field">3 格输出尺寸<input v-model="storyboardProfile.sizeValues[3]" /></label>
-            <label class="field">6 格输出尺寸<input v-model="storyboardProfile.sizeValues[6]" /></label>
-            <label class="field">9 格输出尺寸<input v-model="storyboardProfile.sizeValues[9]" /></label>
+            <label class="field">{{ t('pages.settings.panelSize', { n: 3 }) }}<input v-model="storyboardProfile.sizeValues[3]" /></label>
+            <label class="field">{{ t('pages.settings.panelSize', { n: 6 }) }}<input v-model="storyboardProfile.sizeValues[6]" /></label>
+            <label class="field">{{ t('pages.settings.panelSize', { n: 9 }) }}<input v-model="storyboardProfile.sizeValues[9]" /></label>
           </div>
           <div class="muted mono">Prompt {{ storyboardProfile.inputs.prompt.nodeId || '—' }}/{{ storyboardProfile.inputs.prompt.fieldName }} · Size {{ storyboardProfile.inputs.size.nodeId || '—' }}/{{ storyboardProfile.inputs.size.fieldName }} · Layout {{ storyboardProfile.inputs.layoutImage.nodeId || '—' }}/{{ storyboardProfile.inputs.layoutImage.fieldName }}</div>
           <div v-if="storyboardProfile.verification.note" class="muted">{{ storyboardProfile.verification.note }}</div>
           <div class="row">
-            <button class="sm" @click="saveStoryboardProfile">保存</button>
-            <button class="primary sm" :disabled="verifyingStoryboard" @click="verifyStoryboardProfile">{{ verifyingStoryboard ? '检测中…' : '保存并检测节点' }}</button>
+            <button class="sm" @click="saveStoryboardProfile">{{ t('common.save') }}</button>
+            <button class="primary sm" :disabled="verifyingStoryboard" @click="verifyStoryboardProfile">{{ verifyingStoryboard ? t('pages.settings.detecting') : t('pages.settings.saveAndDetect') }}</button>
           </div>
         </div>
       </div>

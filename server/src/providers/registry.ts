@@ -6,26 +6,27 @@
 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, ProviderCapabilities, ProviderStatus, StoryboardProviderProfile } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, ProviderCapabilities, ProviderStatus, RunningHubRegion, StoryboardProviderProfile } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 import type { VideoProvider } from './types.js';
-import { RunningHubAiAppProvider } from './runninghub.js';
+import { RunningHubAiAppProvider, runningHubOrigin } from './runninghub.js';
 import { ComfyUiProvider } from './comfyui.js';
 import { defaultComfyUiProfile, importComfyUiWorkflow, sanitizeComfyUiProfile } from './comfyui-profile.js';
 import { MockProvider } from './mock.js';
 
 export const H3_AI_APP_ID = '2089265538441764866';
-export const H3_AI_APP_URL = `https://www.runninghub.cn/openapi/v2/run/ai-app/${H3_AI_APP_ID}`;
+export const H3_AI_APP_URL = `${runningHubOrigin('cn')}/openapi/v2/run/ai-app/${H3_AI_APP_ID}`;
 export const STORYBOARD_AI_APP_ID = '2094638110561886209';
 
-export function defaultStoryboardProviderProfile(): StoryboardProviderProfile {
+export function defaultStoryboardProviderProfile(region: RunningHubRegion = 'cn'): StoryboardProviderProfile {
   return {
     provider: 'runninghub_storyboard',
+    region,
     enabled: true,
     appId: STORYBOARD_AI_APP_ID,
-    invokeUrl: `https://www.runninghub.cn/openapi/v2/run/ai-app/${STORYBOARD_AI_APP_ID}`,
+    invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${STORYBOARD_AI_APP_ID}`,
     estimatedCostCny: 0.22,
     inputs: {
       prompt: { nodeId: '1', fieldName: 'text' },
@@ -79,12 +80,13 @@ export function mapStoryboardProviderNodes(
 
 /** Default profile for the fixed v0.1 AI App (PRD §25.3). Node layout is a
  * heuristic until the user runs "detect & verify" with a real key. */
-export function defaultAiAppProfile(): AiAppProfile {
+export function defaultAiAppProfile(region: RunningHubRegion = 'cn'): AiAppProfile {
   return {
     provider: 'runninghub',
+    region,
     concurrency: 1,
     appId: H3_AI_APP_ID,
-    invokeUrl: H3_AI_APP_URL,
+    invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${H3_AI_APP_ID}`,
     protocolVersion: 'observed',
     capabilities: {
       // Unknown until verified (P0-6): a heuristic default must not be
@@ -219,7 +221,14 @@ export class ProviderRegistry {
 
   /** User-set key from the settings page (kv) wins over the env var default. */
   getApiKey(): string | null {
-    return this.getRegistryDb().get<{ value: string }>("SELECT value FROM kv WHERE key = 'runninghub_api_key'")?.value ?? null;
+    const region = this.getProfile()?.region ?? 'cn';
+    const regional = this.getRegistryDb().get<{ value: string }>('SELECT value FROM kv WHERE key = ?', [`runninghub_api_key_${region}`])?.value;
+    if (regional) return regional;
+    // Backward compatibility: the historical single key always targeted the
+    // only supported endpoint at the time, runninghub.cn. Never reuse it for
+    // Global where it could be mistaken for a valid credential.
+    if (region === 'cn') return this.getRegistryDb().get<{ value: string }>("SELECT value FROM kv WHERE key = 'runninghub_api_key'")?.value ?? null;
+    return null;
   }
 
   getEffectiveApiKey(): string | null {
@@ -228,7 +237,8 @@ export class ProviderRegistry {
 
   saveApiKey(key: string): void {
     const k = key.trim();
-    this.getRegistryDb().run("INSERT INTO kv (key, value) VALUES ('runninghub_api_key', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [k]);
+    const region = this.getProfile()?.region ?? 'cn';
+    this.getRegistryDb().run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [`runninghub_api_key_${region}`, k]);
     this.refresh();
   }
 
@@ -261,9 +271,7 @@ export class ProviderRegistry {
       this.providers.set('mock', mock);
       return;
     }
-    let profile = defaultAiAppProfile();
-    const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub'");
-    if (row) profile = jget<AiAppProfile>(row.profile_json, profile);
+    const profile = this.getProfile() ?? defaultAiAppProfile();
     this.providers.set('runninghub', new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile }));
     const comfyProfile = this.getComfyUiProfile();
     this.providers.set('comfyui', new ComfyUiProvider(comfyProfile));
@@ -376,14 +384,21 @@ export class ProviderRegistry {
 
   getProfile(): AiAppProfile | null {
     const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub'");
-    return row ? jget<AiAppProfile>(row.profile_json, defaultAiAppProfile()) : defaultAiAppProfile();
+    return this.sanitizeProfile(row ? jget<unknown>(row.profile_json, defaultAiAppProfile()) : defaultAiAppProfile());
   }
 
   /** Merge a user-edited profile over defaults: appId must be non-empty,
    * every input slot needs a nodeId/fieldName, verification falls back. */
   private sanitizeProfile(raw: unknown): AiAppProfile {
-    const d = defaultAiAppProfile();
     const base = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const region: RunningHubRegion = base.region === 'global'
+      ? 'global'
+      : base.region === 'cn'
+        ? 'cn'
+        : typeof base.invokeUrl === 'string' && /\/\/www\.runninghub\.ai(?:\/|$)/i.test(base.invokeUrl)
+          ? 'global'
+          : 'cn';
+    const d = defaultAiAppProfile(region);
     const appId = typeof base.appId === 'string' && base.appId.trim() ? base.appId.trim() : d.appId;
     const inputsIn = (base.inputs && typeof base.inputs === 'object' ? base.inputs : {}) as Record<string, unknown>;
     const slotOf = (v: unknown): { nodeId: string; fieldName: string } => {
@@ -417,11 +432,12 @@ export class ProviderRegistry {
     return {
       ...d,
       ...base,
+      region,
       appId,
       concurrency: Number.isInteger(Number(base.concurrency))
         ? Math.min(4, Math.max(1, Number(base.concurrency)))
         : d.concurrency,
-      invokeUrl: typeof base.invokeUrl === 'string' && base.invokeUrl.trim() ? base.invokeUrl.trim() : d.invokeUrl,
+      invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${appId}`,
       nodes: Array.isArray(base.nodes) ? base.nodes : d.nodes,
       inputs,
       verification: { ...d.verification, ...(verification as object) },
@@ -429,13 +445,45 @@ export class ProviderRegistry {
   }
 
   saveProfile(raw: unknown): AiAppProfile {
-    const profile = this.sanitizeProfile(raw);
+    const previous = this.getProfile() ?? defaultAiAppProfile();
+    let profile = this.sanitizeProfile(raw);
+    const regionChanged = profile.region !== previous.region;
+    const mappingChanged = profile.region !== previous.region || profile.appId !== previous.appId || JSON.stringify(profile.inputs) !== JSON.stringify(previous.inputs);
+    if (mappingChanged) {
+      profile = {
+        ...profile,
+        nodes: [],
+        verification: { status: 'unconfigured', checkedAt: null, note: 'RunningHub 站点、AI App 或节点映射已修改，请重新检测' },
+      };
+    }
+    const saved = this.persistProfile(profile);
+    if (regionChanged) {
+      const storyboard = this.getStoryboardProfile();
+      this.persistStoryboardProfile({
+        ...storyboard,
+        nodes: [],
+        verification: { status: 'unconfigured', checkedAt: null, note: 'RunningHub 站点已修改，请重新检测 Storyboard AI App 节点' },
+      });
+    }
+    return saved;
+  }
+
+  private persistProfile(profile: AiAppProfile): AiAppProfile {
     this.getRegistryDb().run(
       'INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at',
       ['runninghub', j(profile), new Date().toISOString()],
     );
     this.refresh();
     return profile;
+  }
+
+  setRunningHubRegion(raw: unknown): { profile: AiAppProfile; storyboardProfile: StoryboardProviderProfile } {
+    if (raw !== 'cn' && raw !== 'global') throw new Error('RunningHub region must be cn or global');
+    const region = raw as RunningHubRegion;
+    const current = this.getProfile() ?? defaultAiAppProfile();
+    if (current.region === region) return { profile: current, storyboardProfile: this.getStoryboardProfile() };
+    const profile = this.saveProfile({ ...current, region });
+    return { profile, storyboardProfile: this.getStoryboardProfile() };
   }
 
   /**
@@ -461,7 +509,7 @@ export class ProviderRegistry {
       nodes = current.nodes;
       note = `detection failed: ${e instanceof Error ? e.message : e}`;
       const failed = { ...current, verification: { status: 'failed' as const, checkedAt: new Date().toISOString(), note } };
-      return this.saveProfile(failed);
+      return this.persistProfile(this.sanitizeProfile(failed));
     }
     const updated: AiAppProfile = {
       ...current,
@@ -470,7 +518,7 @@ export class ProviderRegistry {
       capabilities: { ...current.capabilities, supportedModes: inferSupportedModes(mapDiscoveredNodes(nodes), nodes) },
       verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
     };
-    return this.saveProfile(updated);
+    return this.persistProfile(this.sanitizeProfile(updated));
   }
 
   /**
@@ -483,17 +531,18 @@ export class ProviderRegistry {
       ...profile,
       verification: { status: 'verified', checkedAt: new Date().toISOString(), note: 'a real render submission succeeded against this profile' },
     };
-    return this.saveProfile(updated);
+    return this.persistProfile(this.sanitizeProfile(updated));
   }
 
   getStoryboardProfile(): StoryboardProviderProfile {
-    const fallback = defaultStoryboardProviderProfile();
+    const fallback = defaultStoryboardProviderProfile(this.getProfile()?.region ?? 'cn');
     const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub-storyboard'");
     return this.sanitizeStoryboardProfile(row ? jget<unknown>(row.profile_json, fallback) : fallback);
   }
 
   private sanitizeStoryboardProfile(raw: unknown): StoryboardProviderProfile {
-    const d = defaultStoryboardProviderProfile();
+    const region = this.getProfile()?.region ?? 'cn';
+    const d = defaultStoryboardProviderProfile(region);
     const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const inputs = (value.inputs && typeof value.inputs === 'object' ? value.inputs : {}) as Record<string, unknown>;
     const slot = (key: keyof StoryboardProviderProfile['inputs']) => {
@@ -508,9 +557,10 @@ export class ProviderRegistry {
     const cost = value.estimatedCostCny === null ? null : Number(value.estimatedCostCny);
     return {
       ...d,
+      region,
       enabled: value.enabled === undefined ? d.enabled : value.enabled === true,
       appId,
-      invokeUrl: `https://www.runninghub.cn/openapi/v2/run/ai-app/${appId}`,
+      invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${appId}`,
       estimatedCostCny: cost === null || (Number.isFinite(cost) && cost >= 0) ? cost : d.estimatedCostCny,
       inputs: { prompt: slot('prompt'), size: slot('size'), layoutImage: slot('layoutImage') },
       sizeValues: {
@@ -528,7 +578,7 @@ export class ProviderRegistry {
   saveStoryboardProfile(raw: unknown): StoryboardProviderProfile {
     const previous = this.getStoryboardProfile();
     let profile = this.sanitizeStoryboardProfile(raw);
-    const mappingChanged = profile.appId !== previous.appId || JSON.stringify(profile.inputs) !== JSON.stringify(previous.inputs);
+    const mappingChanged = profile.region !== previous.region || profile.appId !== previous.appId || JSON.stringify(profile.inputs) !== JSON.stringify(previous.inputs);
     if (mappingChanged) {
       profile = {
         ...profile,
@@ -551,19 +601,19 @@ export class ProviderRegistry {
     const key = this.getEffectiveApiKey();
     if (!key) throw new Error('RunningHub API Key 未配置');
     const current = this.getStoryboardProfile();
-    const url = `https://www.runninghub.cn/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(key)}&webappId=${encodeURIComponent(current.appId)}`;
+    const url = `${runningHubOrigin(current.region)}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(key)}&webappId=${encodeURIComponent(current.appId)}`;
     let response: Response;
     try {
       response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     } catch (error) {
       throw new Error(`Storyboard 节点检测失败：${error instanceof Error ? error.message : error}`);
     }
-    const json = await response.json().catch(() => null) as { code?: number; msg?: string; data?: { nodeInfoList?: Array<Record<string, unknown>> } } | null;
+    const json = await response.json().catch(() => null) as { code?: number; msg?: string; message?: string; data?: { nodeInfoList?: Array<Record<string, unknown>> } } | null;
     const rawNodes = json?.data?.nodeInfoList;
-    if (!response.ok || json?.code !== 0 || !Array.isArray(rawNodes)) {
+    if (!response.ok || (json?.code !== 0 && json?.code !== 200) || !Array.isArray(rawNodes)) {
       const failed = {
         ...current,
-        verification: { status: 'failed' as const, checkedAt: new Date().toISOString(), note: json?.msg ?? `HTTP ${response.status}` },
+        verification: { status: 'failed' as const, checkedAt: new Date().toISOString(), note: json?.msg ?? json?.message ?? `HTTP ${response.status}` },
       };
       this.persistStoryboardProfile(failed);
       throw new Error(failed.verification.note);

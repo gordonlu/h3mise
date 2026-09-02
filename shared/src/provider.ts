@@ -8,6 +8,8 @@ export interface ProviderVerification {
   note: string;
 }
 
+export type RunningHubRegion = 'cn' | 'global';
+
 // Provider / AI profiles
 // ---------------------------------------------------------------------------
 
@@ -28,6 +30,8 @@ export interface ProviderCapabilities {
 
 export interface AiAppProfile {
   provider: string;
+  /** Account/API region. Credentials and App IDs must belong to this site. */
+  region: RunningHubRegion;
   /** Maximum active remote tasks for this account/workflow. Defaults to 1
    * because a wrong value can create several paid tasks at once. */
   concurrency?: number;

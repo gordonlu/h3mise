@@ -1,5 +1,5 @@
 import type { MediaAsset } from './assets.js';
-import type { ProviderVerification } from './provider.js';
+import type { ProviderVerification, RunningHubRegion } from './provider.js';
 
 export type StoryboardPanelCount = 3 | 6 | 9;
 export type StoryboardStatus = 'draft' | 'generating' | 'ready' | 'approved' | 'failed';
@@ -56,6 +56,7 @@ export interface Storyboard {
 
 export interface StoryboardProviderProfile {
   provider: 'runninghub_storyboard';
+  region: RunningHubRegion;
   enabled: boolean;
   appId: string;
   invokeUrl: string;

@@ -957,6 +957,13 @@ export function buildRoutes(services: AppServices): App {
     services.bus.emit({ type: 'project.updated' });
     return c.json(profile);
   });
+  app.put('/api/providers/runninghub/region', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { region?: unknown };
+    const result = services.providers.setRunningHubRegion(body.region);
+    services.queue.reschedule();
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result);
+  });
   app.get('/api/providers/runninghub/apikey', (c) =>
     c.json({ source: services.providers.getApiKeySource(), configured: services.providers.getEffectiveApiKey() !== null }),
   );

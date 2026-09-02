@@ -128,9 +128,17 @@ Chocolatey がなくても FFmpeg を自分でインストールして構いま�
 
 設定の大半は **設定** ページで完結します。
 
+RunningHub には地域別の 2 サイトがあります:
+
+- 中国大陸: [runninghub.cn](https://www.runninghub.cn/) · [API ドキュメント](https://www.runninghub.cn/runninghub-api-doc-cn/)
+- 海外 / Global: [runninghub.ai](https://www.runninghub.ai/) · [API Documentation](https://www.runninghub.ai/runninghub-api-doc-en/)
+
+まず **設定 → Provider — RunningHub AI App → RunningHub 地域** で地域を選び、そのサイトで作成したアカウント、API Key、動画 AI App ID、Storyboard AI App ID を使用してください。地域をまたいで混用しないでください。地域を切り替えると以前のノード検証状態は消去され、再検出が必要になります。切り替えだけで有料タスクが送信されることはありません。
+
 | 設定項目 | 説明 |
 | --- | --- |
-| **RunningHub API Key** | 実レンダリングに必須。`RUNNINGHUB_API_KEY` 環境変数でも設定可 |
+| **RunningHub 地域** | 中国大陸 `runninghub.cn` または海外 `runninghub.ai` を選択。動画、Storyboard、アップロード、照会は選択地域へ統一 |
+| **RunningHub API Key** | 実レンダリングに必須で、選択したサイトの Key を使用。`RUNNINGHUB_API_KEY` 環境変数でも設定可 |
 | **AI App** | 自分の AI App ID とノードマッピングを貼り付け、またはワークフローノードを自動検出 |
 | **Storyboard 生図** | 任意の独立 RunningHub AI App。同じ API Key を使用しつつ、App ID、Prompt / Size / Layout Image のノードマッピング、サイズ、費用見積を個別に保持 |
 | **ComfyUI Local** | `workflow_api.json` を読み込み、入力マッピングを検査してローカルサービスを検出。詳細は [ComfyUI.md](ComfyUI.md) |

@@ -128,9 +128,17 @@ pnpm start
 
 大部分配置都可以在 **设置** 页面完成。
 
+RunningHub 分为两个站点：
+
+- 中国大陆：[runninghub.cn](https://www.runninghub.cn/) · [API 文档](https://www.runninghub.cn/runninghub-api-doc-cn/)
+- 海外 / Global：[runninghub.ai](https://www.runninghub.ai/) · [API Documentation](https://www.runninghub.ai/runninghub-api-doc-en/)
+
+请先在 **设置 → Provider — RunningHub AI App → RunningHub 站点** 选择区域，再使用该站点创建的账号、API Key、视频 AI App ID 和 Storyboard AI App ID，不要跨站混用。切换站点会清除旧节点验证状态，必须重新检测映射；不会因此自动提交付费任务。
+
 | 配置项 | 说明 |
 | --- | --- |
-| **RunningHub API Key** | 真实渲染所需；也可使用 `RUNNINGHUB_API_KEY` 环境变量 |
+| **RunningHub 站点** | 选择中国大陆 `runninghub.cn` 或海外 `runninghub.ai`；视频、Storyboard、上传、查询统一使用该区域 |
+| **RunningHub API Key** | 真实渲染所需，必须来自所选站点；也可使用 `RUNNINGHUB_API_KEY` 环境变量 |
 | **AI App** | 可粘贴自己的 AI App ID 和节点映射，或自动检测工作流节点 |
 | **Storyboard 生图** | 可选的独立 RunningHub AI App；复用同一 API Key，但单独保存 App ID、Prompt / Size / Layout Image 节点映射、尺寸与费用预估 |
 | **ComfyUI Local** | 导入 `workflow_api.json`，检查输入映射并检测本地服务；详见 [ComfyUI.md](ComfyUI.md) |

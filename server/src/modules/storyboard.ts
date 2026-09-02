@@ -18,8 +18,8 @@ import { listShots, updateShot } from './shots.js';
 import { createShotForBeat } from './story-pipeline.js';
 import { importUpload } from './media.js';
 import { directorStylePromptDirective } from './director-styles.js';
+import { runningHubOrigin } from '../providers/runninghub.js';
 
-const RH_BASE = 'https://www.runninghub.cn';
 const ACTIVE_JOB_STATUSES = "'SUBMITTING','QUEUED','RUNNING'";
 
 interface StoryboardRow {
@@ -300,8 +300,8 @@ export function buildStoryboardPrompt(p: ProjectContext, storyboard: Storyboard,
   ].filter(Boolean).join('\n');
 }
 
-async function runningHubJson(key: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
-  const response = await fetch(`${RH_BASE}${path}`, {
+async function runningHubJson(key: string, origin: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
+  const response = await fetch(`${origin}${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -312,16 +312,17 @@ async function runningHubJson(key: string, path: string, body?: unknown): Promis
   return jsonBody as Record<string, unknown>;
 }
 
-async function uploadLayout(key: string, path: string): Promise<string> {
+async function uploadLayout(key: string, origin: string, path: string): Promise<string> {
   const data = await readFile(path);
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(data)], { type: 'image/png' }), 'storyboard-layout.png');
-  const response = await fetch(`${RH_BASE}/openapi/v2/media/upload/binary`, {
+  const response = await fetch(`${origin}/openapi/v2/media/upload/binary`, {
     method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(180_000),
   });
-  const result = await response.json().catch(() => null) as { code?: number; msg?: string; data?: { fileName?: string } } | null;
-  if (!response.ok || result?.code !== 0 || !result.data?.fileName) throw new Error(`Storyboard 布局图上传失败：${result?.msg ?? `HTTP ${response.status}`}`);
-  return result.data.fileName;
+  const result = await response.json().catch(() => null) as { code?: number; msg?: string; message?: string; data?: { fileName?: string; filename?: string } } | null;
+  const fileName = result?.data?.fileName ?? result?.data?.filename;
+  if (!response.ok || (result?.code !== 0 && result?.code !== 200) || !fileName) throw new Error(`Storyboard 布局图上传失败：${result?.msg ?? result?.message ?? `HTTP ${response.status}`}`);
+  return fileName;
 }
 
 function requireProvider(providers: ProviderRegistry) {
@@ -349,6 +350,7 @@ async function submitJob(
   const active = p.db.get<{ id: string }>(`SELECT id FROM storyboard_jobs WHERE storyboard_id = ? AND status IN (${ACTIVE_JOB_STATUSES}) LIMIT 1`, [storyboardId]);
   if (active) throw new Error('这个 Storyboard 已有生图任务正在进行');
   const { key, profile } = requireProvider(providers);
+  const origin = runningHubOrigin(profile.region);
   const jobId = nextId(p.db, 'storyboard-job');
   const now = new Date().toISOString();
   const prompt = buildStoryboardPrompt(p, storyboard, panel);
@@ -363,13 +365,13 @@ async function submitJob(
   );
   p.db.run("UPDATE storyboards SET status = 'generating', prompt = ?, updated_at = ? WHERE id = ?", [prompt, now, storyboardId]);
   try {
-    const layoutRef = await uploadLayout(key, layoutPath);
+    const layoutRef = await uploadLayout(key, origin, layoutPath);
     const nodeInfoList = [
       { nodeId: profile.inputs.prompt.nodeId, fieldName: profile.inputs.prompt.fieldName, fieldValue: prompt },
       { nodeId: profile.inputs.size.nodeId, fieldName: profile.inputs.size.fieldName, fieldValue: panel ? profile.sizeValues[3] : profile.sizeValues[storyboard.panelCount] },
       { nodeId: profile.inputs.layoutImage.nodeId, fieldName: profile.inputs.layoutImage.fieldName, fieldValue: layoutRef },
     ];
-    const result = await runningHubJson(key, `/openapi/v2/run/ai-app/${profile.appId}`, { nodeInfoList });
+    const result = await runningHubJson(key, origin, `/openapi/v2/run/ai-app/${profile.appId}`, { nodeInfoList });
     const taskId = typeof result.taskId === 'string' || typeof result.taskId === 'number' ? String(result.taskId) : '';
     if (!taskId || (result.errorCode && String(result.errorCode))) throw new Error(`Storyboard 提交失败：${String(result.errorMessage ?? result.errorCode ?? '未返回 taskId')}`);
     p.db.run("UPDATE storyboard_jobs SET provider_task_id = ?, status = 'QUEUED', response_json = ?, updated_at = ? WHERE id = ?", [taskId, j(result), new Date().toISOString(), jobId]);
@@ -444,9 +446,10 @@ export async function reconcileStoryboard(p: ProjectContext, ffmpeg: Ffmpeg, pro
   if (!jobRow || !jobRow.provider_task_id || jobRow.status === 'SUBMITTING') return current;
   const key = providers.getEffectiveApiKey();
   if (!key) return current;
+  const origin = runningHubOrigin(providers.getStoryboardProfile().region);
   let result: Record<string, unknown>;
   try {
-    result = await runningHubJson(key, '/openapi/v2/query', { taskId: jobRow.provider_task_id });
+    result = await runningHubJson(key, origin, '/openapi/v2/query', { taskId: jobRow.provider_task_id });
   } catch {
     return current;
   }

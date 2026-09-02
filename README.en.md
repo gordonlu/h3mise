@@ -128,9 +128,17 @@ On the Projects page, install the bundled demo. The project is copied into your 
 
 Most configuration lives in the **Settings** page.
 
+RunningHub operates two regional sites:
+
+- Mainland China: [runninghub.cn](https://www.runninghub.cn/) · [API documentation](https://www.runninghub.cn/runninghub-api-doc-cn/)
+- Global: [runninghub.ai](https://www.runninghub.ai/) · [API documentation](https://www.runninghub.ai/runninghub-api-doc-en/)
+
+Choose the region under **Settings → Provider — RunningHub AI App → RunningHub region** first, then use the account, API Key, video AI App ID, and Storyboard AI App ID created on that site. Do not mix regions. Switching regions clears the previous node-verification state and requires detection again; it never submits a paid task by itself.
+
 | Setting | Description |
 | --- | --- |
-| **RunningHub API Key** | Needed for real rendering; the `RUNNINGHUB_API_KEY` environment variable also works |
+| **RunningHub region** | Select Mainland China (`runninghub.cn`) or Global (`runninghub.ai`); video, Storyboard, upload, and query requests use the selected site |
+| **RunningHub API Key** | Needed for real rendering and must come from the selected site; the `RUNNINGHUB_API_KEY` environment variable also works |
 | **AI App** | Paste your own AI App ID and node mapping, or auto-detect workflow nodes |
 | **Storyboard image App** | Optional, separate RunningHub AI App; reuses the same API Key but keeps its own App ID, Prompt / Size / Layout Image node mapping, size values, and cost estimate |
 | **ComfyUI Local** | Import `workflow_api.json`, inspect input mappings, and probe the local service; see [ComfyUI.md](ComfyUI.md) |

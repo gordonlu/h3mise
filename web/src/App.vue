@@ -26,6 +26,18 @@ const projectGuide = ref<ProjectGuideSummary | null>(null);
 const projectsRef = ref<HTMLElement | null>(null);
 let off: (() => void) | null = null;
 
+function cycleLocale(): void {
+  setLocale(locale.value === 'zh' ? 'en' : locale.value === 'en' ? 'ja' : 'zh');
+}
+
+function localeLabel(): string {
+  return locale.value === 'zh' ? '中' : locale.value === 'en' ? 'EN' : '日';
+}
+
+function localeTitle(): string {
+  return locale.value === 'zh' ? 'Switch to English' : locale.value === 'en' ? '日本語に切り替え' : '切换到中文';
+}
+
 function activeJobCount(): number {
   return render.jobs.filter((j: RenderJob) => ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(j.status)).length;
 }
@@ -175,8 +187,8 @@ watch(() => route.path, () => void scheduleGuideRefresh());
         </router-link>
       </template>
 
-      <button class="ghost locale-toggle" :title="locale === 'zh' ? 'Switch to English' : '切换到中文'" @click="setLocale(locale === 'zh' ? 'en' : 'zh')">
-        {{ locale === 'zh' ? '中' : 'EN' }}
+      <button class="ghost locale-toggle" :title="localeTitle()" @click="cycleLocale">
+        {{ localeLabel() }}
       </button>
       <button class="ghost theme-toggle" :title="theme.theme === 'light' ? '切换到深色主题' : '切换到浅色主题'" @click="theme.toggle()">
         {{ theme.theme === 'light' ? '☾' : '☀' }}

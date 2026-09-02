@@ -18,11 +18,18 @@
 // always include at least the prompt node.
 
 import {} from 'node:fs';
-import type { AiAppProfile, ProviderCapabilities } from '@h3mise/shared';
+import type { AiAppProfile, ProviderCapabilities, RunningHubRegion } from '@h3mise/shared';
 import type { RenderJobHandle, RenderRequestInput, RenderResult, RenderStatus, UploadedAsset, VideoProvider } from './types.js';
 import { ProviderError } from './types.js';
 
-export const RH_BASE = 'https://www.runninghub.cn';
+export const RUNNINGHUB_ORIGINS: Record<RunningHubRegion, string> = {
+  cn: 'https://www.runninghub.cn',
+  global: 'https://www.runninghub.ai',
+};
+
+export function runningHubOrigin(region: RunningHubRegion | null | undefined): string {
+  return RUNNINGHUB_ORIGINS[region === 'global' ? 'global' : 'cn'];
+}
 
 export interface RunningHubOptions {
   apiKey: string | null;
@@ -64,6 +71,10 @@ export class RunningHubAiAppProvider implements VideoProvider {
     return this.options.profile;
   }
 
+  get origin(): string {
+    return runningHubOrigin(this.profile.region);
+  }
+
   get configured(): boolean {
     return Boolean(this.options.apiKey);
   }
@@ -76,7 +87,7 @@ export class RunningHubAiAppProvider implements VideoProvider {
   private async v2(path: string, body?: unknown, init: RequestInit = {}): Promise<unknown> {
     let res: Response;
     try {
-      res = await fetch(`${RH_BASE}${path}`, {
+      res = await fetch(`${this.origin}${path}`, {
         ...init,
         // Body-carrying calls are POST (submit / query); GET only when no body.
         method: init.method ?? (body !== undefined ? 'POST' : 'GET'),
@@ -106,7 +117,7 @@ export class RunningHubAiAppProvider implements VideoProvider {
    * Throws ProviderError when the key/app is invalid.
    */
   async discoverNodes(): Promise<AiAppProfile['nodes']> {
-    const url = `${RH_BASE}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(this.key)}&webappId=${this.profile.appId}`;
+    const url = `${this.origin}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(this.key)}&webappId=${this.profile.appId}`;
     // P1: never let the API key leak into error metadata / debug output.
     const redactedUrl = url.replace(encodeURIComponent(this.key), '***');
     let res: Response;
@@ -140,7 +151,7 @@ export class RunningHubAiAppProvider implements VideoProvider {
     form.append('file', blob, asset.fileName.split(/[\\/]/).pop() ?? 'upload');
     let res: Response;
     try {
-      res = await fetch(`${RH_BASE}/openapi/v2/media/upload/binary`, {
+      res = await fetch(`${this.origin}/openapi/v2/media/upload/binary`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.key}` },
         body: form,
@@ -153,10 +164,10 @@ export class RunningHubAiAppProvider implements VideoProvider {
       code?: number;
       msg?: string;
       message?: string;
-      data?: { fileName?: string };
+      data?: { fileName?: string; filename?: string };
     } | null;
-    const fileName = json?.data?.fileName;
-    if (json?.code !== 0 || !fileName) {
+    const fileName = json?.data?.fileName ?? json?.data?.filename;
+    if ((json?.code !== 0 && json?.code !== 200) || !fileName) {
       throw new ProviderError(`upload failed: ${json?.msg ?? json?.message ?? `HTTP ${res.status}`}`, 'upload', json);
     }
     return { providerRef: fileName, meta: json };

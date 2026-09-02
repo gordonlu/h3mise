@@ -22,13 +22,14 @@ Prefer the Settings UI over editing JSON or environment files.
    - a RunningHub API Key from their own account;
    - a published RunningHub AI App ID whose workflow accepts the inputs they want to use.
 4. Ask the user to enter the API Key directly in **Settings → Provider — RunningHub AI App**. Never request that they paste a secret into chat, and never print, log, commit, or screenshot it.
-5. If using a different AI App, update its `appId`, save the profile, then run **检测并获取节点映射（apiCallDemo）**.
-6. Explain the status honestly:
+5. Select the RunningHub region first: Mainland China uses `runninghub.cn`, while Global uses `runninghub.ai`. The account, API Key, video AI App, and Storyboard AI App must belong to that same site. Region changes invalidate both profiles' verification and node mappings.
+6. If using a different AI App, update its `appId`, save the profile, then run **检测并获取节点映射（apiCallDemo）**.
+7. Explain the status honestly:
    - `unconfigured`: no usable mapping has been detected;
    - `nodes_detected`: node layout was read and mapped heuristically, but no real render has proved it;
    - `verified`: a real submission returned a task ID with this profile;
    - `failed`: inspect the detection or provider error before doing anything paid.
-7. Before the first real render, bind the required assets, run Preflight, use the lowest practical valid duration and `0.6 MP`, show the user the cost/risk summary, and obtain explicit confirmation before submitting.
+8. Before the first real render, bind the required assets, run Preflight, use the lowest practical valid duration and `0.6 MP`, show the user the cost/risk summary, and obtain explicit confirmation before submitting.
 
 Useful non-secret checks:
 

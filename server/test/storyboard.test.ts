@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { recommendedStoryboardPanelCount } from '@h3mise/shared';
 import { cleanupTempRoot, makeProject, makeStore, makeTempRoot } from './helpers.js';
-import { createEntity } from '../src/modules/assets.js';
-import { updateStory } from '../src/modules/story.js';
-import { buildStoryboardPrompt, prepareStoryboard } from '../src/modules/storyboard.js';
+import { createEntity, insertMedia, listBindings } from '../src/modules/assets.js';
+import { createBeat, updateStory } from '../src/modules/story.js';
+import { createShot, listShots } from '../src/modules/shots.js';
+import { approveStoryboard, buildStoryboardPrompt, prepareStoryboard } from '../src/modules/storyboard.js';
 import { Ffmpeg } from '../src/ffmpeg.js';
 
 const roots: string[] = [];
@@ -76,6 +77,34 @@ test('a new storyboard series cannot hide an active paid generation job', async 
   );
   assert.throws(() => prepareStoryboard(project, 3), /正在进行/);
   assert.equal(project.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM storyboards')?.n, 1);
+});
+
+test('approving a storyboard atomically connects panels to shots and visual references', async () => {
+  const { root, store } = await makeStore('storyboard-sync');
+  roots.push(root);
+  const project = await makeProject(store, 'Storyboard Sync');
+  const beat = createBeat(project, { title: 'Opening', summary: 'A person enters', durationSeconds: 4 });
+  const existingShot = createShot(project, { title: 'Opening', storyBeatId: beat.id, purpose: 'A person enters', h3Mode: 't2va' });
+  const board = prepareStoryboard(project, 3);
+  for (const panel of board.panels) {
+    const asset = insertMedia(project, {
+      kind: 'image', fileName: `assets/panel-${panel.order}.png`, mimeType: 'image/png', sizeBytes: 1, label: `Panel ${panel.order}`,
+    });
+    project.db.run('UPDATE storyboard_panels SET asset_id = ? WHERE id = ?', [asset.id, panel.id]);
+  }
+  const approved = approveStoryboard(project, board.id);
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.sync?.shotsCreated, 2);
+  assert.equal(approved.sync?.shotsUpdated, 1);
+  assert.equal(approved.sync?.bindingsCreated, 3);
+  const shots = listShots(project);
+  assert.equal(shots.length, 3);
+  assert.ok(shots.every((shot) => shot.h3Mode === 'ref2va'));
+  assert.ok(shots.some((shot) => shot.id === existingShot.id), 'a pristine Beat-linked Shot is reused');
+  assert.ok(shots.every((shot) => listBindings(project, shot.id).some((binding) => binding.roles.includes('style'))));
+  const repeated = approveStoryboard(project, board.id);
+  assert.equal(repeated.sync?.shotsCreated, 0);
+  assert.equal(listShots(project).length, 3, 'reapproval is idempotent');
 });
 
 test('FFmpeg creates and splits a fixed black-border 6-panel grid locally', async () => {

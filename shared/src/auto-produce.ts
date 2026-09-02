@@ -52,6 +52,8 @@ export interface AutoProducePlanShot {
   durationSeconds: number;
   mode: H3Mode;
   hasSelectedTake: boolean;
+  hasCandidateTake: boolean;
+  hasActiveJob: boolean;
   willRender: boolean;
   refReady: boolean;
 }
@@ -73,7 +75,7 @@ export interface AutoProducePlan {
   renderCount: number;
   skipCount: number;
   estimatedDurationSeconds: number;
-  storyPreparation: { willCreateBeats: number; willCreateShots: number; note: string | null };
+  storyPreparation: { willCreateBeats: number; willCreateShots: number; uncoveredBeatIds: string[]; note: string | null };
   blockers: string[];
 }
 

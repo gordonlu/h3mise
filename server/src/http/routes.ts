@@ -21,6 +21,7 @@ import * as storyMod from '../modules/story.js';
 import * as skeletonMod from '../modules/story-skeletons.js';
 import { DIRECTOR_STYLE_PRESETS, resolveDirectorStyle } from '../modules/director-styles.js';
 import * as storyboardMod from '../modules/storyboard.js';
+import { applyBeatProposal, materializeMissingBeatShots } from '../modules/story-pipeline.js';
 import * as shotsMod from '../modules/shots.js';
 import * as assetsMod from '../modules/assets.js';
 import * as directorMod from '../modules/director.js';
@@ -348,6 +349,19 @@ export function buildRoutes(services: AppServices): App {
     return c.json({ ok: true });
   });
   app.post('/api/story/beats/reorder', async (c) => c.json(storyMod.reorderBeats(p(c), (await c.req.json()).ids)));
+  app.post('/api/story/beats/apply-proposal', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { beats?: unknown; mode?: unknown; createMissingShots?: unknown };
+    if (!Array.isArray(body.beats)) return c.json({ error: 'beats must be an array' }, 400);
+    const mode = body.mode === 'append' ? 'append' : 'replace';
+    const result = applyBeatProposal(p(c), body.beats, { mode, createMissingShots: body.createMissingShots === true });
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result);
+  });
+  app.post('/api/story/beats/materialize-shots', (c) => {
+    const created = materializeMissingBeatShots(p(c));
+    services.bus.emit({ type: 'project.updated' });
+    return c.json({ created, count: created.length }, 201);
+  });
   app.get('/api/story/skeletons', (c) => c.json(skeletonMod.STORY_SKELETONS));
   app.get('/api/director-styles', (c) => c.json({ presets: DIRECTOR_STYLE_PRESETS, selected: resolveDirectorStyle(p(c).config.visual_style) }));
   app.post('/api/story/skeletons/recommend', async (c) => {
@@ -355,10 +369,10 @@ export function buildRoutes(services: AppServices): App {
     return c.json(await skeletonMod.recommendSkeletons(services.ai, typeof body.theme === 'string' ? body.theme : ''));
   });
   app.post('/api/story/skeletons/:id/apply', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as { segmentCount?: unknown };
-    const created = skeletonMod.applySkeleton(p(c), c.req.param('id'), Number(body.segmentCount));
+    const body = await c.req.json().catch(() => ({})) as { segmentCount?: unknown; mode?: unknown };
+    const result = skeletonMod.applySkeleton(p(c), c.req.param('id'), Number(body.segmentCount), body.mode === 'append' ? 'append' : 'replace');
     services.bus.emit({ type: 'project.updated' });
-    return c.json({ created }, 201);
+    return c.json(result, 201);
   });
 
   // --- optional storyboard -------------------------------------------------

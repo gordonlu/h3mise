@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { AIService, DirectorModel } from '../src/modules/ai.js';
 import { applySkeleton, localRecommendations, recommendSkeletons } from '../src/modules/story-skeletons.js';
 import { cleanupTempRoot, makeProject, makeStore } from './helpers.js';
-import { listBeats, updateStory } from '../src/modules/story.js';
+import { createBeat, listBeats, updateStory } from '../src/modules/story.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -33,16 +33,21 @@ test('missing AI keeps the complete local skeleton workflow usable', async () =>
   assert.equal(result.recommendations[0]?.skeleton.id, 'countdown-task');
 });
 
-test('applying a skeleton appends beat drafts without shots or render jobs', async () => {
+test('applying a skeleton replaces canonical beats instead of appending duplicates', async () => {
   const { root, store } = await makeStore('story-skeleton');
   roots.push(root);
   const project = await makeProject(store, 'Skeleton Project');
   updateStory(project, { plannedDurationSeconds: 30 });
 
-  const created = applySkeleton(project, 'delayed-evidence', 6);
-  assert.equal(created.length, 6);
+  createBeat(project, { title: 'Old A' });
+  createBeat(project, { title: 'Old B' });
+  const result = applySkeleton(project, 'delayed-evidence', 6);
+  assert.equal(result.created, 4);
+  assert.equal(result.updated, 2);
   assert.equal(listBeats(project).length, 6);
-  assert.ok(created.every((beat) => beat.durationSeconds === 5));
+  assert.ok(result.beats.every((beat) => beat.durationSeconds === 5));
+  applySkeleton(project, 'countdown-task', 3);
+  assert.equal(listBeats(project).length, 3, 'reapplying restructures instead of appending');
   assert.equal(project.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM shots')?.n, 0);
   assert.equal(project.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM render_jobs')?.n, 0);
 });

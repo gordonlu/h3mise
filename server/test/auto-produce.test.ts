@@ -2,16 +2,16 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { cleanupTempRoot, makeProject, makeStore, bus } from './helpers.js';
-import { updateStory, listBeats } from '../src/modules/story.js';
-import { listShots } from '../src/modules/shots.js';
+import { cleanupTempRoot, fakeTake, makeProject, makeStore, bus } from './helpers.js';
+import { createBeat, updateStory, listBeats } from '../src/modules/story.js';
+import { createShot, listShots } from '../src/modules/shots.js';
 import { listTakes } from '../src/modules/takes.js';
 import { getTimeline } from '../src/modules/timeline.js';
 import { Ffmpeg } from '../src/ffmpeg.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { RenderQueue } from '../src/modules/render.js';
 import { AutoProduceService } from '../src/modules/auto-produce.js';
-import { compilePrompt } from '../src/modules/prompt.js';
+import { compilePrompt, importRawPrompt } from '../src/modules/prompt.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -53,6 +53,49 @@ test('story-only project creates real beats and linked shots before rendering', 
   const prompts = shots.map((shot) => compilePrompt(project, shot.id, 't2va', shot.durationSeconds));
   assert.ok(prompts.every((prompt, index) => prompt.text.includes(shots[index]!.purpose)), 'every beginner prompt contains its story beat');
   assert.ok(prompts.every((prompt) => prompt.text !== 'integrated_multimodal_description:\nReality: strict realism'));
+});
+
+test('existing beats without shots report the exact paid render count before materialization', async () => {
+  const { project, auto } = await harness('auto-existing-beats');
+  createBeat(project, { title: 'A', summary: 'Action A', durationSeconds: 4 });
+  createBeat(project, { title: 'B', summary: 'Action B', durationSeconds: 6 });
+  const plan = await auto.buildPlan(project);
+  assert.equal(plan.storyPreparation.willCreateBeats, 0);
+  assert.equal(plan.storyPreparation.willCreateShots, 2);
+  assert.equal(plan.renderCount, 2);
+  assert.equal(plan.estimatedDurationSeconds, 10);
+  auto.prepareProject(project);
+  assert.equal(listShots(project).length, 2);
+  assert.equal(project.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM director_plan_versions')?.n, 2);
+});
+
+test('partial beat coverage creates only missing linked shots and never guesses by array position', async () => {
+  const { project, auto } = await harness('auto-partial-beats');
+  const a = createBeat(project, { title: 'A', summary: 'Action A' });
+  const b = createBeat(project, { title: 'B', summary: 'Action B' });
+  createShot(project, { title: 'Unlinked manual shot' });
+  createShot(project, { title: 'Covered A', storyBeatId: a.id });
+  const plan = await auto.buildPlan(project);
+  assert.deepEqual(plan.storyPreparation.uncoveredBeatIds, [b.id]);
+  assert.equal(plan.storyPreparation.willCreateShots, 1);
+  auto.prepareProject(project);
+  const shots = listShots(project);
+  assert.equal(shots.find((shot) => shot.title === 'Unlinked manual shot')?.storyBeatId, null);
+  assert.equal(shots.filter((shot) => shot.storyBeatId === b.id).length, 1);
+});
+
+test('candidate Takes block one-click reruns instead of creating another paid-like job', async () => {
+  const { project, auto } = await harness('auto-candidate');
+  const shot = createShot(project, { title: 'Review me' });
+  const prompt = importRawPrompt(project, shot.id, 'Existing generated result', 't2va');
+  await fakeTake(project, shot.id, prompt.id, 'candidate');
+  const plan = await auto.buildPlan(project);
+  assert.equal(plan.renderCount, 0);
+  assert.match(plan.blockers.join('；'), /候选Take/);
+  assert.throws(
+    () => auto.start(project, { providerId: 'mock', aspectRatio: '16:9', megapixels: 0.6, skipCompleted: true }),
+    /候选Take/,
+  );
 });
 
 test('mock one-click drives canonical pipeline through export', async () => {

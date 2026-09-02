@@ -47,6 +47,11 @@ export interface Storyboard {
   sheetAsset?: MediaAsset | null;
   createdAt: string;
   updatedAt: string;
+  sync?: {
+    shotsCreated: number;
+    shotsUpdated: number;
+    bindingsCreated: number;
+  };
 }
 
 export interface StoryboardProviderProfile {

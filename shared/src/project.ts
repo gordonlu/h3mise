@@ -60,6 +60,23 @@ export interface StoryBeat {
   updatedAt: string;
 }
 
+export type BeatApplyMode = 'replace' | 'append';
+
+export type StoryBeatDraft = Partial<Pick<StoryBeat,
+  'title' | 'category' | 'summary' | 'location' | 'timeOfDay' | 'weather' |
+  'characters' | 'stateChange' | 'notes' | 'durationSeconds' | 'sequenceId'
+>>;
+
+export interface BeatApplyResult {
+  beats: StoryBeat[];
+  created: number;
+  updated: number;
+  deleted: number;
+  retainedLinked: number;
+  shotsSynced: number;
+  shotsCreated: number;
+}
+
 export interface Sequence {
   id: string;
   title: string;

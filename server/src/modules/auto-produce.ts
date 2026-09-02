@@ -10,8 +10,9 @@ import type { Ffmpeg } from '../ffmpeg.js';
 import type { RenderQueue } from './render.js';
 import { nextId } from '../db/ids.js';
 import { j, jget } from '../db/sqlite.js';
-import { createBeat, getStory, listBeats, updateStory } from './story.js';
-import { createShot, getShot, listShots, resolveDependentsAfterSelection, updateShot } from './shots.js';
+import { getStory, listBeats, updateStory } from './story.js';
+import { getShot, listShots, resolveDependentsAfterSelection, updateShot } from './shots.js';
+import { applyBeatProposal, materializeMissingBeatShots } from './story-pipeline.js';
 import { compilePrompt } from './prompt.js';
 import { intentFromInput, renderIntentHash, runBasicPreflightIntent } from './preflight.js';
 import { listTakes, selectTake } from './takes.js';
@@ -137,17 +138,29 @@ export class AutoProduceService {
     if (!shots.length && !story.body.trim()) blockers.push('故事正文和镜头都为空，请先写故事或建立镜头。');
     const missingRefs = previewShots.filter((shot) => shot.willRender && !shot.refReady);
     if (missingRefs.length) blockers.push(`${missingRefs.length}个镜头缺少所选生成模式需要的参考素材；不会自动降级为t2va。`);
+    const candidateShots = previewShots.filter((shot) => shot.hasCandidateTake);
+    if (candidateShots.length) blockers.push(`${candidateShots.length}个镜头已有候选Take，请先选择或拒绝，避免重复付费生成。`);
+    const activeShots = previewShots.filter((shot) => shot.hasActiveJob);
+    if (activeShots.length) blockers.push(`${activeShots.length}个镜头已有生成任务，请等待并对账现有任务。`);
     const createBeats = beats.length ? 0 : segments.length;
-    const createShots = shots.length ? 0 : createBeats;
+    const uncoveredBeats = beats.filter((beat) => !shots.some((shot) => shot.storyBeatId === beat.id));
+    const createShots = createBeats || uncoveredBeats.length;
+    const newShotDuration = beats.length
+      ? uncoveredBeats.reduce((sum, beat) => sum + beat.durationSeconds, 0)
+      : segments.reduce((sum, text, i) => sum + beatDuration(text, i, story.plannedDurationSeconds, segments.length), 0);
     return {
       settings: { providerId: 'mock', aspectRatio: p.config.default_aspect_ratio || '16:9', megapixels: 0.6, skipCompleted: true },
       providers, shots: previewShots,
       renderCount: previewShots.filter((shot) => shot.willRender).length + createShots,
       skipCount: previewShots.filter((shot) => !shot.willRender).length,
-      estimatedDurationSeconds: shots.reduce((sum, shot) => sum + shot.durationSeconds, 0) || segments.reduce((sum, text, i) => sum + beatDuration(text, i, story.plannedDurationSeconds, segments.length), 0),
+      estimatedDurationSeconds: shots.reduce((sum, shot) => sum + shot.durationSeconds, 0) + newShotDuration,
       storyPreparation: {
-        willCreateBeats: createBeats, willCreateShots: createShots,
-        note: createBeats ? `开始时会把故事拆成${createBeats}个真实Beat${createShots ? '并建立关联Shot' : '，再关联现有Shot'}` : null,
+        willCreateBeats: createBeats, willCreateShots: createShots, uncoveredBeatIds: uncoveredBeats.map((beat) => beat.id),
+        note: createBeats
+          ? `开始时会把故事拆成${createBeats}个正式Beat并建立${createShots}个关联Shot`
+          : createShots
+            ? `开始时会为${createShots}个尚未覆盖的Beat补齐关联Shot`
+            : null,
       },
       blockers,
     };
@@ -156,8 +169,14 @@ export class AutoProduceService {
   start(p: ProjectContext, settings: AutoProduceSettings): AutoProduceRun {
     if (this.getActiveRun(p)) throw new Error('已有一键制作正在运行');
     if (settings.providerId !== 'mock' && settings.confirmRealProvider !== true) throw new Error('真实生成服务可能产生费用，请在本次开始前明确确认');
-    if (!this.registry.get(settings.providerId)) throw new Error('生成服务不存在');
+    const provider = this.registry.get(settings.providerId);
+    if (!provider) throw new Error('生成服务不存在');
+    if (settings.providerId !== 'mock' && !provider.configured) throw new Error('生成服务尚未配置或节点未检测，不能开始一键制作');
     if (![0.6, 0.8, 1, 1.2].includes(settings.megapixels)) throw new Error('megapixels必须是0.6、0.8、1.0或1.2');
+    const before = listShots(p).map((shot) => this.planShot(p, shot));
+    if (before.some((shot) => shot.hasCandidateTake)) throw new Error('已有候选Take，请先选择或拒绝，避免重复付费生成');
+    if (before.some((shot) => shot.hasActiveJob)) throw new Error('已有生成任务，请等待并对账现有任务');
+    if (before.some((shot) => shot.willRender && !shot.refReady)) throw new Error('现有镜头缺少所选模式需要的参考素材');
     this.prepareProject(p);
     const shots = listShots(p);
     if (!shots.length) throw new Error('没有可制作的镜头');
@@ -206,7 +225,13 @@ export class AutoProduceService {
   }
 
   private planShot(p: ProjectContext, shot: ReturnType<typeof listShots>[number]): AutoProducePlanShot {
-    const selected = listTakes(p, shot.id).some((take) => take.status === 'selected');
+    const takes = listTakes(p, shot.id);
+    const selected = takes.some((take) => take.status === 'selected');
+    const candidate = !selected && takes.some((take) => take.status === 'candidate');
+    const active = Boolean(p.db.get<{ id: string }>(
+      `SELECT id FROM render_jobs WHERE shot_id = ? AND status IN (${[...ACTIVE_JOB].map(() => '?').join(',')}) LIMIT 1`,
+      [shot.id, ...ACTIVE_JOB],
+    ));
     const mode = shot.h3Mode ?? 't2va';
     const bindings = p.db.all<{ type: string; roles_json: string }>('SELECT type, roles_json FROM reference_bindings WHERE shot_id = ?', [shot.id]);
     const refReady = mode === 't2va' || bindings.some((binding) => {
@@ -216,39 +241,27 @@ export class AutoProduceService {
       if (mode === 'l2va') return roles.includes('last_frame');
       return roles.includes('first_frame') || roles.includes('last_frame');
     });
-    return { shotId: shot.id, storyBeatId: shot.storyBeatId, order: shot.order, title: shot.title, durationSeconds: shot.durationSeconds, mode, hasSelectedTake: selected, willRender: !selected, refReady };
+    return { shotId: shot.id, storyBeatId: shot.storyBeatId, order: shot.order, title: shot.title, durationSeconds: shot.durationSeconds, mode, hasSelectedTake: selected, hasCandidateTake: candidate, hasActiveJob: active, willRender: !selected && !candidate && !active, refReady };
   }
 
   /** Materialize the beginner story plan into the same editable Beat/Shot
    * tables used by the professional flow. Safe to call repeatedly. */
   prepareProject(p: ProjectContext): void {
     let beats = listBeats(p);
-    let shots = listShots(p);
     if (!beats.length) {
       const story = getStory(p);
-      const segments = storySegments(story.body, shots.length || undefined);
+      const segments = storySegments(story.body, listShots(p).length || undefined);
       if (segments.length) {
-        p.db.tx(() => {
-          segments.forEach((text, index) => createBeat(p, {
+        const result = applyBeatProposal(p, segments.map((text, index) => ({
             title: text.replace(/\s+/g, ' ').slice(0, 24) || `段落${index + 1}`,
             summary: text, category: index === 0 ? 'setup' : index === segments.length - 1 ? 'resolution' : index === segments.length - 2 ? 'climax' : 'rising_action',
             durationSeconds: beatDuration(text, index, story.plannedDurationSeconds, segments.length),
-          }));
-        });
-        beats = listBeats(p);
+          })), { mode: 'replace', createMissingShots: true });
+        beats = result.beats;
         if (!story.plannedDurationSeconds) updateStory(p, { plannedDurationSeconds: beats.reduce((sum, beat) => sum + beat.durationSeconds, 0) });
       }
     }
-    if (!shots.length && beats.length) {
-      p.db.tx(() => beats.forEach((beat) => createShot(p, {
-        title: beat.title, storyBeatId: beat.id, purpose: beat.summary, durationSeconds: beat.durationSeconds,
-        aspectRatio: p.config.default_aspect_ratio, h3Mode: 't2va', renderDependencyMode: 'independent',
-      })));
-      shots = listShots(p);
-    } else if (beats.length && shots.length) {
-      // Link only unlinked shots; never replace a professional user's mapping.
-      shots.forEach((shot, index) => { if (!shot.storyBeatId && beats[index]) updateShot(p, shot.id, { storyBeatId: beats[index]!.id }); });
-    }
+    if (beats.length) materializeMissingBeatShots(p);
   }
 
   private patch(p: ProjectContext, runId: string, values: Partial<AutoProduceRun> & { shots?: AutoProduceShot[] }): void {

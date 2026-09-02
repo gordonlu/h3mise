@@ -1,5 +1,6 @@
-// AI assist actions — PRD §39-40. Every action returns a SUGGESTION the user
-// applies; nothing is written to program state and nothing renders.
+// AI assist actions — PRD §39-40. Most actions return suggestions. Story-level
+// generation is different: after explicit UI confirmation it atomically
+// updates canonical Beats and creates only missing Shots, but never renders.
 // When AI is not configured these return a clear "not configured" error so
 // the UI can fall back to Copy Context Package (external AI flow).
 
@@ -14,6 +15,7 @@ import * as assetsMod from './assets.js';
 import * as continuityMod from './continuity.js';
 import * as takesMod from './takes.js';
 import { directorStyleAiContext } from './director-styles.js';
+import { applyBeatProposal, materializeMissingBeatShots } from './story-pipeline.js';
 import { emptyDirectorPlan, type DirectorPlan, type StoryBeat, type VisualContinuityState } from '@h3mise/shared';
 
 type ActionName =
@@ -462,13 +464,14 @@ Empty output shape: ${JSON.stringify(empty)}`),
     }
     case 'story_to_beats': {
       const story = storyMod.getStory(ctx);
+      const existingBeats = storyMod.listBeats(ctx);
       const firstSystem = `你把故事拆成 StoryBeats。每个 beat：title、category（setup|inciting_incident|rising_action|climax|falling_action|resolution|transition|other）、summary、location、timeOfDay、weather、characters（实体名）、stateChange、durationSeconds（1-15）。所有 beat 的 durationSeconds 之和尽量等于计划总时长。
 
 时长分配必须从动作分析倒推：把每个 beat 的动作拆成子步骤（如“走近→接触→拾起→抱起→转身”），按真实物理节奏给每一步留秒数（行走约每米1秒、拾取约1.5-2秒、转身约1秒），加总后向上取整作为该 beat 的 durationSeconds。优先落在 8-12 秒（理想 10 秒左右）：5 秒以下的 beat 会过碎、剪辑困难；15 秒成本高。若动作链在 15 秒内装不下，必须把该 beat 拆成多个 beat，绝不压缩动作。一个 beat 容纳“一个完整动作+其直接反应”。title、summary 等文字字段一律用中文。
 
 FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element: "title" (string), "summary" (string). Optional: category, location, timeOfDay, weather, characters, stateChange, durationSeconds. No prose. No markdown. No code fences. No tables. Begin with '[' and end with ']'. Example:
 [{"title":"节拍标题","summary":"一句话概括","category":"setup","location":"","timeOfDay":"","weather":"","characters":[],"stateChange":"","durationSeconds":5}]`;
-      const userMsg = `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\n${styleContext}`;
+      const userMsg = `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\nCurrent StoryBeats (refine this structure when present; do not append a second copy):\n${JSON.stringify(existingBeats)}\n\n${styleContext}`;
 
       let raw: unknown;
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -481,11 +484,13 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
         });
         const beats = normalizeBeats(raw);
         if (beats.length > 0 && beats.every((b) => typeof b.title === 'string' && typeof b.summary === 'string')) {
-          return { kind: 'beats', beats };
+          const applied = applyBeatProposal(ctx, beats, { mode: 'replace', createMissingShots: true });
+          return { kind: 'beats', beats: applied.beats, applied };
         }
         const converted = convertShotTable(raw);
         if (converted) {
-          return { kind: 'beats', beats: converted, note: '模型返回了分镜表/镜头列表，已自动转换为 StoryBeat' };
+          const applied = applyBeatProposal(ctx, converted, { mode: 'replace', createMissingShots: true });
+          return { kind: 'beats', beats: applied.beats, applied, note: '模型返回了分镜表/镜头列表，已自动转换并更新为正式 StoryBeat' };
         }
       }
       throw new Error(
@@ -504,18 +509,24 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
     case 'auto_director': {
       // Story → Beats → Shots → Plans, stops before render (PRD §40).
       const story = storyMod.getStory(ctx);
+      const existingBeats = storyMod.listBeats(ctx);
       const beats = normalizeBeats(await ai.model.structured<unknown>({
         system: `You break a story into StoryBeats (see story_to_beats rules). Return ONLY a JSON array.\n\n${styleContext}`,
-        messages: [{ role: 'user', content: `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}` }],
+        messages: [{ role: 'user', content: `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\nCurrent StoryBeats (refine these; do not append duplicates):\n${JSON.stringify(existingBeats)}` }],
         temperature: 0.5,
       }));
       if (beats.length === 0 || beats.some((b) => typeof b.title !== 'string')) {
         throw new Error('AI 拆解返回的节拍结构不符合要求（缺少 title 等字段），已中止，请重试。');
       }
+      const applied = applyBeatProposal(ctx, beats, { mode: 'replace' });
+      const newShots = materializeMissingBeatShots(ctx);
+      const newShotIds = new Set(newShots.map((shot) => shot.id));
+      const shotsToPlan = shotsMod.listShots(ctx).filter((shot) => {
+        const latest = directorMod.latestPlan(ctx, shot.id);
+        return newShotIds.has(shot.id) || !latest || latest.source === 'default';
+      });
       const created: { beatId: string; shotId: string }[] = [];
-      for (const b of beats) {
-        const beat = storyMod.createBeat(ctx, { title: b.title, category: b.category, summary: b.summary, location: b.location, timeOfDay: b.timeOfDay, weather: b.weather, stateChange: b.stateChange });
-        const shot = shotsMod.createShot(ctx, { title: beat.title, storyBeatId: beat.id, purpose: beat.summary, durationSeconds: beat.durationSeconds || ctx.config.default_duration_seconds });
+      for (const shot of shotsToPlan) {
         const rawPlan = await ai.model.structured<unknown>({
           system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
           messages: [{ role: 'user', content: planShotPrompt(ctx, shot.id, {}) }],
@@ -523,9 +534,9 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
         });
         const dp = await normalizeOrRepairAiDirectorPlan(ai.model, rawPlan, emptyDirectorPlan());
         directorMod.createPlanVersion(ctx, { shotId: shot.id, plan: dp, source: 'builtin_ai' });
-        created.push({ beatId: beat.id, shotId: shot.id });
+        created.push({ beatId: shot.storyBeatId ?? '', shotId: shot.id });
       }
-      return { kind: 'auto_director_result', created, note: 'stopped before render — review plans, compile prompts, run preflight, then render manually' };
+      return { kind: 'auto_director_result', created, beats: applied.beats, shotsCreated: newShots.length, note: 'updated canonical beats, created only missing shots, and planned shots without a user-authored plan; stopped before render' };
     }
     default:
       throw new Error('unknown action: ' + action);

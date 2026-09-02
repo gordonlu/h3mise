@@ -148,7 +148,13 @@ async function approve() {
   try {
     storyboard.value = await post<Storyboard>(`/api/storyboard/${storyboard.value.id}/approve`, {});
     pages.value = await get<Storyboard[]>('/api/storyboard/pages');
-    toasts.push({ kind: 'ok', text: 'Storyboard 已批准；之后仍可回来改单格' });
+    const sync = storyboard.value.sync;
+    toasts.push({
+      kind: 'ok',
+      text: sync
+        ? `Storyboard 已批准并接入 Shotboard：新建 ${sync.shotsCreated} 个 Shot，更新 ${sync.shotsUpdated} 个，绑定 ${sync.bindingsCreated} 张分格参考图`
+        : 'Storyboard 已批准并接入 Shotboard',
+    });
   } catch (error) {
     toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
   }

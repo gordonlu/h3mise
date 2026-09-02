@@ -4,7 +4,7 @@ import { get, post, patch, del } from '../api/client';
 import { useToastStore } from '../stores/toast';
 import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
-import type { SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StorySkeleton } from '@h3mise/shared';
+import type { BeatApplyResult, SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StorySkeleton } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
 
 const toasts = useToastStore();
@@ -47,6 +47,7 @@ const beatShots = computed(() => {
 
 /** AI split needs a non-empty story body. */
 const canAiSplit = computed(() => Boolean(story.value?.body?.trim()) && !aiBusy.value);
+const uncoveredBeatCount = computed(() => beats.value.filter((beat) => !(beatShots.value.get(beat.id)?.length)).length);
 
 async function load() {
   const [loadedStory, loadedBeats, loadedShots, aiStatus] = await Promise.all([
@@ -177,6 +178,16 @@ async function moveBeat(id: string, dir: -1 | 1) {
   await post('/api/story/beats/reorder', { ids: next.map((b) => b.id) });
 }
 
+async function materializeMissingShots() {
+  try {
+    const result = await post<{ count: number }>('/api/story/beats/materialize-shots', {});
+    await load();
+    toasts.push({ kind: 'ok', text: result.count ? `已为 ${result.count} 个 Beat 建立 Shot 和最小导演计划` : '所有 Beat 已有对应 Shot' });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 async function aiStoryToBeats() {
   if (!aiEnabled.value || aiBusy.value) return;
   if (!story.value?.body?.trim()) {
@@ -185,32 +196,30 @@ async function aiStoryToBeats() {
   }
   const ok = await confirmDialog({
     title: t('pages.story.aiSplit'),
-    message: t('pages.story.aiSplitConfirm'),
+    message: beats.value.length
+      ? `AI 会参考并更新当前 ${beats.value.length} 个 Beat，再原子补齐缺失 Shot；不会在末尾追加第二套。已有专业 Shot 不会被删除。`
+      : 'AI 会生成正式 Beats，并原子创建对应的缺失 Shots；不会调用付费视频 API。',
     confirmLabel: t('pages.story.aiSplit'),
   });
   if (!ok) return;
   aiBusy.value = true;
-  toasts.push({ kind: 'info', text: 'AI 拆解已提交，后台处理中（通常 10–60 秒，最长 3 分钟）…' });
+  toasts.push({ kind: 'info', text: 'AI 拆解已提交，后台处理中（通常 10–60 秒，复杂故事可能需要数分钟）…' });
   try {
+    if (storyDirty.value) await saveStoryDraft();
     const res = await post<{ jobId: string }>('/api/ai/actions/story_to_beats', {});
     for (let i = 0; i < 180; i++) {
       await new Promise((r) => setTimeout(r, 1500));
       const job = await get<{ status: string; result: unknown; error: string | null }>(`/api/jobs/${res.jobId}`);
       if (job.status === 'done') {
-        const out = (job.result as { beats: Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>> }).beats;
-        let shotsCreated = 0;
-        for (const b of out) {
-          const beat = await post<{ id: string }>('/api/story/beats', b);
-          await post('/api/shots', {
-            title: b.title ?? 'New Beat',
-            storyBeatId: beat.id,
-            purpose: b.summary,
-            durationSeconds: b.durationSeconds ?? 5,
-          });
-          shotsCreated++;
-        }
+        const result = job.result as {
+          beats: Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
+          applied?: BeatApplyResult;
+        };
+        const applied = result.applied ?? await post<BeatApplyResult>('/api/story/beats/apply-proposal', {
+          beats: result.beats, mode: 'replace', createMissingShots: true,
+        });
         await load();
-        toasts.push({ kind: 'ok', text: `拆解完成：${out.length} 个节拍，并已自动生成 ${shotsCreated} 个 Shot（可到 Shotboard 继续导演计划与生成）` });
+        toasts.push({ kind: 'ok', text: `拆解完成：当前 ${applied.beats.length} 个 Beat，补齐 ${applied.shotsCreated} 个 Shot${applied.retainedLinked ? `；保留 ${applied.retainedLinked} 个已有 Shot 关联 Beat` : ''}` });
         return;
       }
       if (job.status === 'failed') {
@@ -218,6 +227,7 @@ async function aiStoryToBeats() {
         return;
       }
     }
+    toasts.push({ kind: 'err', text: '等待界面超时，后台任务可能仍在完成；请先刷新查看 Beats，确认任务失败后再重试。' });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   } finally {
@@ -252,15 +262,17 @@ async function recommendSkeletons() {
 async function applyStorySkeleton(skeleton: StorySkeleton) {
   const ok = await confirmDialog({
     title: `套用「${skeleton.name}」`,
-    message: `将追加 ${skeletonCount.value} 个 Beat 草稿${beats.value.length ? `；当前已有 ${beats.value.length} 个 Beat，不会覆盖` : ''}。不会创建 Shot，也不会调用付费 API。`,
-    confirmLabel: '追加 Beat 草稿',
+    message: beats.value.length
+      ? `将按这个骨架重整当前 ${beats.value.length} 个 Beat 为 ${skeletonCount.value} 段。已有 Shot 关联会尽量原位保留，不会追加第二套，也不会调用付费 API。`
+      : `将建立 ${skeletonCount.value} 个正式 Beat。不会创建 Shot，也不会调用付费 API。`,
+    confirmLabel: beats.value.length ? '重整当前 Beats' : '建立 Beats',
   });
   if (!ok) return;
   try {
-    await post(`/api/story/skeletons/${skeleton.id}/apply`, { segmentCount: skeletonCount.value });
+    const result = await post<BeatApplyResult>(`/api/story/skeletons/${skeleton.id}/apply`, { segmentCount: skeletonCount.value, mode: 'replace' });
     await load();
     skeletonOpen.value = false;
-    toasts.push({ kind: 'ok', text: `已追加 ${skeletonCount.value} 个「${skeleton.name}」Beat 草稿` });
+    toasts.push({ kind: 'ok', text: `已按「${skeleton.name}」重整为 ${result.beats.length} 个正式 Beat${result.retainedLinked ? `，并保留 ${result.retainedLinked} 个已有 Shot 关联 Beat` : ''}` });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   }
@@ -275,6 +287,7 @@ onMounted(load);
       <h1>{{ t('pages.story.title') }}</h1>
       <div class="row">
         <button class="sm" @click="openSkeletons">{{ skeletonOpen ? '收起灵感' : '找节奏灵感' }}</button>
+        <button v-if="uncoveredBeatCount" class="sm" @click="materializeMissingShots">补齐 {{ uncoveredBeatCount }} 个 Shot</button>
         <RouterLink class="button-link sm" to="/storyboard">可选：生成 Storyboard →</RouterLink>
         <button
           v-if="aiEnabled"
@@ -308,7 +321,7 @@ onMounted(load);
             <ol class="skeleton-preview">
               <li v-for="segment in item.skeleton.variants[skeletonCount]" :key="segment.title"><strong>{{ segment.title }}</strong><span>{{ segment.purpose }}</span></li>
             </ol>
-            <button class="sm primary" @click="applyStorySkeleton(item.skeleton)">套用为 {{ skeletonCount }} 个 Beat 草稿</button>
+            <button class="sm primary" @click="applyStorySkeleton(item.skeleton)">{{ beats.length ? '重整当前' : '建立' }} {{ skeletonCount }} 个 Beat</button>
           </article>
         </div>
       </div>

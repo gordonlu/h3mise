@@ -10,7 +10,7 @@ This file tells coding assistants how to help a user run and configure H3Mise sa
 - ComfyUI Local is a separate render provider. Its workflow mapping and safe Agent procedure are documented in `ComfyUI.md`; read that file before importing or editing a ComfyUI profile.
 - A `Shot` is the plan; a `Take` is a generated result. Never overwrite a Take to represent a new render.
 - Storyboard is an optional visual planning layer before Shot design. Creating or editing its text panels is free; generating a sheet or regenerating one panel through RunningHub is a separate paid image task.
-- Story skeletons and director-style presets are planning aids, not story facts. Applying a skeleton appends editable StoryBeat drafts; it must not silently create renders or overwrite existing beats.
+- Story skeletons and director-style presets are planning aids. Applying a skeleton restructures canonical StoryBeats in place by default; it must not append a duplicate set or silently render.
 
 ## Help a first-time user
 
@@ -74,6 +74,7 @@ If detection fails or the workflow cannot express a requested H3 mode, keep that
 - Never start Storyboard generation to test connectivity. Never prepare a replacement Storyboard series while one of its paid tasks is active; reconcile the existing provider task instead.
 - Whole-sheet results are split into panel assets with local FFmpeg. Regenerating one panel creates a new version and recomposes the sheet; do not overwrite or delete the earlier asset version.
 - For more than nine narrative segments, approve only after every page has a generated asset for every panel.
+- Approval atomically connects panels to Shotboard: it reuses matching Beat-linked Shots, creates only missing Shots, and binds panel images as visual references. Reapproval must remain idempotent.
 
 Useful non-secret checks:
 
@@ -85,7 +86,9 @@ curl -sS http://127.0.0.1:4789/api/storyboard/pages
 ## Assist story structure and director style
 
 - Built-in narrative skeletons work without AI. Theme matching is deterministic; when AI ranking fails or is unavailable, keep the local recommendations usable and say that fallback occurred.
-- A skeleton has `3`, `6`, and `9` segment variants. Applying one appends editable StoryBeats only; it does not create Shots, submit jobs, or replace the user's story.
+- A skeleton has `3`, `6`, and `9` segment variants. Applying one updates existing StoryBeat rows by order, creates or removes only the unlinked remainder, and preserves Beats already linked to professional Shots. Explicit append mode exists for API clients but is never the UI default.
+- AI story splitting receives current Beats and atomically refines/replaces them on the server. It creates only missing linked Shots; browser closure, retry, or a partial HTTP sequence must not append duplicates.
+- Beat-to-Shot materialization never guesses by array position. It creates a Shot only for an uncovered Beat and adds a deterministic minimum DirectorPlan derived from that Beat.
 - Familiar style phrases such as a film, series, genre, or era name are lookup intent only. Resolve them to generic, observable direction for medium, production design, lighting, performance, camera, editing, and sound.
 - Do not retain an imitated work name in the final H3 prompt. Do not reproduce recognizable characters, locations, dialogue, costumes, plots, or signature shots.
 - Director style is subordinate to project facts, bound assets, continuity, explicit shot instructions, and physical plausibility. Inject only the attributes relevant to the current Shot and keep at most one dominant camera behavior.
@@ -110,6 +113,7 @@ curl -sS http://127.0.0.1:4789/api/storyboard/pages
 - Use selected megapixels exactly as mapped. Supported presets are `0.6`, `0.8`, `1.0`, and `1.2`; do not silently substitute another value.
 - Do not claim `nodes_detected` means the workflow is verified.
 - Surface the provider error, stage, and task ID without exposing credentials.
+- One-click preview and execution must calculate from the same canonical Beats, Shots, Takes, and jobs. Candidate Takes and active jobs block a new run until selected, rejected, or reconciled; the paid confirmation count must include Shots materialized from uncovered Beats.
 
 ## Development workflow
 
@@ -128,6 +132,7 @@ curl -sS http://127.0.0.1:4789/api/storyboard/pages
 - `server/src/modules/render.ts`: persistent queue and reconciliation.
 - `server/src/modules/storyboard.ts`: optional text boards, paid image jobs, reconciliation, splitting, and panel versioning.
 - `server/src/modules/story-skeletons.ts`: built-in narrative structures, local matching, AI ranking fallback, and Beat creation.
+- `server/src/modules/story-pipeline.ts`: atomic Beat proposal application, uncovered Beat-to-Shot materialization, and minimum DirectorPlan creation.
 - `server/src/modules/director-styles.ts`: style aliases, generic presets, AI context, and deterministic H3 directives.
 - `web/src/pages/SettingsPage.vue`: user-facing provider setup.
 - `web/src/pages/StoryboardPage.vue`: optional multi-page Storyboard planning and paid-generation confirmation UI.

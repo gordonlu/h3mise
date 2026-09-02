@@ -6,9 +6,12 @@ import type {
   SkeletonSegment,
   SkeletonSegmentCount,
   StoryBeat,
+  BeatApplyMode,
+  BeatApplyResult,
   StorySkeleton,
 } from '@h3mise/shared';
-import { createBeat, getStory } from './story.js';
+import { getStory } from './story.js';
+import { applyBeatProposal } from './story-pipeline.js';
 
 type Stage = Omit<SkeletonSegment, 'title'> & { title: string };
 
@@ -178,17 +181,17 @@ export async function recommendSkeletons(ai: AIService, theme: string): Promise<
   }
 }
 
-export function applySkeleton(p: ProjectContext, skeletonId: string, segmentCount: number): StoryBeat[] {
+export function applySkeleton(p: ProjectContext, skeletonId: string, segmentCount: number, mode: BeatApplyMode = 'replace'): BeatApplyResult {
   const found = STORY_SKELETONS.find((item) => item.id === skeletonId);
   if (!found) throw new Error('story skeleton not found');
   if (segmentCount !== 3 && segmentCount !== 6 && segmentCount !== 9) throw new Error('segmentCount must be 3, 6, or 9');
   const story = getStory(p);
   const seconds = Math.max(2, Math.min(15, Math.round((story.plannedDurationSeconds || segmentCount * 5) / segmentCount)));
-  return found.variants[segmentCount].map((segment) => createBeat(p, {
+  return applyBeatProposal(p, found.variants[segmentCount].map((segment) => ({
     title: segment.title,
     category: segment.category,
     summary: `${segment.purpose}\n创作问题：${segment.question}`,
     notes: `叙事骨架：${found.name}；张力：${segment.tension}`,
     durationSeconds: seconds,
-  }));
+  })), { mode });
 }

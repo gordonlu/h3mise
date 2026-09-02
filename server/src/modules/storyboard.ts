@@ -12,8 +12,10 @@ import type { Ffmpeg } from '../ffmpeg.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { nextId } from '../db/ids.js';
 import { j, jget } from '../db/sqlite.js';
-import { getStory, listBeats } from './story.js';
-import { getMedia, listEntities } from './assets.js';
+import { createBeat, getStory, listBeats } from './story.js';
+import { createBinding, getMedia, listBindings, listEntities } from './assets.js';
+import { listShots, updateShot } from './shots.js';
+import { createShotForBeat } from './story-pipeline.js';
 import { importUpload } from './media.js';
 import { directorStylePromptDirective } from './director-styles.js';
 
@@ -207,8 +209,66 @@ export function approveStoryboard(p: ProjectContext, id: string): Storyboard {
   const seriesId = row.series_id || row.id;
   const missing = p.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM storyboard_panels sp JOIN storyboards s ON s.id = sp.storyboard_id WHERE s.series_id = ? AND sp.asset_id IS NULL', [seriesId])?.n ?? row.panel_count;
   if (missing > 0) throw new Error('请先生成全部 Storyboard 页面和分格再批准');
-  p.db.run("UPDATE storyboards SET status = 'approved', updated_at = ? WHERE series_id = ?", [new Date().toISOString(), seriesId]);
-  return fromRow(p, requireStoryboardRow(p, id));
+  return p.db.tx(() => {
+    p.db.run("UPDATE storyboards SET status = 'approved', updated_at = ? WHERE series_id = ?", [new Date().toISOString(), seriesId]);
+    const sync = syncStoryboardToShots(p, seriesId);
+    return { ...fromRow(p, requireStoryboardRow(p, id)), sync };
+  });
+}
+
+function syncStoryboardToShots(p: ProjectContext, seriesId: string): NonNullable<Storyboard['sync']> {
+  const rows = p.db.all<StoryboardRow>('SELECT * FROM storyboards WHERE series_id = ? ORDER BY page_number', [seriesId]);
+  let beats = listBeats(p);
+  const usedShots = new Set<string>();
+  let shotsCreated = 0;
+  let shotsUpdated = 0;
+  let bindingsCreated = 0;
+  for (const row of rows) {
+    const board = fromRow(p, row);
+    for (const panel of board.panels) {
+      const sourceOffset = Math.min(panel.order - 1, Math.max(0, row.source_end_index - row.source_start_index - 1));
+      const sourceIndex = row.source_start_index + sourceOffset;
+      let beat = beats[sourceIndex];
+      if (!beat) {
+        beat = createBeat(p, {
+          title: panel.description.slice(0, 40) || `Storyboard ${row.page_number}-${panel.order}`,
+          summary: panel.description,
+          category: sourceIndex === 0 ? 'setup' : 'other',
+          durationSeconds: Math.min(15, Math.max(2, p.config.default_duration_seconds)),
+          notes: `来源 Storyboard ${board.id} 第 ${panel.order} 格`,
+        });
+        beats = listBeats(p);
+      }
+      let shot = listShots(p).find((item) => item.storyBeatId === beat!.id && !usedShots.has(item.id));
+      if (!shot) {
+        shot = createShotForBeat(p, beat, { purpose: panel.description, h3Mode: panel.assetId ? 'ref2va' : 't2va' });
+        shotsCreated++;
+      } else {
+        const hasWork = Boolean(
+          p.db.get<{ id: string }>('SELECT id FROM prompt_versions WHERE shot_id = ? LIMIT 1', [shot.id]) ||
+          p.db.get<{ id: string }>('SELECT id FROM takes WHERE shot_id = ? LIMIT 1', [shot.id]) ||
+          p.db.get<{ id: string }>('SELECT id FROM render_jobs WHERE shot_id = ? LIMIT 1', [shot.id]) ||
+          p.db.get<{ id: string }>("SELECT id FROM director_plan_versions WHERE shot_id = ? AND source <> 'default' LIMIT 1", [shot.id]),
+        );
+        if (!hasWork && (shot.purpose !== panel.description || (panel.assetId && shot.h3Mode !== 'ref2va'))) {
+          shot = updateShot(p, shot.id, { purpose: panel.description, ...(panel.assetId ? { h3Mode: 'ref2va' as const } : {}) });
+          shotsUpdated++;
+        }
+      }
+      usedShots.add(shot.id);
+      if (panel.assetId && !listBindings(p, shot.id).some((binding) => binding.assetId === panel.assetId)) {
+        createBinding(p, {
+          assetId: panel.assetId,
+          shotId: shot.id,
+          roles: ['style'],
+          label: `Approved Storyboard page ${row.page_number} panel ${panel.order}`,
+          preserve: ['composition', 'subject placement', 'screen direction'],
+        });
+        bindingsCreated++;
+      }
+    }
+  }
+  return { shotsCreated, shotsUpdated, bindingsCreated };
 }
 
 function visualAliases(p: ProjectContext): string {

@@ -49,8 +49,8 @@ Story → Narrative skeleton / StoryBeat → (optional Storyboard) → Shot desi
 
 ## How an AI film gets managed
 
-1. **Define the work**: lay out the logline, full text, and total duration, then split the story into shootable StoryBeats — or start from a built-in narrative skeleton; everything stays editable.
-2. **Optional Storyboard**: review a free 3 / 6 / 9-panel text plan first, then decide whether to call the separate RunningHub image App. Long stories page automatically; every page and every single-panel regeneration is confirmed separately.
+1. **Define the work**: lay out the logline, full text, and total duration, then split the story into shootable StoryBeats. Skeletons and AI refine the current canonical Beats by default instead of appending a second set.
+2. **Optional Storyboard**: review a free 3 / 6 / 9-panel text plan first, then decide whether to call the separate RunningHub image App. Approval connects it to Shotboard; long stories page automatically, with every paid page or panel regeneration confirmed separately.
 3. **Build assets and states**: manage characters, creatures, scenes, and reference material, and record character states across the story.
 4. **Plan Shots**: per shot, keep duration, aspect ratio, generation mode, primary character, scene, Prompt, and megapixel tier.
 5. **Track render jobs**: submit after Preflight; record Provider, task ID, progress, failure reason, and elapsed time so a paid retry is never mistaken for a free one.
@@ -69,8 +69,8 @@ The repo ships a ~40-second sitcom project, **Good Boy**: Olivia shows off Newto
 ## Key capabilities
 
 - **Work-level data model**: story, assets, CharacterState, Shot, Take, continuity, and timeline have explicit relations rather than being a pile of unlinked files.
-- **Optional Storyboard**: 3 / 6 / 9-panel text plans chosen from narrative segment count, auto-paginated above nine segments; text editing is free, while whole-sheet or single-panel image generation calls RunningHub only after explicit confirmation. Fixed black frames, sheet splitting, and recomposition run on local FFmpeg; single-panel regeneration keeps versions.
-- **Narrative skeletons**: built-in pacing structures — reversal, misunderstanding escalation, rules gone wrong, countdown, information asymmetry, emotional payoff, delayed evidence, misplaced authority — each in 3 / 6 / 9 segment variants. Themes rank via AI when available; local matching is used when AI is not configured or fails.
+- **Optional Storyboard**: free 3 / 6 / 9-panel text plans with pagination and explicitly confirmed image generation. Approval reuses or creates the corresponding Shots and binds panel images as references; repeated approval is idempotent.
+- **Narrative skeletons**: built-in 3 / 6 / 9-segment pacing structures restructure the current canonical Beats by default instead of appending another set. AI reads and atomically refines current Beats, then creates only missing Shots; local matching still works without AI.
 - **Director-style translation**: familiar work names, genres, and eras only resolve into generic director attributes, then inject medium, production design, lighting, performance, camera, and editing direction into H3Mise AI, Storyboard, and the final H3 Prompt; the model is never asked to copy an original work's characters or locations.
 - **Shot/Take separation**: a Shot holds directorial intent; every generation creates a new Take; videos generated elsewhere can enter a Shot as Takes too, so reworks and tool swaps never erase history or the rationale behind a choice.
 - **Persistent render queue**: keeps Provider task IDs, status, elapsed time, and failure stage; when the provider succeeds but local state is broken, it reconciles the existing task instead of submitting a new paid job.
@@ -80,6 +80,7 @@ The repo ships a ~40-second sitcom project, **Good Boy**: Olivia shows off Newto
 - **Multimodal AI assistance**: reads reference images or last frames when polishing shot design and continuity; vision failures fall back to text context, and everything still works without any AI configured.
 - **Generation parameter archival**: records generation mode, reference assets, duration, aspect ratio, and megapixel tier (`0.6 / 0.8 / 1.0 / 1.2 MP`) so each Take's provenance is understandable.
 - **Paid-job protection**: runs local Preflight before real renders, and uses the active-job lock plus capability checks to reduce bad and duplicate submissions.
+- **One-click reconciliation**: paid-task estimates include Shots that uncovered Beats will create. Candidate Takes and active jobs stop a new run until review or reconciliation, preventing blind resubmission.
 - **Basic local finishing**: Selected Takes can go to the timeline for trimming, transitions, and loudness normalization, then export via FFmpeg — a delivery path, not the product's main differentiator.
 - **Local-first**: project data and media live under `H3MISE_HOME`; a project lock prevents concurrent tab sessions from operating on different projects simultaneously.
 
@@ -142,8 +143,8 @@ If you're unfamiliar with the Providers, let your coding assistant read [AGENTS.
 ## Pages
 
 - **Quick Edit (in progress)**: a simplified entry point exists, but editing still jumps to the professional timeline — not yet a self-contained beginner loop.
-- **Story**: story facts, full text, total duration, and StoryBeat management; optional 3 / 6 / 9-segment narrative skeletons work even without AI.
-- **Storyboard (optional)**: free text-panel editing; paid sheet generation, single-panel regeneration, versioning, and approval are all confirmed per action. Skip it entirely — it never blocks the Shot / Take pipeline.
+- **Story**: story facts, full text, duration, and canonical StoryBeats; skeletons and AI refine in place, and uncovered Beats can create missing Shots with minimum DirectorPlans.
+- **Storyboard (optional)**: free text-panel editing and explicitly confirmed image generation; approval connects it to Shotboard, or it can be skipped entirely.
 - **Shots**: Shotboard and Director Desk; bind assets, design shots, generate prompts, preflight, and render.
 - **Assets**: characters, creatures, scenes, character states, media assets, and reference bindings.
 - **Timeline**: trimming, transitions, and local export.

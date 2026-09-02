@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import type { GuideStepState, ProjectGuideSummary } from '@h3mise/shared';
 import GuideStepper from './GuideStepper.vue';
+import { t } from '../stores/locale';
 
 const props = defineProps<{ summary: ProjectGuideSummary | null }>();
 const route = useRoute();
@@ -20,11 +21,11 @@ const stages = computed(() => {
   const summary = props.summary;
   const productionDone = Boolean(summary?.shotCount && summary.selectedTakeCount === summary.shotCount);
   const definitions = [
-    { key: 'story', label: '故事 / 设定', to: '/story', done: Boolean(summary?.shotCount) },
-    { key: 'shots', label: 'Shot 列表', to: '/shots', done: Boolean(summary?.shotCount) },
-    { key: 'production', label: '镜头制作', to: summary?.attention.to?.startsWith('/shots/') ? summary.attention.to : '/shots', done: productionDone },
-    { key: 'timeline', label: '成片编排', to: '/timeline', done: Boolean(summary?.timelineClipCount) },
-    { key: 'export', label: '导出', to: '/timeline', done: Boolean(summary?.exportCount) },
+    { key: 'story', label: t('guide.storySetup'), to: '/story', done: Boolean(summary?.shotCount) },
+    { key: 'shots', label: t('guide.shotList'), to: '/shots', done: Boolean(summary?.shotCount) },
+    { key: 'production', label: t('guide.production'), to: summary?.attention.to?.startsWith('/shots/') ? summary.attention.to : '/shots', done: productionDone },
+    { key: 'timeline', label: t('guide.assembly'), to: '/timeline', done: Boolean(summary?.timelineClipCount) },
+    { key: 'export', label: t('guide.export'), to: '/timeline', done: Boolean(summary?.exportCount) },
   ];
   return definitions.map((stage) => ({
     ...stage,
@@ -36,9 +37,9 @@ const stages = computed(() => {
 <template>
   <div class="project-guide">
     <div class="guide-inner">
-      <span class="guide-title">项目进度</span>
+      <span class="guide-title">{{ t('guide.progress') }}</span>
       <GuideStepper :stages="stages" compact class="macro-steps" />
-      <span v-if="summary" class="guide-summary">{{ summary.selectedTakeCount }} / {{ summary.shotCount }} 已选片</span>
+      <span v-if="summary" class="guide-summary">{{ t('guide.selectedTakes', { selected: summary.selectedTakeCount, total: summary.shotCount }) }}</span>
     </div>
   </div>
 </template>

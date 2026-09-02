@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { GuideStepState } from '@h3mise/shared';
+import { t } from '../stores/locale';
 
 defineProps<{
   stages: Array<{ key: string; label: string; state: GuideStepState; to?: string }>;
@@ -8,14 +9,14 @@ defineProps<{
 </script>
 
 <template>
-  <ol class="guide-steps" :class="{ compact }" aria-label="制作进度">
+  <ol class="guide-steps" :class="{ compact }" :aria-label="t('guide.aria')">
     <li v-for="(stage, index) in stages" :key="stage.key" :class="['guide-step', stage.state]">
       <div class="step-track" :class="{ first: index === 0, last: index === stages.length - 1 }">
         <span class="step-dot" aria-hidden="true" />
       </div>
       <router-link v-if="stage.to" :to="stage.to" class="step-label">{{ stage.label }}</router-link>
       <span v-else class="step-label">{{ stage.label }}</span>
-      <span class="sr-only">{{ stage.state === 'complete' ? '已完成' : stage.state === 'current' ? '当前步骤' : stage.state === 'attention' ? '需要处理' : '尚未开始' }}</span>
+      <span class="sr-only">{{ stage.state === 'complete' ? t('guide.complete') : stage.state === 'current' ? t('guide.current') : stage.state === 'attention' ? t('guide.attention') : t('guide.upcoming') }}</span>
     </li>
   </ol>
 </template>

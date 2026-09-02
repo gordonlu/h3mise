@@ -66,7 +66,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <nav ref="root" class="workspace-nav" aria-label="项目工作流">
+  <nav ref="root" class="workspace-nav" :aria-label="t('nav.workspaceAria')">
     <router-link to="/production" class="one-click" active-class="active">
       <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M11.7 1.8 4.6 11h4l-.5 7.2 7.3-9.5h-4.2l.5-6.9Z" /></svg>
       <span>{{ t('nav.oneClick') }}</span>

@@ -50,9 +50,9 @@ async function switchProject(id: string) {
     await project.refreshProjects();
     await render.refresh();
     await refreshProjectGuide();
-    toasts.push({ kind: 'ok', text: `已切换到项目：${project.current?.config.title ?? id}` });
+    toasts.push({ kind: 'ok', text: t('shell.switchedProject', { name: project.current?.config.title ?? id }) });
   } catch (e) {
-    toasts.push({ kind: 'err', text: `切换项目失败：${e instanceof Error ? e.message : e}` });
+    toasts.push({ kind: 'err', text: t('shell.switchProjectFailed', { msg: e instanceof Error ? e.message : String(e) }) });
   }
 }
 
@@ -83,19 +83,19 @@ function notify(e: AppEvent) {
     : '';
   switch (e.type) {
     case 'render.job.succeeded':
-      toasts.push({ kind: 'ok', text: `渲染成功${projectLabel}，Take 已就绪（Shot ${e.shotId}）`, ...(isCurrentRenderProject ? { actionLabel: '去选片', actionTo: `/shots/${e.shotId}` } : {}) });
+      toasts.push({ kind: 'ok', text: t('shell.renderSucceeded', { project: projectLabel, shot: e.shotId }), ...(isCurrentRenderProject ? { actionLabel: t('shell.pickTake'), actionTo: `/shots/${e.shotId}` } : {}) });
       break;
     case 'render.job.failed':
-      toasts.push({ kind: 'err', text: `渲染失败${projectLabel}（Shot ${e.shotId}）：${e.error?.slice(0, 120) ?? ''}`, ...(isCurrentRenderProject ? { actionLabel: '查看', actionTo: `/shots/${e.shotId}` } : {}) });
+      toasts.push({ kind: 'err', text: t('shell.renderFailed', { project: projectLabel, shot: e.shotId, msg: e.error?.slice(0, 120) ?? '' }), ...(isCurrentRenderProject ? { actionLabel: t('shell.view'), actionTo: `/shots/${e.shotId}` } : {}) });
       break;
     case 'take.selected':
-      toasts.push({ kind: 'info', text: `已选片（Shot ${e.shotId}）` });
+      toasts.push({ kind: 'info', text: t('shell.takeSelected', { shot: e.shotId }) });
       break;
     case 'continuity.committed':
-      toasts.push({ kind: 'ok', text: `${e.scope === 'visual' ? '视觉' : '叙事'}连续性已提交（Shot ${e.shotId}）` });
+      toasts.push({ kind: 'ok', text: t('shell.continuityCommitted', { scope: t(e.scope === 'visual' ? 'shell.visual' : 'shell.narrative'), shot: e.shotId }) });
       break;
     case 'render.job.created':
-      toasts.push({ kind: 'info', text: `渲染任务已创建${projectLabel}（Shot ${e.shotId}）` });
+      toasts.push({ kind: 'info', text: t('shell.renderCreated', { project: projectLabel, shot: e.shotId }) });
       break;
   }
 }
@@ -166,9 +166,9 @@ watch(() => route.path, () => void scheduleGuideRefresh());
               @click="switchProject(p.id)"
             >
               <span class="project-menu-title">{{ p.title }}</span>
-              <span class="project-menu-meta">{{ p.shotCount }} shots</span>
+              <span class="project-menu-meta">{{ t('shell.shotsCount', { n: p.shotCount }) }}</span>
             </button>
-            <router-link to="/projects" class="project-menu-link" @click="projectsOpen = false">项目列表…</router-link>
+            <router-link to="/projects" class="project-menu-link" @click="projectsOpen = false">{{ t('shell.projectList') }}</router-link>
           </div>
         </div>
         <WorkspaceNav />
@@ -180,7 +180,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
         <router-link
           to="/settings"
           class="ghost-link system-link"
-          :title="health?.ffmpeg.available === false ? 'ffmpeg不可用，请先处理设置' : '生成服务、AI与ffmpeg设置'"
+          :title="health?.ffmpeg.available === false ? t('shell.ffmpegUnavailable') : t('shell.systemSettings')"
         >
           <span v-if="health?.ffmpeg.available === false" class="system-alert" />
           {{ t('nav.settings') }}
@@ -190,7 +190,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
       <button class="ghost locale-toggle" :title="localeTitle()" @click="cycleLocale">
         {{ localeLabel() }}
       </button>
-      <button class="ghost theme-toggle" :title="theme.theme === 'light' ? '切换到深色主题' : '切换到浅色主题'" @click="theme.toggle()">
+      <button class="ghost theme-toggle" :title="theme.theme === 'light' ? t('shell.darkTheme') : t('shell.lightTheme')" @click="theme.toggle()">
         {{ theme.theme === 'light' ? '☾' : '☀' }}
       </button>
     </header>

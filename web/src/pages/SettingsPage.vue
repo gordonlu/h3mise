@@ -42,6 +42,29 @@ function verifLabel(s: string | undefined): string {
   return locale.value === 'en' ? v.en : locale.value === 'ja' ? v.ja : v.cn;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function localizedProviderNote(note: string | undefined): string {
+  if (!note) return '';
+  const exact: Record<string, string> = {
+    'a real render submission succeeded against this profile': 'pages.settings.noteVideoVerified',
+    'Storyboard 生图是可选付费功能；请先检测 AI App 节点映射': 'pages.settings.noteStoryboardSetup',
+    'RunningHub 站点、AI App 或节点映射已修改，请重新检测': 'pages.settings.noteRunningHubChanged',
+    'RunningHub 站点已修改，请重新检测 Storyboard AI App 节点': 'pages.settings.noteStoryboardChanged',
+    '真实 Storyboard 任务已成功提交': 'pages.settings.noteStoryboardVerified',
+    'import a ComfyUI workflow in API format, then test the connection and mapping': 'pages.settings.noteComfySetup',
+    'a real ComfyUI prompt was accepted with this workflow mapping': 'pages.settings.noteComfyVerified',
+  };
+  if (exact[note]) return t(exact[note]);
+  const detected = note.match(/^已检测 (\d+) 个节点；首次真实生图成功后标记为已验证$/);
+  if (detected) return t('pages.settings.noteNodesDetected', { n: detected[1] });
+  const connected = note.match(/^connected to (.+); workflow has (\d+) nodes — mapping awaits one successful render$/);
+  if (connected) return t('pages.settings.noteComfyConnected', { url: connected[1], n: connected[2] });
+  return note;
+}
+
 async function saveRunningHubRegion(region: RunningHubRegion) {
   if (!profile.value || profile.value.region === region || savingRegion.value) return;
   savingRegion.value = true;
@@ -103,7 +126,7 @@ onMounted(() => {
 
 async function saveProjectConfig(patchData: Record<string, unknown>) {
   await project.saveConfig(patchData);
-  notice.value = '项目配置已保存';
+  notice.value = t('pages.settings.projectSaved');
 }
 
 async function verify() {
@@ -112,9 +135,9 @@ async function verify() {
   try {
     profile.value = await post<AiAppProfile>('/api/providers/runninghub/verify');
     profileJson.value = JSON.stringify(profile.value, null, 2);
-    notice.value = `检测完成：${profile.value.verification.note}`;
+    notice.value = t('pages.settings.detectDone', { note: localizedProviderNote(profile.value.verification.note) });
   } catch (e) {
-    notice.value = `检测失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.detectFailed', { msg: errorMessage(e) });
   } finally {
     verifying.value = false;
   }
@@ -125,15 +148,15 @@ async function saveProfile() {
   try {
     parsed = JSON.parse(profileJson.value);
   } catch (e) {
-    notice.value = `JSON 解析失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.jsonParseFailed', { msg: errorMessage(e) });
     return;
   }
   try {
     profile.value = await put('/api/providers/runninghub/profile', parsed);
     editingProfile.value = false;
-    notice.value = 'Provider Profile 已保存（节点映射只影响 RunningHub 适配器）';
+    notice.value = t('pages.settings.profileSaved');
   } catch (e) {
-    notice.value = `保存失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.saveFailed', { msg: errorMessage(e) });
   }
 }
 
@@ -142,24 +165,24 @@ async function saveProviderConcurrency(provider: 'runninghub' | 'comfyui', value
   try {
     await put(`/api/providers/${provider}/concurrency`, { concurrency });
     await load();
-    notice.value = `并发上限已保存为 ${concurrency}；等待中的任务会按新上限调度`;
+    notice.value = t('pages.settings.concurrencySaved', { n: concurrency });
   } catch (e) {
-    notice.value = `保存并发上限失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.concurrencySaveFailed', { msg: errorMessage(e) });
   }
 }
 
 async function saveApiKey() {
   if (!apiKeyInput.value.trim()) {
-    notice.value = '请输入 API Key';
+    notice.value = t('pages.settings.enterApiKey');
     return;
   }
   savingKey.value = true;
   try {
     apiKeyInfo.value = await put('/api/providers/runninghub/apikey', { key: apiKeyInput.value });
     apiKeyInput.value = '';
-    notice.value = 'API Key 已保存（替换环境变量默认值，立即生效）';
+    notice.value = t('pages.settings.apiKeySaved');
   } catch (e) {
-    notice.value = `API Key 保存失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.apiKeySaveFailed', { msg: errorMessage(e) });
   } finally {
     savingKey.value = false;
   }
@@ -174,10 +197,10 @@ async function importComfyWorkflow(event: Event) {
     const parsed = JSON.parse(await file.text());
     comfyProfile.value = await post<ComfyUiWorkflowProfile>('/api/providers/comfyui/import', parsed);
     comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
-    notice.value = `已导入 ${Object.keys(comfyProfile.value.workflow).length} 个节点。请检查自动映射，然后检测连接。`;
+    notice.value = t('pages.settings.comfyImported', { n: Object.keys(comfyProfile.value.workflow).length });
     await project.refreshProviders();
   } catch (e) {
-    notice.value = `ComfyUI 工作流导入失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.comfyImportFailed', { msg: errorMessage(e) });
   }
 }
 
@@ -187,10 +210,10 @@ async function saveComfyProfile() {
     comfyProfile.value = await put<ComfyUiWorkflowProfile>('/api/providers/comfyui/profile', parsed);
     comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
     editingComfyProfile.value = false;
-    notice.value = 'ComfyUI Profile 已保存，请重新检测连接与映射';
+    notice.value = t('pages.settings.comfyProfileSaved');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = `ComfyUI Profile 保存失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.comfyProfileSaveFailed', { msg: errorMessage(e) });
   }
 }
 
@@ -199,10 +222,10 @@ async function verifyComfyProfile() {
   try {
     comfyProfile.value = await post<ComfyUiWorkflowProfile>('/api/providers/comfyui/verify', {});
     comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
-    notice.value = `ComfyUI 检测完成：${comfyProfile.value.verification.note}`;
+    notice.value = t('pages.settings.comfyVerified', { note: localizedProviderNote(comfyProfile.value.verification.note) });
     await project.refreshProviders();
   } catch (e) {
-    notice.value = `ComfyUI 检测失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.comfyVerifyFailed', { msg: errorMessage(e) });
   } finally {
     verifyingComfy.value = false;
   }
@@ -212,9 +235,9 @@ async function saveStoryboardProfile() {
   if (!storyboardProfile.value) return;
   try {
     storyboardProfile.value = await put<StoryboardProviderProfile>('/api/providers/runninghub/storyboard-profile', storyboardProfile.value);
-    notice.value = 'Storyboard 生图配置已保存；修改 AI App 后请重新检测节点';
+    notice.value = t('pages.settings.storyboardSaved');
   } catch (e) {
-    notice.value = `Storyboard 配置保存失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.storyboardSaveFailed', { msg: errorMessage(e) });
   }
 }
 
@@ -223,9 +246,9 @@ async function verifyStoryboardProfile() {
   try {
     await saveStoryboardProfile();
     storyboardProfile.value = await post<StoryboardProviderProfile>('/api/providers/runninghub/storyboard-profile/verify', {});
-    notice.value = `Storyboard 节点检测完成：${storyboardProfile.value.verification.note}`;
+    notice.value = t('pages.settings.storyboardVerified', { note: localizedProviderNote(storyboardProfile.value.verification.note) });
   } catch (e) {
-    notice.value = `Storyboard 节点检测失败：${e instanceof Error ? e.message : e}`;
+    notice.value = t('pages.settings.storyboardVerifyFailed', { msg: errorMessage(e) });
   } finally {
     verifyingStoryboard.value = false;
   }
@@ -238,35 +261,35 @@ async function verifyStoryboardProfile() {
 
     <div class="grid">
       <div class="panel">
-        <div class="panel-title">当前项目</div>
+        <div class="panel-title">{{ t('pages.settings.currentProject') }}</div>
         <div class="panel-body col" v-if="project.current">
-          <p class="muted">每个项目独立保存这些配置；切换项目请在顶栏下拉或 Projects 页操作。</p>
-          <label class="field">标题<input :value="project.current.config.title" placeholder="项目名称" @change="saveProjectConfig({ title: ($event.target as HTMLInputElement).value })" /></label>
+          <p class="muted">{{ t('pages.settings.projectHelp') }}</p>
+          <label class="field">{{ t('pages.settings.projectTitle') }}<input :value="project.current.config.title" :placeholder="t('pages.settings.projectNamePlaceholder')" @change="saveProjectConfig({ title: ($event.target as HTMLInputElement).value })" /></label>
           <label class="field">
-            默认生成服务
+            {{ t('pages.settings.defaultProvider') }}
             <select :value="project.current.config.default_provider" @change="saveProjectConfig({ default_provider: ($event.target as HTMLSelectElement).value })">
               <option v-for="provider in project.providers" :key="provider.id" :value="provider.id">
-                {{ provider.name }}{{ provider.configured ? '' : '（未配置）' }}
+                {{ provider.name }}{{ provider.configured ? '' : ` (${t('common.unconfigured')})` }}
               </option>
             </select>
-            <span class="muted">镜头会严格使用这里选择的 Provider；未配置时不会静默切换到其他服务。</span>
+            <span class="muted">{{ t('pages.settings.providerStrictHelp') }}</span>
           </label>
           <label class="field">
-            项目画幅
+            {{ t('pages.settings.aspectRatio') }}
             <select :value="project.current.config.default_aspect_ratio" @change="saveProjectConfig({ default_aspect_ratio: ($event.target as HTMLSelectElement).value })">
               <option>16:9</option><option>9:16</option><option>4:3</option><option>1:1</option>
             </select>
-            <span class="muted">应用于项目内全部镜头；已有成片不会自动重新生成。</span>
+            <span class="muted">{{ t('pages.settings.aspectRatioHelp') }}</span>
           </label>
           <label class="field">
-            新镜头默认时长
-            <input type="number" :value="project.current.config.default_duration_seconds" title="默认时长（秒，1–15）" placeholder="5" @change="saveProjectConfig({ default_duration_seconds: Number(($event.target as HTMLInputElement).value) })" />
+            {{ t('pages.settings.defaultDuration') }}
+            <input type="number" :value="project.current.config.default_duration_seconds" :title="t('pages.settings.defaultDurationTitle')" placeholder="5" @change="saveProjectConfig({ default_duration_seconds: Number(($event.target as HTMLInputElement).value) })" />
           </label>
           <label class="field">
-            视觉风格
-            <input list="director-style-presets" :value="project.current.config.visual_style ?? ''" placeholder="如：武林外传风格、邵氏电影风格、港片警匪感" @change="saveProjectConfig({ visual_style: ($event.target as HTMLInputElement).value })" />
+            {{ t('pages.settings.visualStyle') }}
+            <input list="director-style-presets" :value="project.current.config.visual_style ?? ''" :placeholder="t('pages.settings.visualStylePlaceholder')" @change="saveProjectConfig({ visual_style: ($event.target as HTMLInputElement).value })" />
             <datalist id="director-style-presets"><option v-for="style in directorStyles" :key="style.id" :value="style.name" /></datalist>
-            <span class="muted">熟悉的作品名只用于匹配；H3Mise AI 会接收通用导演属性，最终提示词不会照搬作品名。</span>
+            <span class="muted">{{ t('pages.settings.visualStyleHelp') }}</span>
           </label>
           <div class="muted mono">{{ project.current.meta.dirPath }}</div>
         </div>
@@ -317,8 +340,8 @@ async function verifyStoryboardProfile() {
             <button class="sm" :disabled="verifying" @click="verify">{{ verifying ? t('pages.settings.detecting') : t('pages.settings.detectNodes') }}</button>
             <button class="sm" @click="editingProfile = !editingProfile">{{ t('pages.settings.editProfile') }}</button>
           </div>
-          <div v-if="profile?.verification.note" class="muted">{{ t('pages.settings.lastDetection', { note: profile.verification.note }) }}</div>
-          <textarea v-if="editingProfile" v-model="profileJson" rows="12" class="mono" placeholder="在此粘贴 / 编辑 RunningHub AI App Profile JSON（appId、节点映射 inputs、成本、能力）"></textarea>
+          <div v-if="profile?.verification.note" class="muted">{{ t('pages.settings.lastDetection', { note: localizedProviderNote(profile.verification.note) }) }}</div>
+          <textarea v-if="editingProfile" v-model="profileJson" rows="12" class="mono" :placeholder="t('pages.settings.profileJsonPlaceholder')"></textarea>
           <button v-if="editingProfile" class="primary sm" @click="saveProfile">{{ t('pages.settings.saveProfile') }}</button>
         </div>
       </div>
@@ -339,7 +362,7 @@ async function verifyStoryboardProfile() {
             <label class="field">{{ t('pages.settings.panelSize', { n: 9 }) }}<input v-model="storyboardProfile.sizeValues[9]" /></label>
           </div>
           <div class="muted mono">Prompt {{ storyboardProfile.inputs.prompt.nodeId || '—' }}/{{ storyboardProfile.inputs.prompt.fieldName }} · Size {{ storyboardProfile.inputs.size.nodeId || '—' }}/{{ storyboardProfile.inputs.size.fieldName }} · Layout {{ storyboardProfile.inputs.layoutImage.nodeId || '—' }}/{{ storyboardProfile.inputs.layoutImage.fieldName }}</div>
-          <div v-if="storyboardProfile.verification.note" class="muted">{{ storyboardProfile.verification.note }}</div>
+          <div v-if="storyboardProfile.verification.note" class="muted">{{ localizedProviderNote(storyboardProfile.verification.note) }}</div>
           <div class="row">
             <button class="sm" @click="saveStoryboardProfile">{{ t('common.save') }}</button>
             <button class="primary sm" :disabled="verifyingStoryboard" @click="verifyStoryboardProfile">{{ verifyingStoryboard ? t('pages.settings.detecting') : t('pages.settings.saveAndDetect') }}</button>
@@ -348,64 +371,64 @@ async function verifyStoryboardProfile() {
       </div>
 
       <div class="panel">
-        <div class="panel-title">AI（可选）</div>
+        <div class="panel-title">{{ t('pages.settings.aiOptional') }}</div>
         <div class="panel-body col">
           <span class="badge" :class="health?.aiConfigured ? 'ok' : 'muted'">
-            Built-in AI: {{ health?.aiConfigured ? 'Configured' : 'Not configured' }}
+            {{ t('pages.settings.builtInAi', { status: health?.aiConfigured ? t('pages.settings.configured') : t('pages.settings.notConfigured') }) }}
           </span>
           <p class="muted">
-            无内置 AI 时产品完整可用。要启用，请在启动前设置环境变量：
+            {{ t('pages.settings.aiHelp') }}
             <span class="mono">AI_BASE_URL / AI_API_KEY / AI_MODEL</span>
-            （OpenAI-compatible：OpenAI / DeepSeek / MiniMax / Ollama）。
+            {{ t('pages.settings.aiCompatibility') }}
           </p>
           <label class="field">
-            同时生成任务数（1–4）
+            {{ t('pages.settings.concurrency') }}
             <input type="number" min="1" max="4" :value="comfyProfile?.concurrency ?? 1" @change="saveProviderConcurrency('comfyui', Number(($event.target as HTMLInputElement).value))" />
-            <span class="muted">默认 1；只有显存和工作流允许时才提高。</span>
+            <span class="muted">{{ t('pages.settings.aiConcurrencyHelp') }}</span>
           </label>
-          <p class="muted">外部 AI 流程始终可用：Director Desk → External AI → Copy Context Package，粘贴到任意外部 AI。</p>
+          <p class="muted">{{ t('pages.settings.externalAiHelp') }}</p>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-title">Provider — ComfyUI Local</div>
+        <div class="panel-title">{{ t('pages.settings.comfyProvider') }}</div>
         <div class="panel-body col">
           <div class="row">
             <span class="badge" :class="verifClass(comfyProfile?.verification.status)">{{ verifLabel(comfyProfile?.verification.status) }}</span>
             <span class="mono muted">{{ comfyProfile?.baseUrl }}{{ comfyProfile?.apiPrefix }}</span>
           </div>
           <p class="muted">
-            导入 ComfyUI 的 <strong>API Format</strong> 工作流。H3Mise 会推断 Prompt、首尾帧、参考图、时长、画幅和像素输入；推断结果必须检查并检测后才可生成。
+            {{ t('pages.settings.comfyHelpBefore') }} <strong>API Format</strong> {{ t('pages.settings.comfyHelpAfter') }}
           </p>
           <div class="row wrap">
             <label class="sm file-button">
-              导入 workflow_api.json
+              {{ t('pages.settings.importWorkflow') }}
               <input type="file" accept="application/json,.json" hidden @change="importComfyWorkflow" />
             </label>
             <button class="sm" :disabled="verifyingComfy || !comfyProfile || !Object.keys(comfyProfile.workflow).length" @click="verifyComfyProfile">
-              {{ verifyingComfy ? '检测中…' : '检测连接与映射' }}
+              {{ verifyingComfy ? t('pages.settings.detecting') : t('pages.settings.verifyComfy') }}
             </button>
-            <button class="sm" @click="editingComfyProfile = !editingComfyProfile">编辑 Profile（JSON）</button>
-            <a class="sm button-link" href="https://github.com/gordonlu/h3mise/blob/master/ComfyUI.md" target="_blank" rel="noreferrer">Agent 接入指引</a>
+            <button class="sm" @click="editingComfyProfile = !editingComfyProfile">{{ t('pages.settings.editProfile') }}</button>
+            <a class="sm button-link" href="https://github.com/gordonlu/h3mise/blob/master/ComfyUI.md" target="_blank" rel="noreferrer">{{ t('pages.settings.agentGuide') }}</a>
           </div>
-          <div v-if="comfyProfile?.verification.note" class="muted">状态：{{ comfyProfile.verification.note }}</div>
+          <div v-if="comfyProfile?.verification.note" class="muted">{{ t('pages.settings.status', { note: localizedProviderNote(comfyProfile.verification.note) }) }}</div>
           <textarea v-if="editingComfyProfile" v-model="comfyProfileJson" rows="14" class="mono" placeholder="ComfyUI Profile JSON"></textarea>
-          <button v-if="editingComfyProfile" class="primary sm" @click="saveComfyProfile">保存 ComfyUI Profile</button>
+          <button v-if="editingComfyProfile" class="primary sm" @click="saveComfyProfile">{{ t('pages.settings.saveComfyProfile') }}</button>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-title">Environment</div>
+        <div class="panel-title">{{ t('pages.settings.environment') }}</div>
         <div class="panel-body col">
           <div class="row">
             <span class="badge" :class="health === null ? 'muted' : health?.ffmpeg.available ? 'ok' : 'bad'">
-              <template v-if="health === null">ffmpeg 检测中…</template>
-              <template v-else>ffmpeg {{ health?.ffmpeg.available ? '可用' : '缺失' }}</template>
+              <template v-if="health === null">{{ t('pages.settings.ffmpegChecking') }}</template>
+              <template v-else>{{ health?.ffmpeg.available ? t('pages.settings.ffmpegAvailable') : t('pages.settings.ffmpegMissing') }}</template>
             </span>
             <span v-if="health" class="muted mono">{{ health?.ffmpeg.ffmpegVersion }}</span>
-            <span v-if="healthError" class="badge bad">health 接口异常：{{ healthError }}</span>
+            <span v-if="healthError" class="badge bad">{{ t('pages.settings.healthError', { msg: healthError }) }}</span>
           </div>
-          <p class="muted">启动顺序：Node Local Server → SQLite 初始化 → RenderQueue 恢复 → Web。渲染队列的 taskId 持久化，重启后可恢复轮询。</p>
+          <p class="muted">{{ t('pages.settings.startupHelp') }}</p>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import type { H3Mode, MediaAsset, ReferenceBinding, ReferenceRole } from '@h3mise/shared';
 import { fileUrl, get, mediaUrl } from '../../api/client';
+import { t } from '../../stores/locale';
 
 const props = defineProps<{
   bindings: ReferenceBinding[];
@@ -31,7 +32,7 @@ onMounted(async () => {
   slotsLoaded.value = true;
 });
 
-interface RefGroup { id: string; cn: string; limit: number; items: MediaAsset[]; role?: ReferenceRole }
+interface RefGroup { id: string; label: string; limit: number; items: MediaAsset[]; role?: ReferenceRole }
 
 /** Only expose slots that the current generation path can actually submit. */
 const groups = computed<RefGroup[]>(() => {
@@ -39,27 +40,21 @@ const groups = computed<RefGroup[]>(() => {
   const audios = props.media.filter((m) => m.kind === 'audio');
   const out: RefGroup[] = [];
   if (props.currentMode === 'ref2va') {
-    if (slots.value.images > 0) out.push({ id: 'refimg', cn: 'Ref2VA 参考图', limit: slots.value.images, items: images });
-    if (slots.value.audios > 0) out.push({ id: 'refaudio', cn: 'Ref2VA 参考音频', limit: slots.value.audios, items: audios });
+    if (slots.value.images > 0) out.push({ id: 'refimg', label: t('shot.references.refImages'), limit: slots.value.images, items: images });
+    if (slots.value.audios > 0) out.push({ id: 'refaudio', label: t('shot.references.refAudio'), limit: slots.value.audios, items: audios });
     return out;
   }
   if ((props.currentMode === 'i2va' || props.currentMode === 'fl2va') && slots.value.firstFrame) {
-    out.push({ id: 'first', cn: '首帧图', limit: 1, items: images, role: 'first_frame' });
+    out.push({ id: 'first', label: t('shot.references.firstFrameImage'), limit: 1, items: images, role: 'first_frame' });
   }
   if ((props.currentMode === 'l2va' || props.currentMode === 'fl2va') && slots.value.lastFrame) {
-    out.push({ id: 'last', cn: '尾帧图', limit: 1, items: images, role: 'last_frame' });
+    out.push({ id: 'last', label: t('shot.references.lastFrameImage'), limit: 1, items: images, role: 'last_frame' });
   }
   return out;
 });
 
 const hasSlots = computed(() => groups.value.length > 0);
-const modeHint = computed(() => ({
-  t2va: 'T2VA 不需要参考素材',
-  i2va: 'I2VA 只使用首帧图',
-  l2va: 'L2VA 只使用尾帧图',
-  fl2va: 'FL2VA 使用首帧图和尾帧图',
-  ref2va: 'Ref2VA 至少需要一张参考图；参考音频可选。首尾帧也可以在参考模式里用（在提示词中声明为开场/结尾画面）',
-})[props.currentMode]);
+const modeHint = computed(() => t(`shot.references.modeHint.${props.currentMode}`));
 /** Ref2VA is slower and pricier — if the shot only has frame images and no
  * other references, the dedicated frame modes do the same job for less. */
 const suggestFrameMode = computed(() => {
@@ -115,21 +110,21 @@ function selectAsset(group: RefGroup, assetId: string) {
 <template>
   <div class="col">
     <div class="row">
-      <button class="primary sm" @click="pickerOpen = !pickerOpen">＋ 绑定 Reference</button>
-      <router-link :to="uploadPath" class="sm upload-link">上传新素材</router-link>
+      <button class="primary sm" @click="pickerOpen = !pickerOpen">＋ {{ t('shot.references.bindReference') }}</button>
+      <router-link :to="uploadPath" class="sm upload-link">{{ t('shot.references.uploadNewAsset') }}</router-link>
       <span v-if="!bindings.length" class="muted">{{ modeHint }}</span>
     </div>
 
     <div v-if="suggestFrameMode" class="note">
-      当前只有首尾帧、没有其他参考图——建议改用 <strong>{{ suggestFrameMode.toUpperCase() }}</strong>：同样的首尾帧控制，但生成更快、更便宜（Ref2VA 会按多参考计费）。
+      {{ t('shot.references.frameModeSuggestionBefore') }} <strong>{{ suggestFrameMode.toUpperCase() }}</strong>{{ t('shot.references.frameModeSuggestionAfter') }}
     </div>
 
     <div v-if="pickerOpen" class="panel picker">
-      <div class="panel-title">绑定参考资源（按类型填入工作流槽位）</div>
+      <div class="panel-title">{{ t('shot.references.bindByWorkflowSlot') }}</div>
       <div class="panel-body col">
         <template v-if="slotsLoaded && hasSlots">
           <div v-for="g in groups" :key="g.id" class="role-group">
-            <span class="muted group-cn">{{ g.cn }}<span class="group-limit">上限 {{ g.limit }} · 可用 {{ remaining(g) }}</span></span>
+            <span class="muted group-cn">{{ g.label }}<span class="group-limit">{{ t('shot.references.limitAvailable', { limit: g.limit, remaining: remaining(g) }) }}</span></span>
             <div class="asset-pick">
               <div
                 v-for="m in g.items"
@@ -146,25 +141,25 @@ function selectAsset(group: RefGroup, assetId: string) {
                 <div class="opt-label" :title="m.label || m.id">{{ m.label || m.id }}</div>
                 <div class="muted">{{ m.kind }}</div>
               </div>
-              <div v-if="!g.items.length" class="muted">暂无{{ g.cn }}，<router-link :to="uploadPath">上传并自动关联</router-link>。</div>
+              <div v-if="!g.items.length" class="muted">{{ t('shot.references.noAssetsOfType', { type: g.label }) }}<router-link :to="uploadPath">{{ t('shot.references.uploadAndLink') }}</router-link>。</div>
             </div>
           </div>
           <div class="note">
             <template v-if="currentMode === 'ref2va'">
-              当前是 <strong>Ref2VA 参考模式</strong>：提交 RefImages / RefAudios。参考图 ≤{{ slots.images }} 张、参考音频 ≤{{ slots.audios }} 个，合计 ≤{{ refTotalCap }} 个；音频必须同时有参考图。
-              若同时绑定了「首帧图」，该图会作为开场画面发给首帧槽（不占参考槽）；工作流在参考模式下是否消费首帧以真实渲染为准。
+              {{ t('shot.references.refModeLimits', { images: slots.images, audios: slots.audios, total: refTotalCap }) }}
+              {{ t('shot.references.firstFrameBehavior') }}
             </template>
             <template v-else>
-              当前是 <strong>{{ currentMode.toUpperCase() }} 帧控制模式</strong>：只提交 FirstFrame / LastFrame，不会提交 RefImages 或参考音频。
+              {{ t('shot.references.frameControlModeBefore') }} <strong>{{ currentMode.toUpperCase() }}</strong>{{ t('shot.references.frameControlModeAfter') }}
             </template>
           </div>
         </template>
         <div v-else class="note">
-          {{ !slotsLoaded ? '正在读取工作流槽位…' : currentMode === 't2va' ? 'T2VA 是纯文字生成，不需要绑定参考素材。' : '当前 Provider 没有为这个模式提供可执行的参考槽位。' }}
+          {{ !slotsLoaded ? t('shot.references.loadingSlots') : currentMode === 't2va' ? t('shot.references.t2vaNoReferences') : t('shot.references.noExecutableSlots') }}
         </div>
         <div class="row">
-          <button class="primary sm" :disabled="!pickAsset || !hasSlots || !selectedGroupHasSpace" @click="add">绑定</button>
-          <button class="sm" @click="pickerOpen = false">取消</button>
+          <button class="primary sm" :disabled="!pickAsset || !hasSlots || !selectedGroupHasSpace" @click="add">{{ t('shot.common.bind') }}</button>
+          <button class="sm" @click="pickerOpen = false">{{ t('common.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -189,7 +184,7 @@ function selectAsset(group: RefGroup, assetId: string) {
             preserve: {{ b.preserve.join(', ') || '—' }} · ignore: {{ b.ignore.join(', ') || '—' }}
           </div>
         </div>
-        <button class="sm ghost" @click="onRemove(b.id)">移除</button>
+        <button class="sm ghost" @click="onRemove(b.id)">{{ t('shot.common.remove') }}</button>
       </div>
     </div>
   </div>

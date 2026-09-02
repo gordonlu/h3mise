@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { H3_MODE_LABEL } from '@h3mise/shared';
 import type { H3Mode, PromptVersion } from '@h3mise/shared';
+import { t } from '../../stores/locale';
 
 const props = defineProps<{
   prompts: PromptVersion[];
@@ -37,12 +38,14 @@ async function saveEdit() {
   });
 }
 
-const SOURCE_LABEL: Record<string, string> = {
-  deterministic_compiler: '规则生成',
-  ai_compiler: 'AI 优化',
-  external_ai: '外部 AI',
-  manual: '手动输入',
-};
+function sourceLabel(source: string): string {
+  const key = ({ deterministic_compiler: 'rules', ai_compiler: 'ai', external_ai: 'externalAi', manual: 'manual' } as Record<string, string>)[source];
+  return key ? t(`shot.prompt.source.${key}`) : source;
+}
+
+function modeLabel(value: H3Mode): string {
+  return t(`shot.mode.${value}`);
+}
 
 async function run(kind: string, fn: () => Promise<unknown>) {
   busy.value = kind;
@@ -63,42 +66,42 @@ async function copy(text: string) {
 <template>
   <div class="col">
     <div class="row wrap">
-      <span class="badge accent no-dot" title="生成模式由当前镜头决定">{{ H3_MODE_LABEL[mode] }}</span>
+      <span class="badge accent no-dot" :title="t('shot.prompt.modeDeterminedByShot')">{{ modeLabel(mode) }}</span>
       <button class="primary sm" :disabled="busy !== ''" @click="run('compile', () => onCompile(mode))">
-        {{ busy === 'compile' ? '生成中…' : '从镜头设计生成' }}
+        {{ busy === 'compile' ? t('shot.prompt.generating') : t('shot.prompt.generateFromDesign') }}
       </button>
-      <button v-if="aiEnabled" class="sm" :disabled="busy !== '' || !prompts.length" :title="prompts.length ? '优化当前最新提示词并保存为新版本' : '请先生成或手动输入一版提示词'" @click="run('ai', onAiCompile)">
-        {{ busy === 'ai' ? 'AI 优化中…' : 'AI 优化当前提示词' }}
+      <button v-if="aiEnabled" class="sm" :disabled="busy !== '' || !prompts.length" :title="prompts.length ? t('shot.prompt.optimizeLatestTitle') : t('shot.prompt.createFirstTitle')" @click="run('ai', onAiCompile)">
+        {{ busy === 'ai' ? t('shot.prompt.aiOptimizing') : t('shot.prompt.aiOptimizeCurrent') }}
       </button>
-      <button class="sm" @click="showRaw = !showRaw">手动输入提示词</button>
+      <button class="sm" @click="showRaw = !showRaw">{{ t('shot.prompt.manualInput') }}</button>
     </div>
 
     <div v-if="showRaw" class="panel">
       <div class="panel-body col">
-        <textarea v-model="rawText" rows="5" placeholder="在这里自行输入或粘贴完整的 H3 提示词，不需要先填写导演计划"></textarea>
+        <textarea v-model="rawText" rows="5" :placeholder="t('shot.prompt.manualPlaceholder')"></textarea>
         <div class="row">
-          <button class="primary sm" :disabled="busy !== '' || !rawText.trim()" @click="run('raw', () => onRaw(rawText, mode).then(() => { showRaw = false; rawText = ''; }))">保存为新版本</button>
-          <button class="sm" @click="showRaw = false">取消</button>
+          <button class="primary sm" :disabled="busy !== '' || !rawText.trim()" @click="run('raw', () => onRaw(rawText, mode).then(() => { showRaw = false; rawText = ''; }))">{{ t('shot.prompt.saveNewVersion') }}</button>
+          <button class="sm" @click="showRaw = false">{{ t('common.cancel') }}</button>
         </div>
       </div>
     </div>
 
-    <div v-if="copied" class="muted">已复制：{{ copied }}…</div>
+    <div v-if="copied" class="muted">{{ t('shot.prompt.copied') }}{{ copied }}…</div>
 
     <div class="prompt-list col">
       <div v-for="pv in [...prompts].reverse()" :key="pv.id" class="panel prompt-item">
         <div class="spread">
           <div class="row wrap">
-            <span class="badge accent no-dot">{{ H3_MODE_LABEL[pv.h3Mode] }}</span>
-            <span class="badge no-dot">{{ SOURCE_LABEL[pv.source] ?? pv.source }}</span>
+            <span class="badge accent no-dot">{{ modeLabel(pv.h3Mode) }}</span>
+            <span class="badge no-dot">{{ sourceLabel(pv.source) }}</span>
             <span class="muted mono">{{ pv.id }}</span>
             <span class="muted">{{ new Date(pv.createdAt).toLocaleString() }}</span>
           </div>
-          <button class="sm ghost" @click="copy(pv.text)">复制</button>
+          <button class="sm ghost" @click="copy(pv.text)">{{ t('shot.common.copy') }}</button>
         </div>
-        <pre class="prompt-text">{{ pv.text || '（空提示词）' }}</pre>
+        <pre class="prompt-text">{{ pv.text || t('shot.prompt.emptyPrompt') }}</pre>
       </div>
-      <div v-if="!prompts.length" class="muted">还没有提示词。可以从镜头设计生成，也可以手动输入。</div>
+      <div v-if="!prompts.length" class="muted">{{ t('shot.prompt.noPrompts') }}</div>
     </div>
   </div>
 </template>

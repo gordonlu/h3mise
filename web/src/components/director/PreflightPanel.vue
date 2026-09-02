@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import type { PreflightReport, PromptVersion, ProviderStatus } from '@h3mise/shared';
 import { H3_MODE_LABEL } from '@h3mise/shared';
+import { t } from '../../stores/locale';
 
 const props = defineProps<{
   reports: PreflightReport[];
@@ -69,32 +70,38 @@ async function refreshPrompt() {
 
 const STATUS_COLOR: Record<string, string> = { ok: 'ok', warn: 'warn', fail: 'bad', skip: 'muted' };
 const RISK_COLOR: Record<string, string> = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'bad' };
-const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '高' };
+function riskLabel(risk: string): string {
+  return t(`shot.preflight.risk.${risk.toLowerCase()}`);
+}
+
+function modeLabel(mode: string): string {
+  return t(`shot.mode.${mode}`);
+}
 </script>
 
 <template>
   <div class="col">
     <div class="row preflight-actions">
-      <button class="primary sm check-action" :disabled="busy !== '' || !prompt" @click="run('basic')">运行生成检查</button>
-      <button v-if="aiEnabled" class="sm ai-check-action" :disabled="busy !== '' || !prompt" @click="run('ai')">AI 连续性检查</button>
-      <span v-if="busy === 'basic'" class="muted">检查中…</span>
-      <span v-if="busy === 'ai'" class="muted">AI 连续性检查中…（后台任务）</span>
+      <button class="primary sm check-action" :disabled="busy !== '' || !prompt" @click="run('basic')">{{ t('shot.preflight.runCheck') }}</button>
+      <button v-if="aiEnabled" class="sm ai-check-action" :disabled="busy !== '' || !prompt" @click="run('ai')">{{ t('shot.preflight.aiContinuityCheck') }}</button>
+      <span v-if="busy === 'basic'" class="muted">{{ t('shot.preflight.checking') }}</span>
+      <span v-if="busy === 'ai'" class="muted">{{ t('shot.preflight.aiChecking') }}</span>
     </div>
 
-    <div v-if="!prompt" class="muted">请先编译或粘贴提示词。</div>
+    <div v-if="!prompt" class="muted">{{ t('shot.preflight.promptRequired') }}</div>
     <div v-else-if="!latestMatchingReport" class="panel pending-check">
-      <strong>当前提示词还没有生成检查记录</strong>
-      <p>旧提示词的检查结果不会沿用。点击“运行生成检查”确认当前提示词、参考素材和生成参数。</p>
+      <strong>{{ t('shot.preflight.noCurrentReport') }}</strong>
+      <p>{{ t('shot.preflight.oldReportsNotReused') }}</p>
     </div>
 
     <div v-for="r in visibleReports" :key="r.id" class="panel preflight">
       <div class="spread report-head">
         <span class="muted mono report-meta">{{ r.id }} · {{ new Date(r.createdAt).toLocaleString() }}</span>
         <div class="row report-status">
-          <span v-if="r.aiSemanticRun" class="badge info">已运行 AI 连续性检查</span>
-          <span v-else class="muted">未运行 AI 连续性检查</span>
-          <span :class="['badge', RISK_COLOR[r.risk]]">风险：{{ RISK_LABEL[r.risk] }}</span>
-          <span :class="['badge', r.blocked ? 'bad' : 'ok']">{{ r.blocked ? '未通过' : '可生成' }}</span>
+          <span v-if="r.aiSemanticRun" class="badge info">{{ t('shot.preflight.aiCheckRun') }}</span>
+          <span v-else class="muted">{{ t('shot.preflight.aiCheckNotRun') }}</span>
+          <span :class="['badge', RISK_COLOR[r.risk]]">{{ t('shot.preflight.riskLabel') }}{{ riskLabel(r.risk) }}</span>
+          <span :class="['badge', r.blocked ? 'bad' : 'ok']">{{ r.blocked ? t('shot.preflight.notPassed') : t('shot.preflight.canGenerate') }}</span>
         </div>
       </div>
       <div class="sections">
@@ -116,35 +123,35 @@ const RISK_LABEL: Record<string, string> = { LOW: '低', MEDIUM: '中', HIGH: '�
         </div>
       </div>
     </div>
-    <div v-if="matchingReportCount > 1" class="muted">已保留 {{ matchingReportCount - 1 }} 条历史检查记录；当前只显示最新结果。</div>
+    <div v-if="matchingReportCount > 1" class="muted">{{ t('shot.preflight.historyCount', { n: matchingReportCount - 1 }) }}</div>
 
     <div v-if="needsPromptRefresh" class="panel repair-prompt">
       <div>
-        <strong>参考素材已更新</strong>
-        <p>当前提示词尚未包含新的参考图。重新生成后会自动复查，不会提交生成任务。</p>
+        <strong>{{ t('shot.preflight.referencesUpdated') }}</strong>
+        <p>{{ t('shot.preflight.promptNeedsReferences') }}</p>
       </div>
       <button class="primary sm" :disabled="busy !== ''" @click="refreshPrompt">
-        {{ busy === 'refresh-prompt' ? '处理中…' : '重新生成提示词并复查' }}
+        {{ busy === 'refresh-prompt' ? t('shot.common.processing') : t('shot.preflight.regenerateAndRecheck') }}
       </button>
     </div>
 
     <!-- PRD §41 cost protection: show exactly what one Generate will spend. -->
     <div class="panel cost-preview">
-      <div class="panel-title">渲染成本预览（本次提交 = 1 次付费生成）</div>
+      <div class="panel-title">{{ t('shot.preflight.costPreview') }}</div>
       <div class="panel-body row wrap cost-row">
         <span class="badge accent no-dot provider-badge" :title="provider?.name">{{ providerDisplayName }}</span>
-        <span class="badge no-dot">{{ prompt ? H3_MODE_LABEL[prompt.h3Mode] : '—' }}</span>
+        <span class="badge no-dot">{{ prompt ? modeLabel(prompt.h3Mode) : '—' }}</span>
         <span class="badge no-dot">{{ durationSeconds }}s</span>
         <span class="badge no-dot">{{ aspectRatio }}</span>
         <span v-if="provider?.id !== 'mock'" class="badge no-dot">{{ megapixelsLabel }}</span>
-        <span class="muted take-count">1 个 Take</span>
+        <span class="muted take-count">{{ t('shot.workspace.oneNewTake') }}</span>
       </div>
     </div>
 
     <button class="primary render-btn" :disabled="busy !== '' || !prompt || !renderReady" @click="render">
-      {{ busy === 'render' ? '提交中…' : renderReady ? '生成视频 · 创建 1 个新 Take' : !latestMatchingReport ? '请先运行当前提示词的生成检查' : canRender && !providerSupportsPrompt ? '当前 Provider 不支持此模式' : '生成检查通过后可生成' }}
+      {{ busy === 'render' ? t('shot.preflight.submitting') : renderReady ? t('shot.workspace.generateOneTake') : !latestMatchingReport ? t('shot.preflight.runCurrentCheckFirst') : canRender && !providerSupportsPrompt ? t('shot.workspace.providerModeUnsupported') : t('shot.preflight.generateAfterPass') }}
     </button>
-    <p class="muted">点击后会显示最终参数确认；提交前还会强制重跑生成检查，未通过时不会产生生成任务。</p>
+    <p class="muted">{{ t('shot.preflight.finalConfirmationNote') }}</p>
   </div>
 </template>
 

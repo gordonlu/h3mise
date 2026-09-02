@@ -4,6 +4,7 @@ import type { Take, VisualContinuityState } from '@h3mise/shared';
 import { FAILURE_TAGS } from '@h3mise/shared';
 import { takeVideoUrl, fileUrl } from '../../api/client';
 import { confirmDialog } from '../../stores/confirm';
+import { t as tr } from '../../stores/locale';
 import VideoPlayer from '../VideoPlayer.vue';
 import VideoAnalysisFilmstrip from '../VideoAnalysisFilmstrip.vue';
 
@@ -70,9 +71,9 @@ async function run(id: string, fn: () => Promise<void>) {
 
 async function removeRejectedTake(take: Take) {
   const ok = await confirmDialog({
-    title: `删除 ${take.id}？`,
-    message: '将删除这个 Rejected Take 的本地视频、海报和未被引用的帧文件。渲染任务与费用记录会保留。',
-    confirmLabel: '删除 Take',
+    title: tr('shot.takes.deleteTitle', { id: take.id }),
+    message: tr('shot.takes.deleteMessage'),
+    confirmLabel: tr('shot.takes.deleteTake'),
     danger: true,
   });
   if (!ok) return;
@@ -162,8 +163,8 @@ function statesOf(characterId: string): StateLite[] {
 }
 
 function appearanceLabel(character: EntityLite, field: 'costume' | 'hair'): string {
-  if (character.kind !== 'creature') return field === 'costume' ? '服装' : '发型';
-  return field === 'costume' ? '穿戴 / 外观变化' : '毛发 / 表面变化';
+  if (character.kind !== 'creature') return field === 'costume' ? tr('shot.takes.costume') : tr('shot.takes.hair');
+  return field === 'costume' ? tr('shot.takes.creatureAppearance') : tr('shot.takes.creatureSurface');
 }
 
 async function openCommit(takeId: string) {
@@ -252,12 +253,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
         @change="onImportPick"
       />
       <div>
-        <strong>已经在其他工具生成了视频？</strong>
-        <span>导入后会成为这个 Shot 的 Candidate Take，不会发起渲染或产生费用。</span>
-        <span v-if="importError" class="import-error">导入失败：{{ importError }}</span>
+        <strong>{{ tr('shot.takes.generatedElsewhere') }}</strong>
+        <span>{{ tr('shot.takes.importExplanation') }}</span>
+        <span v-if="importError" class="import-error">{{ tr('shot.takes.importFailed') }}{{ importError }}</span>
       </div>
       <button class="sm" :disabled="importBusy" @click="importInput?.click()">
-        {{ importBusy ? '正在读取并抽帧…' : '导入已有视频' }}
+        {{ importBusy ? tr('shot.takes.importing') : tr('shot.takes.importVideo') }}
       </button>
     </div>
 
@@ -266,11 +267,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       <div class="panel-title spread">
         <span>A/B Compare</span>
         <div class="row">
-          <label class="row muted sync-toggle" title="两个播放器同步播放/暂停/seek">
-            <input type="checkbox" v-model="syncPlay" /> 同步播放
+          <label class="row muted sync-toggle" :title="tr('shot.takes.syncTitle')">
+            <input type="checkbox" v-model="syncPlay" /> {{ tr('shot.takes.syncPlayback') }}
           </label>
-          <button class="sm ghost" title="交换 A/B" @click="swapSlots">⇄ 交换</button>
-          <button class="sm ghost" @click="slotA = null; slotB = null">清空</button>
+          <button class="sm ghost" :title="tr('shot.takes.swapTitle')" @click="swapSlots">⇄ {{ tr('shot.takes.swap') }}</button>
+          <button class="sm ghost" @click="slotA = null; slotB = null">{{ tr('shot.takes.clear') }}</button>
         </div>
       </div>
       <div class="compare-grid">
@@ -293,7 +294,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <button class="sm ghost" @click="slotA = null">✕</button>
             </div>
           </template>
-          <div v-else class="cmp-empty muted">在 Take 卡片上点 <span class="kbd">A</span> 设定对比项 A</div>
+          <div v-else class="cmp-empty muted">{{ tr('shot.takes.assignCompareBefore') }} <span class="kbd">A</span> {{ tr('shot.takes.assignCompareAfter', { slot: 'A' }) }}</div>
         </div>
         <div class="cmp-slot">
           <template v-if="takeB">
@@ -314,7 +315,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <button class="sm ghost" @click="slotB = null">✕</button>
             </div>
           </template>
-          <div v-else class="cmp-empty muted">在 Take 卡片上点 <span class="kbd">B</span> 设定对比项 B</div>
+          <div v-else class="cmp-empty muted">{{ tr('shot.takes.assignCompareBefore') }} <span class="kbd">B</span> {{ tr('shot.takes.assignCompareAfter', { slot: 'B' }) }}</div>
         </div>
       </div>
     </div>
@@ -322,8 +323,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
     <!-- focused single player -->
     <div v-else-if="activeTake" class="panel">
       <div class="panel-title spread">
-        <span>播放 Take <span class="mono">{{ activeTake.id }}</span></span>
-        <button class="sm ghost" @click="active = null">关闭</button>
+        <span>{{ tr('shot.takes.playTake') }} <span class="mono">{{ activeTake.id }}</span></span>
+        <button class="sm ghost" @click="active = null">{{ tr('common.close') }}</button>
       </div>
       <div class="panel-body">
         <VideoPlayer :src="takeVideoUrl(activeTake.id)" :poster="activeTake.posterPath ? fileUrl(activeTake.posterPath) : undefined" :max-height="420" />
@@ -331,48 +332,48 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       </div>
     </div>
 
-    <div v-if="!takes.length" class="muted takes-empty">还没有 Take。可以生成新视频，也可以导入已有视频。</div>
+    <div v-if="!takes.length" class="muted takes-empty">{{ tr('shot.takes.noTakes') }}</div>
 
     <div v-if="needsContinuity && !commitTarget" class="panel continuity-next-step">
       <div>
-        <strong>下一步：记录 Selected Take 的最后一帧</strong>
-        <span>下一镜头会用这里的角色外观、位置和环境状态保持衔接。</span>
+        <strong>{{ tr('shot.takes.nextRecordLastFrame') }}</strong>
+        <span>{{ tr('shot.takes.continuityExplanation') }}</span>
       </div>
-      <button class="primary sm" @click="selectedTakeId && openCommit(selectedTakeId)">填写连续性</button>
+      <button class="primary sm" @click="selectedTakeId && openCommit(selectedTakeId)">{{ tr('shot.takes.fillContinuity') }}</button>
     </div>
 
     <!-- Select + Commit continuity form -->
     <div v-if="commitTarget" ref="commitPanel" class="panel commit-panel">
-      <div class="panel-title">记录最后一帧状态 <span class="mono">{{ commitTarget }}</span></div>
+      <div class="panel-title">{{ tr('shot.takes.recordLastFrame') }} <span class="mono">{{ commitTarget }}</span></div>
       <div class="panel-body col">
-        <p class="commit-intro">把这条视频结束时实际看到的内容记下来，下一镜头才能接得上。不确定时先让 AI 读取尾帧，再检查结果。</p>
+        <p class="commit-intro">{{ tr('shot.takes.commitIntro') }}</p>
         <div class="grid commit-grid">
-          <label class="field">地点<input v-model="commitForm.location" placeholder="如：窄巷 / 天台 / 车内" /></label>
-          <label class="field">时间<input v-model="commitForm.timeOfDay" placeholder="如 dusk / 03:00" /></label>
-          <label class="field">天气<input v-model="commitForm.weather" placeholder="如：暴雨 / 晴 / 雾" /></label>
-          <label class="field">风<input v-model="commitForm.wind" placeholder="如：3 级 / 无" /></label>
-          <label class="field">银幕方向<input v-model="commitForm.screenDirection" placeholder="left-to-right" /></label>
-          <label class="field">朝向<input v-model="commitForm.facing" placeholder="如：profile right" /></label>
+          <label class="field">{{ tr('shot.takes.location') }}<input v-model="commitForm.location" :placeholder="tr('shot.takes.locationPlaceholder')" /></label>
+          <label class="field">{{ tr('shot.takes.time') }}<input v-model="commitForm.timeOfDay" :placeholder="tr('shot.takes.timePlaceholder')" /></label>
+          <label class="field">{{ tr('shot.takes.weather') }}<input v-model="commitForm.weather" :placeholder="tr('shot.takes.weatherPlaceholder')" /></label>
+          <label class="field">{{ tr('shot.takes.wind') }}<input v-model="commitForm.wind" :placeholder="tr('shot.takes.windPlaceholder')" /></label>
+          <label class="field">{{ tr('shot.takes.screenDirection') }}<input v-model="commitForm.screenDirection" placeholder="left-to-right" /></label>
+          <label class="field">{{ tr('shot.takes.facing') }}<input v-model="commitForm.facing" :placeholder="tr('shot.takes.facingPlaceholder')" /></label>
         </div>
 
         <div v-if="aiEnabled" class="ai-continuity-assist">
           <div>
-            <strong>推荐：让 AI 先填写</strong>
-            <span>AI 读取真实尾帧生成草稿，你检查后才会保存。</span>
+            <strong>{{ tr('shot.takes.aiRecommended') }}</strong>
+            <span>{{ tr('shot.takes.aiDraftExplanation') }}</span>
           </div>
           <button class="sm" :disabled="aiContinuityBusy || commitBusy" @click="fillContinuityFromLastFrame">
-            {{ aiContinuityBusy ? '正在识别尾帧…' : 'AI 读取尾帧并填写' }}
+            {{ aiContinuityBusy ? tr('shot.takes.aiReadingLastFrame') : tr('shot.takes.aiReadAndFill') }}
           </button>
         </div>
 
         <template v-if="characters.length">
-          <div class="muted sec-caption">角色视觉状态（服装 / 发型 / 伤势 / 手持物 / CharacterState）</div>
+          <div class="muted sec-caption">{{ tr('shot.takes.characterVisualState') }}</div>
           <div v-for="ch in characters" :key="ch.id" class="char-block">
             <div class="row char-head">
               <span class="badge accent no-dot">{{ ch.name }}</span>
               <select
                 :value="commitForm.characterStates[ch.id] ?? ''"
-                title="关联 CharacterState"
+                :title="tr('shot.takes.linkCharacterState')"
                 @change="commitForm.characterStates[ch.id] = ($event.target as HTMLSelectElement).value || undefined as never"
               >
                 <option value="">— CharacterState —</option>
@@ -380,31 +381,31 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               </select>
             </div>
             <div class="grid commit-grid">
-              <label class="field">{{ appearanceLabel(ch, 'costume') }}<input :value="commitForm.costume[ch.id] ?? ''" :placeholder="ch.kind === 'creature' ? '仅填写新增服饰、泥污等变化' : 'wet_white_shirt'" @input="commitForm.costume[ch.id] = ($event.target as HTMLInputElement).value" /></label>
-              <label class="field">{{ appearanceLabel(ch, 'hair') }}<input :value="commitForm.hair[ch.id] ?? ''" :placeholder="ch.kind === 'creature' ? '仅填写湿毛、破损等变化' : 'wet'" @input="commitForm.hair[ch.id] = ($event.target as HTMLInputElement).value" /></label>
-              <label class="field">伤势<input :value="commitForm.injury[ch.id] ?? ''" placeholder="forehead_cut" @input="commitForm.injury[ch.id] = ($event.target as HTMLInputElement).value" /></label>
-              <label class="field">手持物（逗号分隔）<input :value="heldItemsText[ch.id] ?? ''" placeholder="umbrella, phone" @input="heldItemsText[ch.id] = ($event.target as HTMLInputElement).value" /></label>
+              <label class="field">{{ appearanceLabel(ch, 'costume') }}<input :value="commitForm.costume[ch.id] ?? ''" :placeholder="ch.kind === 'creature' ? tr('shot.takes.creatureClothingPlaceholder') : 'wet_white_shirt'" @input="commitForm.costume[ch.id] = ($event.target as HTMLInputElement).value" /></label>
+              <label class="field">{{ appearanceLabel(ch, 'hair') }}<input :value="commitForm.hair[ch.id] ?? ''" :placeholder="ch.kind === 'creature' ? tr('shot.takes.creatureHairPlaceholder') : 'wet'" @input="commitForm.hair[ch.id] = ($event.target as HTMLInputElement).value" /></label>
+              <label class="field">{{ tr('shot.takes.injury') }}<input :value="commitForm.injury[ch.id] ?? ''" placeholder="forehead_cut" @input="commitForm.injury[ch.id] = ($event.target as HTMLInputElement).value" /></label>
+              <label class="field">{{ tr('shot.takes.heldItems') }}<input :value="heldItemsText[ch.id] ?? ''" placeholder="umbrella, phone" @input="heldItemsText[ch.id] = ($event.target as HTMLInputElement).value" /></label>
             </div>
           </div>
         </template>
 
         <template v-if="vehicles.length">
-          <div class="muted sec-caption">载具可见状态</div>
+          <div class="muted sec-caption">{{ tr('shot.takes.vehicleState') }}</div>
           <div class="grid commit-grid">
             <label v-for="v in vehicles" :key="v.id" class="field">
               {{ v.name }}
-              <input :value="commitForm.vehicleState[v.id] ?? ''" placeholder="如 door_open / muddy" @input="commitForm.vehicleState[v.id] = ($event.target as HTMLInputElement).value" />
+              <input :value="commitForm.vehicleState[v.id] ?? ''" :placeholder="tr('shot.takes.vehiclePlaceholder')" @input="commitForm.vehicleState[v.id] = ($event.target as HTMLInputElement).value" />
             </label>
           </div>
         </template>
 
-        <label class="field">备注<textarea v-model="commitForm.notes" rows="2" placeholder="连续性备注：本 Take 实际结束状态与计划的偏差…"></textarea></label>
+        <label class="field">{{ tr('shot.takes.notes') }}<textarea v-model="commitForm.notes" rows="2" :placeholder="tr('shot.takes.notesPlaceholder')"></textarea></label>
 
         <div class="row">
-          <button class="primary sm" :disabled="commitBusy || aiContinuityBusy" @click="doSelectCommit">{{ commitBusy ? '保存中…' : '确认并保存连续性' }}</button>
-          <button class="sm" @click="commitTarget = null">取消</button>
+          <button class="primary sm" :disabled="commitBusy || aiContinuityBusy" @click="doSelectCommit">{{ commitBusy ? tr('shot.common.saving') : tr('shot.takes.confirmContinuity') }}</button>
+          <button class="sm" @click="commitTarget = null">{{ tr('common.cancel') }}</button>
         </div>
-        <p class="muted">这里只记录画面结束状态，不会改动故事内容。</p>
+        <p class="muted">{{ tr('shot.takes.onlyRecordsVisualState') }}</p>
       </div>
     </div>
 
@@ -431,7 +432,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <span class="mono take-id">{{ t.id }}</span>
               <span v-if="t.source === 'import'" class="badge info no-dot" :title="t.provenance.originalFileName">IMPORTED</span>
             </div>
-            <div class="stars" :title="`评分 ${t.rating ?? '—'}`">
+            <div class="stars" :title="tr('shot.takes.rating', { value: t.rating ?? '—' })">
               <span v-for="i in 5" :key="i" class="star" :class="{ on: (t.rating ?? 0) >= i }" @click="setRating(t, i)">★</span>
             </div>
           </div>
@@ -439,32 +440,32 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <!-- contextual primary actions -->
           <div class="row wrap">
             <template v-if="t.status === 'candidate'">
-              <button class="sm primary" :disabled="busyId === t.id" title="选中后继续填写尾帧连续性；快捷键 S" @click="selectAndOpenCommit(t.id)">选用此条</button>
-              <button class="sm" @click="openCommit(t.id)">选用并填写连续性</button>
-              <button class="sm danger ghost" title="快捷键 R" @click="run(t.id, () => onReject(t.id))">Reject</button>
+              <button class="sm primary" :disabled="busyId === t.id" :title="tr('shot.takes.selectTitle')" @click="selectAndOpenCommit(t.id)">{{ tr('shot.takes.selectThis') }}</button>
+              <button class="sm" @click="openCommit(t.id)">{{ tr('shot.takes.selectAndFill') }}</button>
+              <button class="sm danger ghost" :title="tr('shot.takes.rejectTitle')" @click="run(t.id, () => onReject(t.id))">Reject</button>
             </template>
             <template v-else-if="t.status === 'selected'">
-              <button class="sm primary" @click="openCommit(t.id)">{{ committedTakeId === t.id ? '查看 / 更新连续性' : '下一步：填写连续性' }}</button>
-              <button class="sm danger ghost" @click="run(t.id, () => onReject(t.id))">取消选择</button>
+              <button class="sm primary" @click="openCommit(t.id)">{{ committedTakeId === t.id ? tr('shot.takes.viewUpdateContinuity') : tr('shot.takes.nextFillContinuity') }}</button>
+              <button class="sm danger ghost" @click="run(t.id, () => onReject(t.id))">{{ tr('shot.takes.cancelSelection') }}</button>
             </template>
             <template v-else>
-              <button class="sm primary" :disabled="busyId === t.id" @click="run(t.id, () => onSelect(t.id))">改选此条</button>
-              <button class="sm danger" :disabled="busyId === t.id" @click="removeRejectedTake(t)">删除</button>
+              <button class="sm primary" :disabled="busyId === t.id" @click="run(t.id, () => onSelect(t.id))">{{ tr('shot.takes.selectInstead') }}</button>
+              <button class="sm danger" :disabled="busyId === t.id" @click="removeRejectedTake(t)">{{ tr('common.delete') }}</button>
             </template>
           </div>
 
           <div class="row wrap take-tools">
-            <button class="sm" :class="{ 'slot-a': slotA === t.id }" title="设为对比 A（快捷键 A）" @click="assignSlot(t.id, 'A')">A</button>
-            <button class="sm" :class="{ 'slot-b': slotB === t.id }" title="设为对比 B（快捷键 B）" @click="assignSlot(t.id, 'B')">B</button>
-            <button class="sm ghost" title="把本 Take 的最后一帧作为下一镜头的首帧（Frame Bridge）" @click="onUseLastFrame(t.id)">↗ 尾帧作首帧</button>
-            <button class="sm ghost" title="把本 Take 的首帧作为首帧参考" @click="onUseFirstFrame(t.id)">↗ 首帧作参考</button>
-            <button v-if="aiEnabled" class="sm ghost" @click="onAiDiagnose(t.id)">AI 诊断</button>
+            <button class="sm" :class="{ 'slot-a': slotA === t.id }" :title="tr('shot.takes.compareSlotTitle', { slot: 'A' })" @click="assignSlot(t.id, 'A')">A</button>
+            <button class="sm" :class="{ 'slot-b': slotB === t.id }" :title="tr('shot.takes.compareSlotTitle', { slot: 'B' })" @click="assignSlot(t.id, 'B')">B</button>
+            <button class="sm ghost" :title="tr('shot.takes.lastFrameBridgeTitle')" @click="onUseLastFrame(t.id)">↗ {{ tr('shot.takes.lastFrameAsFirst') }}</button>
+            <button class="sm ghost" :title="tr('shot.takes.firstFrameReferenceTitle')" @click="onUseFirstFrame(t.id)">↗ {{ tr('shot.takes.firstFrameAsReference') }}</button>
+            <button v-if="aiEnabled" class="sm ghost" @click="onAiDiagnose(t.id)">{{ tr('shot.takes.aiDiagnosis') }}</button>
           </div>
 
           <!-- failure tags, collapsible -->
           <div class="tag-area">
             <div class="row tag-head" @click="tagOpen[t.id] = !tagOpen[t.id]">
-              <span class="muted">失败标记</span>
+              <span class="muted">{{ tr('shot.takes.failureTags') }}</span>
               <span v-if="t.failureTags.length" class="badge bad no-dot">{{ t.failureTags.length }}</span>
               <span class="muted chev-sm">{{ tagOpen[t.id] ? '▾' : '▸' }}</span>
             </div>
@@ -486,17 +487,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             v-if="noteEdit === t.id"
             :value="t.notes"
             rows="2"
-            placeholder="笔记 / 失败原因…"
+            :placeholder="tr('shot.takes.notesFailurePlaceholder')"
             @blur="noteEdit = null"
             @input="onUpdate(t.id, { notes: ($event.target as HTMLTextAreaElement).value })"
           />
-          <button v-else class="sm ghost note-btn" @click="noteEdit = t.id">{{ t.notes || '＋ 笔记' }}</button>
+          <button v-else class="sm ghost note-btn" @click="noteEdit = t.id">{{ t.notes || `＋ ${tr('shot.takes.note')}` }}</button>
         </div>
       </div>
     </div>
 
     <div class="muted shortcuts">
-      快捷键：点击封面聚焦 Take 后，<span class="kbd">S</span> 选片 · <span class="kbd">R</span> 拒片 · <span class="kbd">A</span>/<span class="kbd">B</span> 设定对比
+      {{ tr('shot.takes.shortcutsBefore') }} <span class="kbd">S</span> {{ tr('shot.takes.select') }} · <span class="kbd">R</span> {{ tr('shot.takes.reject') }} · <span class="kbd">A</span>/<span class="kbd">B</span> {{ tr('shot.takes.compare') }}
     </div>
   </div>
 </template>

@@ -2,6 +2,7 @@
 import { ref, watch, computed, toRaw } from 'vue';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan } from '@h3mise/shared';
+import { t } from '../../stores/locale';
 
 const props = defineProps<{ plan: DirectorPlan; aiEnabled: boolean; onAiSuggest: (plan: DirectorPlan) => void; aiBusy?: boolean }>();
 const emit = defineEmits<{ save: [plan: DirectorPlan]; paste: []; dirtyChange: [dirty: boolean] }>();
@@ -185,6 +186,24 @@ const advancedSections = sections
   .map((section) => ({ ...section, fields: section.fields.filter((field) => !essentialPathKeys.has(field.path.join('.'))) }))
   .filter((section) => section.fields.length > 0);
 
+function pathKey(path: readonly string[]): string {
+  return path.join('.');
+}
+
+function fieldLabel(field: FieldDef): string {
+  return t(`shot.plan.field.${pathKey(field.path)}`);
+}
+
+function fieldPlaceholder(field: FieldDef): string {
+  const key = `shot.plan.placeholder.${pathKey(field.path)}`;
+  const translated = t(key);
+  return translated === key ? (field.placeholder ?? '') : translated;
+}
+
+function essentialText(field: EssentialFieldDef, part: 'question' | 'help' | 'placeholder'): string {
+  return t(`shot.plan.essential.${pathKey(field.path)}.${part}`);
+}
+
 const requiredFilledCount = computed(() => essentialFields.filter((field) => {
   const value = fieldValue(field.path);
   return String(value ?? '').trim() !== '';
@@ -246,76 +265,75 @@ function requestAiSuggestion() {
     <div class="spread editor-bar">
       <div>
         <div class="row">
-          <strong>镜头设计</strong>
-          <span class="required-progress" :class="{ complete: isRequiredComplete }">{{ requiredFilledCount }} / {{ essentialFields.length }} 必填</span>
+          <strong>{{ t('shot.plan.shotDesign') }}</strong>
+          <span class="required-progress" :class="{ complete: isRequiredComplete }">{{ t('shot.plan.requiredProgress', { filled: requiredFilledCount, total: essentialFields.length }) }}</span>
         </div>
         <div class="save-state row">
           <span class="muted mono">DirectorPlan v{{ draft.version }}</span>
-          <span v-if="isDirty" class="badge warn" title="有未保存的修改">● 未保存修改</span>
-          <span v-else-if="hasSavedVersion" class="badge ok">已保存</span>
-          <span v-else class="badge warn">尚未创建</span>
+          <span v-if="isDirty" class="badge warn" :title="t('shot.plan.unsavedChangesTitle')">● {{ t('shot.plan.unsavedChanges') }}</span>
+          <span v-else-if="hasSavedVersion" class="badge ok">{{ t('shot.plan.saved') }}</span>
+          <span v-else class="badge warn">{{ t('shot.plan.notCreated') }}</span>
         </div>
       </div>
       <div class="row editor-actions">
         <button
           class="sm ai-fill"
           :disabled="!aiEnabled || aiBusy"
-          :title="aiEnabled ? '基于当前草稿，一次完善必填项和高级设置' : '请先在设置中配置内部 AI'"
+          :title="aiEnabled ? t('shot.plan.aiImproveTitle') : t('shot.plan.configureAiTitle')"
           @click="requestAiSuggestion"
-        >{{ aiBusy ? 'AI 完善中…' : aiEnabled ? 'AI 完善镜头设计' : '内部 AI 未配置' }}</button>
-        <button class="primary sm" :class="{ pulse: isDirty && isRequiredComplete }" :disabled="!isDirty || !isRequiredComplete" @click="save">保存镜头设计</button>
+        >{{ aiBusy ? t('shot.plan.aiImproving') : aiEnabled ? t('shot.plan.aiImprove') : t('shot.plan.aiNotConfigured') }}</button>
+        <button class="primary sm" :class="{ pulse: isDirty && isRequiredComplete }" :disabled="!isDirty || !isRequiredComplete" @click="save">{{ t('shot.plan.saveShotDesign') }}</button>
       </div>
     </div>
 
     <section class="panel essential-card">
       <div class="essential-intro">
-        <strong>完成这 4 项就可以继续</strong>
-        <span>不懂专业术语也没关系，用自然语言描述即可。</span>
+        <strong>{{ t('shot.plan.completeFourItems') }}</strong>
+        <span>{{ t('shot.plan.plainLanguageHint') }}</span>
       </div>
       <div class="essential-fields">
         <label v-for="(f, index) in essentialFields" :key="f.path.join('.')" class="essential-field">
           <span class="essential-number" :class="{ done: String(fieldValue(f.path) ?? '').trim() }">{{ String(fieldValue(f.path) ?? '').trim() ? '✓' : index + 1 }}</span>
           <span class="essential-copy">
-            <span class="essential-question">{{ f.question }} <span class="required-mark">必填</span></span>
-            <span class="essential-help">{{ f.help }}</span>
+            <span class="essential-question">{{ essentialText(f, 'question') }} <span class="required-mark">{{ t('shot.plan.required') }}</span></span>
+            <span class="essential-help">{{ essentialText(f, 'help') }}</span>
           </span>
-          <textarea :value="fieldValue(f.path)" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
+          <textarea :value="fieldValue(f.path)" rows="2" :placeholder="essentialText(f, 'placeholder')" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
         </label>
       </div>
-      <div v-if="!isRequiredComplete" class="required-hint">还需填写 {{ essentialFields.length - requiredFilledCount }} 项，完成后即可保存并继续准备提示词。</div>
-      <div v-else class="required-hint complete">镜头设计已完整，可以保存并继续准备提示词。</div>
+      <div v-if="!isRequiredComplete" class="required-hint">{{ t('shot.plan.itemsRemaining', { n: essentialFields.length - requiredFilledCount }) }}</div>
+      <div v-else class="required-hint complete">{{ t('shot.plan.designComplete') }}</div>
     </section>
 
     <section class="advanced-wrap">
       <div class="advanced-head">
         <button class="advanced-toggle" :aria-expanded="advancedVisible" @click="advancedVisible = !advancedVisible">
           <span>{{ advancedVisible ? '▾' : '▸' }}</span>
-          <span><strong>高级设置</strong><small>可选 · 走位、表演、环境、连续性与生成参数</small></span>
+          <span><strong>{{ t('shot.plan.advancedSettings') }}</strong><small>{{ t('shot.plan.advancedSettingsHint') }}</small></span>
         </button>
-        <button class="sm ghost paste-btn" @click.stop="emit('paste')">粘贴外部 AI</button>
+        <button class="sm ghost paste-btn" @click.stop="emit('paste')">{{ t('shot.plan.pasteExternalAi') }}</button>
       </div>
 
       <div v-if="advancedVisible" class="advanced-sections">
         <div v-for="sec in advancedSections" :key="sec.key" class="panel section" :class="{ open: open.has(sec.key) }">
           <div class="sec-head" @click="toggleSection(sec.key)">
             <span class="chev">{{ open.has(sec.key) ? '▾' : '▸' }}</span>
-            <span class="sec-cn">{{ sec.cn }}</span>
-            <span class="sec-en">{{ sec.en }}</span>
-            <span v-if="!open.has(sec.key) && filledCount(sec)" class="badge accent no-dot">{{ filledCount(sec) }} 项已填</span>
+            <span class="sec-cn">{{ t(`shot.plan.section.${sec.key}`) }}</span>
+            <span v-if="!open.has(sec.key) && filledCount(sec)" class="badge accent no-dot">{{ t('shot.plan.itemsFilled', { n: filledCount(sec) }) }}</span>
             <span class="grow" />
           </div>
           <div v-if="open.has(sec.key)" class="panel-body grid two">
             <label v-for="f in sec.fields" :key="f.path.join('.')" class="field">
-              <span class="f-label">{{ f.cn }} <span class="f-en">{{ f.en }}</span></span>
+              <span class="f-label">{{ fieldLabel(f) }}</span>
               <select v-if="f.type === 'select'" :value="fieldValue(f.path)" @change="setField(f.path, ($event.target as HTMLSelectElement).value)">
                 <option v-for="o in f.options" :key="o" :value="o">{{ o || '—' }}</option>
               </select>
-              <textarea v-else-if="f.type === 'textarea'" :value="fieldValue(f.path)" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
-              <input v-else-if="f.type === 'number'" type="number" :value="fieldValue(f.path)" :placeholder="f.placeholder" @input="setField(f.path, Number(($event.target as HTMLInputElement).value))" />
+              <textarea v-else-if="f.type === 'textarea'" :value="fieldValue(f.path)" rows="2" :placeholder="fieldPlaceholder(f)" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value)" />
+              <input v-else-if="f.type === 'number'" type="number" :value="fieldValue(f.path)" :placeholder="fieldPlaceholder(f)" @input="setField(f.path, Number(($event.target as HTMLInputElement).value))" />
               <template v-else-if="f.type === 'list'">
-                <textarea :value="(fieldValue(f.path) as string[]).join('\n')" rows="2" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value.split('\n').filter(Boolean))" />
+                <textarea :value="(fieldValue(f.path) as string[]).join('\n')" rows="2" :placeholder="fieldPlaceholder(f)" @input="setField(f.path, ($event.target as HTMLTextAreaElement).value.split('\n').filter(Boolean))" />
               </template>
-              <input v-else :value="fieldValue(f.path)" :placeholder="f.placeholder" @input="setField(f.path, ($event.target as HTMLInputElement).value)" />
+              <input v-else :value="fieldValue(f.path)" :placeholder="fieldPlaceholder(f)" @input="setField(f.path, ($event.target as HTMLInputElement).value)" />
             </label>
           </div>
         </div>

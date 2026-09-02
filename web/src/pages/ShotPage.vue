@@ -17,6 +17,7 @@ import ReferencesPanel from '../components/director/ReferencesPanel.vue';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import GuideStepper from '../components/GuideStepper.vue';
 import WorkspacePanel from '../components/director/WorkspacePanel.vue';
+import { t as tr } from '../stores/locale';
 
 const route = useRoute();
 const router = useRouter();
@@ -34,11 +35,11 @@ function showVisionStatus(result: unknown) {
   const vision = (result as { vision?: VisionStatus } | null)?.vision;
   if (!vision) return;
   if (vision.mode === 'multimodal') {
-    toasts.push({ kind: 'ok', text: `图片请求成功：AI 已接收 ${vision.imageCount} 张参考图` });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.visionSuccess', { n: vision.imageCount }) });
   } else if (vision.mode === 'text_fallback') {
-    toasts.push({ kind: 'info', text: `识图请求失败，已自动降级为纯文字（原计划发送 ${vision.imageCount} 张图）`, timeout: 8000 });
+    toasts.push({ kind: 'info', text: tr('shot.toast.visionFallback', { n: vision.imageCount }), timeout: 8000 });
   } else {
-    toasts.push({ kind: 'info', text: '本次 AI 请求未附带可读取的镜头参考图，使用纯文字处理', timeout: 8000 });
+    toasts.push({ kind: 'info', text: tr('shot.toast.visionTextOnly'), timeout: 8000 });
   }
 }
 
@@ -53,7 +54,7 @@ async function resolveRenderDependency() {
   try {
     await post<ShotRenderReadiness>(`/api/shots/${shotId}/render-dependency/resolve`);
     await s.load();
-    toasts.push({ kind: 'ok', text: '已把上游 Selected Take 的尾帧绑定为本镜头首帧；请重新生成提示词并 Preflight' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.boundPreviousLastFrame') });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   }
@@ -139,14 +140,16 @@ const primaryVisualImage = computed(() => {
   const assetId = primaryState.value?.effectiveImageAssetId ?? primaryEntity.value?.imageAssetId;
   return media.value.find((asset) => asset.id === assetId && asset.kind === 'image') ?? null;
 });
-const primaryVisualLabel = computed(() => primaryState.value?.imageAssetId ? `${primaryState.value.name}状态图` : `${primaryEntity.value?.name ?? '实体'}主图`);
+const primaryVisualLabel = computed(() => primaryState.value?.imageAssetId
+  ? tr('shot.asset.stateImage', { name: primaryState.value.name })
+  : tr('shot.asset.mainImage', { name: primaryEntity.value?.name ?? tr('shot.asset.entity') }));
 const hasRefImageBinding = computed(() => sDetail.value?.bindings.some((binding) => binding.type === 'image' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame')) ?? false);
 const canUsePrimaryAsRefImage = computed(() => sShot.value?.h3Mode === 'ref2va' && Boolean(primaryVisualImage.value) && !hasRefImageBinding.value);
 
 async function usePrimaryVisualAsRefImage() {
   const asset = primaryVisualImage.value;
   if (!asset || !canUsePrimaryAsRefImage.value) return;
-  await guarded(() => s.addBinding({ assetId: asset.id, roles: [], label: primaryVisualLabel.value }), '已绑定角色图为 RefImage');
+  await guarded(() => s.addBinding({ assetId: asset.id, roles: [], label: primaryVisualLabel.value }), tr('shot.toast.boundCharacterRef'));
 }
 
 async function correctToRef2va() {
@@ -155,7 +158,7 @@ async function correctToRef2va() {
   await guarded(async () => {
     await s.updateShot({ h3Mode: 'ref2va' });
     if (needsBinding && asset) await s.addBinding({ assetId: asset.id, roles: [], label: primaryVisualLabel.value });
-  }, needsBinding ? '已切换 Ref2VA，并绑定角色图为 RefImage' : '已切换为 Ref2VA 参考图模式');
+  }, needsBinding ? tr('shot.toast.switchedRefAndBound') : tr('shot.toast.switchedRefMode'));
 }
 
 /** PRD §15: UI only opens modes the current provider profile actually supports.
@@ -172,27 +175,24 @@ const canCorrectReferenceMode = computed(() =>
 );
 
 const userStatus = computed(() => (sShot.value ? SHOT_USER_STATUS[sShot.value.status] : 'draft'));
-const referenceModeHint = computed(() => ({
-  t2va: '当前为 T2VA，无需参考素材',
-  i2va: '当前为 I2VA，需要首帧图',
-  l2va: '当前为 L2VA，需要尾帧图',
-  fl2va: '当前为 FL2VA，需要首帧图和尾帧图',
-  ref2va: '当前为 Ref2VA，需要参考图；参考音频可选',
-})[sShot.value?.h3Mode ?? 't2va']);
+const referenceModeHint = computed(() => tr(`shot.referenceHint.${sShot.value?.h3Mode ?? 't2va'}`));
 
 const guideActionLabel = computed(() => {
   const kind = sDetail.value?.guide.nextAction.kind;
-  if (kind === 'design_shot') return '编辑镜头设计';
-  if (kind === 'add_reference') return '添加参考素材';
-  if (kind === 'review_prompt') return '准备提示词';
-  if (kind === 'run_preflight') return '开始生成检查';
-  if (kind === 'render') return '确认生成参数';
-  if (kind === 'wait_render') return '查看生成任务';
-  if (kind === 'select_take') return '比较 Takes';
-  if (kind === 'continue_next_shot') return '继续下一个镜头';
-  if (kind === 'open_timeline') return '进入成片编排';
-  return '前往导出';
+  return tr(`shot.guide.action.${kind ?? 'export'}`);
 });
+
+function localizedNextAction(action: NextAction): NextAction {
+  const titleKey = `shot.guide.${action.kind}.title`;
+  const descriptionKey = `shot.guide.${action.kind}.description`;
+  const title = tr(titleKey);
+  const description = tr(descriptionKey);
+  return {
+    ...action,
+    title: title === titleKey ? action.title : title,
+    description: description === descriptionKey ? action.description : description,
+  };
+}
 
 function openGuideAction(action: NextAction) {
   if (action.kind === 'wait_render') {
@@ -218,34 +218,26 @@ function applyGuideQuery() {
   else if (target === 'preflight') tab.value = 'preflight';
 }
 
-const EXTERNAL_TASKS = [
-  { id: 'Plan Shot', label: '生成完整镜头设计' },
-  { id: 'Improve Camera', label: '优化摄影机设计' },
-  { id: 'Improve Performance', label: '优化表演设计' },
-];
+const EXTERNAL_TASKS = computed(() => [
+  { id: 'Plan Shot', label: tr('shot.external.planShot') },
+  { id: 'Improve Camera', label: tr('shot.external.improveCamera') },
+  { id: 'Improve Performance', label: tr('shot.external.improvePerformance') },
+]);
 
-const DIRECTOR_PLAN_EXAMPLE = `intent:
-  visualThesis: "空荡的放映室里，MISE 在应急灯下显得孤独而渺小"
-  endState: "停在 MISE 抬头望向墙上时钟的中近景"
-subject:
-  action: "MISE 低着头静止片刻，然后缓慢抬头"
-camera:
-  dominantBehavior: "中景固定机位，缓慢推近 MISE"`;
+const DIRECTOR_PLAN_EXAMPLE = computed(() => tr('shot.external.planExample'));
 
-const EXTERNAL_TASK_INSTRUCTION: Record<string, string> = {
-  'Plan Shot': '为当前 Shot 生成清晰、可执行的镜头设计。',
-  'Improve Camera': '保留现有镜头意图和主体动作，重点优化摄影机设计。',
-  'Improve Performance': '保留现有镜头意图和摄影机设计，重点优化主体动作与表演。',
-};
+function externalTaskInstruction(task: string): string {
+  return tr(`shot.external.instruction.${({ 'Plan Shot': 'plan', 'Improve Camera': 'camera', 'Improve Performance': 'performance' } as Record<string, string>)[task] ?? 'plan'}`);
+}
 
 const parsedMissingFields = computed(() => {
   const plan = parseResult.value?.plan;
   if (!plan) return [];
   return [
-    ['镜头目标', plan.intent.visualThesis],
-    ['主体动作', plan.subject.action],
-    ['摄影机', plan.camera.dominantBehavior],
-    ['结束画面', plan.intent.endState],
+    [tr('shot.plan.field.intent.visualThesis'), plan.intent.visualThesis],
+    [tr('shot.plan.field.subject.action'), plan.subject.action],
+    [tr('shot.plan.field.camera.dominantBehavior'), plan.camera.dominantBehavior],
+    [tr('shot.plan.field.intent.endState'), plan.intent.endState],
   ].filter(([, value]) => !String(value ?? '').trim()).map(([label]) => label);
 });
 
@@ -280,7 +272,7 @@ async function runAi(action: string, body: Record<string, unknown>): Promise<unk
   const key = `${action}:${JSON.stringify(body).slice(0, 40)}`;
   const res = await post<{ jobId: string; status: string }>(`/api/ai/actions/${action}`, body);
   aiJobs.value[key] = res.jobId;
-  toasts.push({ kind: 'info', text: `AI 任务已提交，后台处理中（通常 10–60 秒，最长 3 分钟），结果会即时提示…` });
+  toasts.push({ kind: 'info', text: tr('shot.toast.aiSubmitted') });
   let waited = 0;
   let longRunningReminderShown = false;
   try {
@@ -297,7 +289,7 @@ async function runAi(action: string, body: Record<string, unknown>): Promise<unk
       // polls, producing two consecutive "still processing" toasts.
       if (!longRunningReminderShown && waited >= 30) {
         longRunningReminderShown = true;
-        toasts.push({ kind: 'info', text: 'AI 仍在处理，请稍候…（超过 3 分钟会提示超时）' });
+        toasts.push({ kind: 'info', text: tr('shot.toast.aiStillProcessing') });
       }
     }
     throw new Error('AI job timeout');
@@ -310,15 +302,15 @@ const aiBusy = computed(() => Object.keys(aiJobs.value).length > 0);
 
 async function deleteThisShot() {
   const ok = await confirmDialog({
-    title: `删除 Shot「${sShot.value?.title || shotId}」？`,
-    message: '将同时删除其导演计划、提示词版本、成片、生成任务和时间线片段，不可恢复。',
-    confirmLabel: '删除',
+    title: tr('shot.confirmDeleteTitle', { title: sShot.value?.title || shotId }),
+    message: tr('shot.confirmDeleteMessage'),
+    confirmLabel: tr('common.delete'),
     danger: true,
   });
   if (!ok) return;
   try {
     await del(`/api/shots/${shotId}`);
-    toasts.push({ kind: 'ok', text: 'Shot 已删除' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.shotDeleted') });
     router.push('/shots');
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
@@ -341,9 +333,9 @@ async function aiSuggest(currentPlan: DirectorPlan) {
     const plan = (result as { plan?: DirectorPlan })?.plan;
     if (plan) {
       await s.savePlan(plan, 'builtin_ai');
-      toasts.push({ kind: 'ok', text: 'AI 建议已保存为新的导演计划版本，可继续手工调整' });
+      toasts.push({ kind: 'ok', text: tr('shot.toast.aiPlanSaved') });
     } else {
-      toasts.push({ kind: 'err', text: 'AI 未返回可用的计划' });
+      toasts.push({ kind: 'err', text: tr('shot.toast.aiNoPlan') });
     }
   });
 }
@@ -354,7 +346,7 @@ async function aiCompile() {
     const text = (result as { text?: string })?.text;
     if (text) {
       await s.importRawPrompt(text, sShot.value?.h3Mode ?? 't2va', 'ai_compiler');
-      toasts.push({ kind: 'ok', text: 'AI 优化后的提示词已保存为新版本' });
+      toasts.push({ kind: 'ok', text: tr('shot.toast.aiPromptSaved') });
     }
   });
 }
@@ -363,14 +355,14 @@ async function aiDiagnose(takeId: string) {
   await guarded(async () => {
     const result = await runAi('diagnose_take', { takeId });
     aiResults.value[`diag:${takeId}`] = result;
-    toasts.push({ kind: 'ok', text: 'AI 诊断完成，见 Take 区域下方' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.aiDiagnosisComplete') });
   });
 }
 
 async function aiContinuity(takeId: string): Promise<{ state: import('@h3mise/shared').VisualContinuityState }> {
   const result = await runAi('analyze_take_continuity', { takeId }) as { state?: import('@h3mise/shared').VisualContinuityState };
-  if (!result.state) throw new Error('AI 未返回可用的连续性状态');
-  toasts.push({ kind: 'ok', text: 'AI 已根据尾帧填写连续性草稿，请确认后提交' });
+  if (!result.state) throw new Error(tr('shot.toast.aiNoContinuity'));
+  toasts.push({ kind: 'ok', text: tr('shot.toast.aiContinuityDraft') });
   return { state: result.state };
 }
 
@@ -383,7 +375,7 @@ async function aiPreflight(promptId: string) {
     if (!report) report = await s.runPreflight(prompt.id, providerId.value, megapixels.value);
     const result = await runAi('continuity_check', { shotId });
     report = await s.attachSemanticReview(report.id, aiText(result));
-    toasts.push({ kind: 'ok', text: 'AI 连续性检查已加入当前生成检查记录' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.aiCheckAdded') });
   });
   return report;
 }
@@ -401,16 +393,16 @@ async function doRender(promptId: string) {
       return false;
     });
     const referenceSummary = submittedBindings.length
-      ? `\n实际提交的参考素材：${submittedBindings.map((binding) => binding.label || binding.id).join('、')}`
-      : '\n当前模式不提交参考素材。';
+      ? `\n${tr('shot.render.submittedReferences')}${submittedBindings.map((binding) => binding.label || binding.id).join(tr('shot.common.listSeparator'))}`
+      : `\n${tr('shot.render.noReferencesSubmitted')}`;
     const confirmed = await confirmDialog({
-      title: '确认生成 1 个新 Take？',
-      message: `${activeProvider.value?.name ?? '当前生成服务'} · ${H3_MODE_LABEL[mode]} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'} · ${megapixels.value} MP。${referenceSummary}\n提交后将创建一次生成任务。`,
-      confirmLabel: '确认生成',
+      title: tr('shot.render.confirmTitle'),
+      message: `${activeProvider.value?.name ?? tr('shot.render.currentProvider')} · ${modeLabel(mode)} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'} · ${megapixels.value} MP。${referenceSummary}\n${tr('shot.render.confirmMessage')}`,
+      confirmLabel: tr('shot.render.confirm'),
     });
     if (!confirmed) return;
     const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds, megapixels.value);
-    toasts.push({ kind: 'ok', text: `渲染任务 ${job.id} 已提交 — 状态实时推送` });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.renderSubmitted', { id: job.id }) });
   });
 }
 
@@ -418,7 +410,7 @@ async function refreshPromptReferences() {
   await guarded(async () => {
     const prompt = await s.compilePrompt(sShot.value?.h3Mode ?? 't2va');
     await s.runPreflight(prompt.id, providerId.value, megapixels.value);
-    toasts.push({ kind: 'ok', text: '提示词已纳入最新参考素材，生成检查已通过' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.promptReferencesUpdated') });
   });
 }
 
@@ -437,36 +429,21 @@ async function contextPackage(): Promise<Record<string, unknown>> {
 async function copyExternalAiPrompt() {
   await guarded(async () => {
     const pkg = await contextPackage();
-    const prompt = `你是 H3Mise 的镜头导演助手。
-
-任务：${EXTERNAL_TASK_INSTRUCTION[externalTask.value] ?? EXTERNAL_TASK_INSTRUCTION['Plan Shot']}
-
-请根据下面的 Context Package 返回一个 DirectorPlan。
-
-输出要求：
-1. 只返回 YAML 或 JSON，不要解释，不要使用 Markdown 代码围栏。
-2. 必须包含这 4 个字段：intent.visualThesis、subject.action、camera.dominantBehavior、intent.endState。
-3. 可以补充其他 DirectorPlan 字段，但不确定的内容请省略，不要编造事实。
-4. 最简有效格式如下：
-
-${DIRECTOR_PLAN_EXAMPLE}
-
-Context Package：
-${JSON.stringify(pkg, null, 2)}`;
+    const prompt = `${tr('shot.external.fullPromptTemplate', { task: externalTaskInstruction(externalTask.value), example: DIRECTOR_PLAN_EXAMPLE.value, context: JSON.stringify(pkg, null, 2) })}`;
     await navigator.clipboard.writeText(prompt);
-    toasts.push({ kind: 'ok', text: '完整提示词已复制，可直接粘贴给任意外部 AI' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.fullPromptCopied') });
   });
 }
 
 async function copyContextPackageOnly() {
   await guarded(async () => {
     await navigator.clipboard.writeText(JSON.stringify(await contextPackage(), null, 2));
-    toasts.push({ kind: 'ok', text: '仅 Context Package 已复制' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.contextOnlyCopied') });
   });
 }
 
 function insertDirectorPlanExample() {
-  pasteText.value = DIRECTOR_PLAN_EXAMPLE;
+  pasteText.value = DIRECTOR_PLAN_EXAMPLE.value;
   parseResult.value = null;
 }
 
@@ -477,7 +454,7 @@ async function parsePaste() {
 async function applyParsed() {
   if (parseResult.value?.plan && parsedMissingFields.value.length === 0) {
     await s.savePlan(parseResult.value.plan, 'external_ai');
-    toasts.push({ kind: 'ok', text: '外部 AI 的导演计划已应用为新版本' });
+    toasts.push({ kind: 'ok', text: tr('shot.toast.externalPlanApplied') });
     parseResult.value = null;
     pasteText.value = '';
     tab.value = 'plan';
@@ -489,7 +466,7 @@ async function applyParsed() {
 async function inheritContinuity() {
   const actual = sDetail.value?.continuityLatest?.visualActual?.state;
   if (!actual) {
-    toasts.push({ kind: 'err', text: '没有已提交的 Actual Continuity 可继承（先在上一镜头 Select + Commit）' });
+    toasts.push({ kind: 'err', text: tr('shot.toast.noActualToInherit') });
     return;
   }
   const plan = sPlan.value?.plan ? structuredClone(toRaw(sPlan.value.plan)) : emptyPlan();
@@ -506,35 +483,35 @@ async function inheritContinuity() {
   ].filter(Boolean);
   plan.continuity.plannedStartState = `Inherited from previous shot actual: ${parts.join('; ')}`;
   await s.savePlan(plan);
-  toasts.push({ kind: 'ok', text: '已将上一镜头的 Actual Continuity 继承为本镜头的 Planned Start State' });
+  toasts.push({ kind: 'ok', text: tr('shot.toast.actualInherited') });
 }
 
 async function useTakeFrame(takeId: string, which: 'first' | 'last') {
   const target = media.value.find((m) => m.label.includes(`Take ${takeId} ${which} frame`));
   if (!target) {
-    toasts.push({ kind: 'err', text: `未找到 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧资产` });
+    toasts.push({ kind: 'err', text: tr('shot.toast.frameAssetNotFound', { takeId, frame: which === 'last' ? tr('shot.lastFrame') : tr('shot.firstFrame') }) });
     return;
   }
   // Frame Bridge semantics: a take's LAST frame is the NEXT shot's first
   // frame (continuity chaining); its FIRST frame references this shot.
   let bindShotId = shotId;
-  let where = '本镜头';
+  let where = tr('shot.thisShot');
   if (which === 'last') {
     const shots = await get<Array<{ id: string; sequenceId: string | null; order: number; title: string }>>('/api/shots');
     const cur = shots.find((x) => x.id === shotId);
     if (!cur) {
-      toasts.push({ kind: 'err', text: '找不到当前镜头' });
+      toasts.push({ kind: 'err', text: tr('shot.toast.currentShotNotFound') });
       return;
     }
     const next = shots
       .filter((x) => x.sequenceId === cur.sequenceId && x.order > cur.order)
       .sort((a, b) => a.order - b.order)[0];
     if (!next) {
-      toasts.push({ kind: 'err', text: '当前序列没有下一镜头，无法做尾帧桥接' });
+      toasts.push({ kind: 'err', text: tr('shot.toast.noNextShotForBridge') });
       return;
     }
     bindShotId = next.id;
-    where = `下一镜「${next.title || next.id}」`;
+    where = tr('shot.nextShotTitle', { title: next.title || next.id });
   }
   await post('/api/assets/bindings', {
     assetId: target.id,
@@ -542,14 +519,14 @@ async function useTakeFrame(takeId: string, which: 'first' | 'last') {
     label: `Frame bridge from ${takeId} (${which === 'last' ? 'last' : 'first'} frame)`,
     shotId: bindShotId,
   });
-  toasts.push({ kind: 'ok', text: `已把 Take ${takeId} 的${which === 'last' ? '尾' : '首'}帧绑定为${where}的 First Frame` });
+  toasts.push({ kind: 'ok', text: tr('shot.toast.frameBridged', { takeId, frame: which === 'last' ? tr('shot.lastFrame') : tr('shot.firstFrame'), where }) });
 }
 
 /** Drag an asset from the rail library onto the shot → bind as reference. */
 async function quickBind(assetId: string, roles: string[]) {
   const m = mediaOf(assetId);
   await s.addBinding({ assetId, roles, label: m?.label });
-  toasts.push({ kind: 'ok', text: `已绑定 ${m?.label ?? assetId}（${roles.join(', ')}）` });
+  toasts.push({ kind: 'ok', text: tr('shot.toast.assetBound', { label: m?.label ?? assetId, roles: roles.join(', ') }) });
 }
 
 // --- unsaved-plan guards -----------------------------------------------------
@@ -560,9 +537,9 @@ function beforeUnload(e: BeforeUnloadEvent) {
 onBeforeRouteLeave(async () => {
   if (!planDirty.value) return true;
   return confirmDialog({
-    title: '放弃未保存的修改？',
-    message: '导演计划有未保存的编辑。离开此页面将丢弃这些修改（不会生成新版本）。',
-    confirmLabel: '放弃修改',
+    title: tr('shot.plan.discardTitle'),
+    message: tr('shot.plan.discardMessage'),
+    confirmLabel: tr('shot.plan.discardLabel'),
     danger: true,
   });
 });
@@ -621,18 +598,42 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', beforeUnload);
 });
 
-const TABS = [
-  { id: 'workspace', cn: '工作台', en: 'Workspace' },
-  { id: 'plan', cn: '导演计划', en: 'DirectorPlan' },
-  { id: 'references', cn: '参考素材', en: 'References' },
-  { id: 'prompt', cn: '提示词', en: 'Prompt' },
-  { id: 'preflight', cn: '生成检查', en: 'Preflight' },
-  { id: 'external', cn: '外部 AI', en: 'External AI' },
-] as const;
+const TABS = computed(() => [
+  { id: 'workspace', label: tr('shot.tab.workspace') },
+  { id: 'plan', label: tr('shot.tab.plan') },
+  { id: 'references', label: tr('shot.tab.references') },
+  { id: 'prompt', label: tr('shot.tab.prompt') },
+  { id: 'preflight', label: tr('shot.tab.preflight') },
+  { id: 'external', label: tr('shot.tab.external') },
+] as const);
+
+function modeLabel(mode: string): string {
+  return tr(`shot.mode.${mode}`);
+}
+
+function userStatusLabel(status: string): string {
+  return tr(`shot.status.user.${status}`);
+}
+
+function internalStatusLabel(status: string): string {
+  return tr(`shot.status.internal.${status}`);
+}
+
+function localizeRequirement(value: string): string {
+  const exact: Record<string, string> = {
+    '无需参考素材': 'shot.requirement.noReferences',
+    '需要首帧图': 'shot.requirement.firstFrame',
+    '需要尾帧图': 'shot.requirement.lastFrame',
+    '需要首帧图和尾帧图': 'shot.requirement.firstLastFrame',
+    '需要参考图': 'shot.requirement.referenceImage',
+    '参考音频可选': 'shot.requirement.referenceAudioOptional',
+  };
+  return exact[value] ? tr(exact[value]) : value;
+}
 </script>
 
 <template>
-  <div v-if="sLoading" class="page muted">加载中…</div>
+  <div v-if="sLoading" class="page muted">{{ tr('common.loading') }}</div>
   <div v-else-if="sError" class="page badge bad">{{ sError }}</div>
 
   <div v-else-if="sShot" class="desk">
@@ -645,44 +646,44 @@ const TABS = [
     <header class="desk-header">
       <div class="row wrap">
         <h1>{{ sShot.title || sShot.id }}</h1>
-        <span :class="['st', `st-${userStatus}`]" :title="`内部状态：${SHOT_STATUS_LABEL[sShot.status]}（${sShot.status}）`">
-          <i />{{ SHOT_USER_STATUS_LABEL[userStatus] }}
+        <span :class="['st', `st-${userStatus}`]" :title="tr('shot.internalStatusTitle', { label: internalStatusLabel(sShot.status), status: sShot.status })">
+          <i />{{ userStatusLabel(userStatus) }}
         </span>
-        <span class="badge accent no-dot">{{ H3_MODE_LABEL[sShot.h3Mode ?? 't2va'] }}</span>
+        <span class="badge accent no-dot">{{ modeLabel(sShot.h3Mode ?? 't2va') }}</span>
         <span class="badge no-dot">{{ sShot.durationSeconds }}s</span>
         <span class="badge no-dot">{{ sShot.aspectRatio }}</span>
         <span class="badge no-dot">{{ sShot.shotFunction }}</span>
         <span v-if="sShot.sequenceId" class="badge info no-dot">{{ sDetail?.sequences.find((x) => x.id === sShot?.sequenceId)?.title }}</span>
         <span v-if="renderReadiness" :class="['badge', renderReadiness.ready ? 'ok' : 'warn']" :title="renderReadiness.reason">
-          {{ renderReadiness.ready ? '可进入队列' : renderReadiness.reason }}
+          {{ renderReadiness.ready ? tr('shot.readyForQueue') : localizeRequirement(renderReadiness.reason) }}
         </span>
       </div>
       <div class="row controls">
-        <button class="sm danger ghost" title="删除此 Shot 及其全部子数据" @click="deleteThisShot">删除 Shot</button>
+        <button class="sm danger ghost" :title="tr('shot.deleteTitle')" @click="deleteThisShot">{{ tr('shot.deleteShot') }}</button>
         <label class="ctl mode-ctl">
           <span class="ctl-label">H3 Mode</span>
           <select v-model="sShot.h3Mode" @change="s.updateShot({ h3Mode: sShot?.h3Mode ?? 't2va' })">
-            <option v-for="m in availableModes" :key="m" :value="m">{{ H3_MODE_LABEL[m] }}</option>
+            <option v-for="m in availableModes" :key="m" :value="m">{{ modeLabel(m) }}</option>
           </select>
         </label>
         <label class="ctl">
-          <span class="ctl-label">生成关系</span>
+          <span class="ctl-label">{{ tr('shot.renderDependency') }}</span>
           <select :value="sShot.renderDependencyMode" @change="updateRenderDependency(($event.target as HTMLSelectElement).value as ShotRenderDependencyMode)">
-            <option value="auto">自动判断</option>
-            <option value="independent">独立生成（可并行）</option>
-            <option value="planned">文字连续性（可并行）</option>
-            <option value="previous_take">承接上一镜尾帧</option>
-            <option value="manual_frame">手工首帧</option>
+            <option value="auto">{{ tr('shot.dependency.auto') }}</option>
+            <option value="independent">{{ tr('shot.dependency.independent') }}</option>
+            <option value="planned">{{ tr('shot.dependency.planned') }}</option>
+            <option value="previous_take">{{ tr('shot.dependency.previousTake') }}</option>
+            <option value="manual_frame">{{ tr('shot.dependency.manualFrame') }}</option>
           </select>
         </label>
-        <button v-if="renderReadiness?.canResolveFrame && !renderReadiness.ready" class="sm" @click="resolveRenderDependency">绑定上一镜尾帧</button>
+        <button v-if="renderReadiness?.canResolveFrame && !renderReadiness.ready" class="sm" @click="resolveRenderDependency">{{ tr('shot.bindPreviousLastFrame') }}</button>
         <label class="ctl">
-          <span class="ctl-label">时长</span>
-          <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" title="时长（秒，1–15）" placeholder="5" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
+          <span class="ctl-label">{{ tr('shot.duration') }}</span>
+          <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" :title="tr('shot.durationTitle')" placeholder="5" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
         </label>
         <label v-if="activeProvider?.id === 'runninghub'" class="ctl">
-          <span class="ctl-label">输出像素</span>
-          <select v-model.number="megapixels" title="工作流总像素；更高画质会占用更多显存">
+          <span class="ctl-label">{{ tr('shot.outputPixels') }}</span>
+          <select v-model.number="megapixels" :title="tr('shot.outputPixelsTitle')">
             <option :value="0.6">0.6 MP</option>
             <option :value="0.8">0.8 MP</option>
             <option :value="1">1.0 MP</option>
@@ -692,21 +693,21 @@ const TABS = [
         <label class="ctl">
           <span class="ctl-label">StoryBeat</span>
           <select v-model="sShot.storyBeatId" @change="s.updateShot({ storyBeatId: sShot?.storyBeatId })">
-            <option :value="null">— 未关联 —</option>
+            <option :value="null">— {{ tr('shot.notLinked') }} —</option>
             <option v-for="b in sDetail?.beats ?? []" :key="b.id" :value="b.id">{{ b.title }}</option>
           </select>
         </label>
         <label class="ctl">
-          <span class="ctl-label">主角色 / 生物</span>
+          <span class="ctl-label">{{ tr('shot.primaryCharacterCreature') }}</span>
           <select v-model="sShot.primaryCharacterId" @change="s.updateShot({ primaryCharacterId: sShot?.primaryCharacterId })">
-            <option :value="null">— 未设定 —</option>
+            <option :value="null">— {{ tr('shot.notSet') }} —</option>
             <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'character' || x.kind === 'creature') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
           </select>
         </label>
         <label class="ctl">
-          <span class="ctl-label">场景</span>
+          <span class="ctl-label">{{ tr('shot.scene') }}</span>
           <select v-model="sShot.sceneId" @change="s.updateShot({ sceneId: sShot?.sceneId })">
-            <option :value="null">— 未设定 —</option>
+            <option :value="null">— {{ tr('shot.notSet') }} —</option>
             <option v-for="e in sDetail?.entities.filter((x) => x.kind === 'scene') ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
           </select>
         </label>
@@ -717,9 +718,9 @@ const TABS = [
       <GuideStepper :stages="sDetail.guide.state.steps" class="shot-guide-steps" />
       <div v-if="tab !== 'workspace'" class="next-action">
         <div class="next-copy">
-          <span class="next-kicker">下一步</span>
-          <strong>{{ sDetail.guide.nextAction.title }}</strong>
-          <span class="muted">{{ sDetail.guide.nextAction.description }}</span>
+          <span class="next-kicker">{{ tr('shot.nextStep') }}</span>
+          <strong>{{ localizedNextAction(sDetail.guide.nextAction).title }}</strong>
+          <span class="muted">{{ localizedNextAction(sDetail.guide.nextAction).description }}</span>
         </div>
         <button class="primary" @click="openGuideAction(sDetail.guide.nextAction)">{{ guideActionLabel }}</button>
       </div>
@@ -730,30 +731,30 @@ const TABS = [
       <!-- Assets rail -->
       <aside class="rail">
         <div class="panel">
-          <div class="panel-title">资产需求</div>
+          <div class="panel-title">{{ tr('shot.assetRequirements') }}</div>
           <div class="panel-body col">
             <div v-for="r in sDetail?.requirements ?? []" :key="r.kind" class="req-row">
               <span :class="['badge', r.level === 'ok' ? 'ok' : r.level === 'required' ? 'bad' : 'no-dot muted']">
-                {{ r.level === 'ok' ? '✓' : r.level === 'required' ? '⚠' : '' }} {{ r.label }}
+                {{ r.level === 'ok' ? '✓' : r.level === 'required' ? '⚠' : '' }} {{ localizeRequirement(r.label) }}
               </span>
-              <div class="muted req-detail">{{ r.detail }}</div>
+              <div class="muted req-detail">{{ localizeRequirement(r.detail) }}</div>
             </div>
             <button v-if="canCorrectReferenceMode" class="sm primary" @click="correctToRef2va">
-              这是参考图：切换 Ref2VA{{ hasRefImageBinding ? '' : '并绑定' }}
+              {{ hasRefImageBinding ? tr('shot.switchToRefMode') : tr('shot.switchToRefAndBind') }}
             </button>
             <button v-if="canUsePrimaryAsRefImage" class="sm" @click="usePrimaryVisualAsRefImage">
-              使用「{{ primaryVisualLabel }}」作为 RefImage
+              {{ tr('shot.useAsRefImage', { label: primaryVisualLabel }) }}
             </button>
             <router-link :to="assetUploadRoute" class="rail-link">
-              {{ missingFrameRole ? `＋ 上传并绑定${missingFrameRole === 'first_frame' ? '首帧' : '尾帧'}` : '＋ 上传图片 / 参考音频' }}
+              {{ missingFrameRole ? tr('shot.uploadAndBindFrame', { frame: missingFrameRole === 'first_frame' ? tr('shot.firstFrame') : tr('shot.lastFrame') }) : tr('shot.uploadImageAudio') }}
             </router-link>
           </div>
         </div>
 
         <div class="panel">
           <div class="panel-title spread">
-            <span>已绑定参考</span>
-            <button class="sm ghost" @click="tab = 'references'">管理 →</button>
+            <span>{{ tr('shot.boundReferences') }}</span>
+            <button class="sm ghost" @click="tab = 'references'">{{ tr('shot.manage') }} →</button>
           </div>
           <div class="panel-body col">
             <div v-if="!sDetail?.bindings.length" class="muted">{{ referenceModeHint }}</div>
@@ -771,16 +772,16 @@ const TABS = [
         </div>
 
         <div class="panel">
-          <div class="panel-title">连续性</div>
+          <div class="panel-title">{{ tr('shot.continuity') }}</div>
           <div class="panel-body col">
-            <div class="row"><span class="status-dot" :style="{ background: sDetail?.continuityLatest?.visualActual?.state ? 'var(--ok)' : 'var(--line-2)' }"></span><span class="muted">Actual（已提交）</span></div>
-            <div class="row"><span class="status-dot" :style="{ background: sPlan?.plan.continuity.plannedStartState ? 'var(--info)' : 'var(--line-2)' }"></span><span class="muted">Planned（计划）</span></div>
+            <div class="row"><span class="status-dot" :style="{ background: sDetail?.continuityLatest?.visualActual?.state ? 'var(--ok)' : 'var(--line-2)' }"></span><span class="muted">{{ tr('shot.actualCommitted') }}</span></div>
+            <div class="row"><span class="status-dot" :style="{ background: sPlan?.plan.continuity.plannedStartState ? 'var(--info)' : 'var(--line-2)' }"></span><span class="muted">{{ tr('shot.planned') }}</span></div>
             <div v-if="sDetail?.continuityLatest?.visualActual?.state" class="muted mono state-box">
               {{ JSON.stringify(sDetail.continuityLatest.visualActual.state, null, 1).slice(0, 500) }}
             </div>
-            <button class="sm" @click="tab = 'plan'">编辑计划连续性 →</button>
+            <button class="sm" @click="tab = 'plan'">{{ tr('shot.editPlannedContinuity') }} →</button>
             <button class="sm" :disabled="!sDetail?.continuityLatest?.visualActual?.state" @click="inheritContinuity">
-              继承上一镜头 Actual → Planned
+              {{ tr('shot.inheritContinuity') }}
             </button>
           </div>
         </div>
@@ -789,7 +790,7 @@ const TABS = [
       <!-- Stage -->
       <section v-show="tab !== 'workspace'" class="stage panel">
         <div class="panel-title spread">
-          <span>Stage / 导演监视器</span>
+          <span>{{ tr('shot.directorMonitor') }}</span>
           <span v-if="sSelected" class="badge ok no-dot">SELECTED {{ sSelected.id }}</span>
         </div>
         <div class="panel-body">
@@ -804,17 +805,17 @@ const TABS = [
             <img v-if="firstFrameThumb" :src="firstFrameThumb" class="ff-preview" alt="first frame" />
             <div class="empty-stage-text">
               <template v-if="(sDetail?.takes.length ?? 0) > 0">
-                已有 {{ sDetail?.takes.length }} 条 Take，<b>待选片</b>。<br />在下方 Takes 区域选片后，这里播放 Selected Take。
+                {{ tr('shot.stageCandidates', { n: sDetail?.takes.length ?? 0 }) }}<br />{{ tr('shot.stageSelectHint') }}
               </template>
               <template v-else>
-                舞台待命。<br />
-                <span class="muted">导演计划 → 提示词 → 生成检查 → 渲染，第一条成片将出现在这里。</span>
+                {{ tr('shot.stageWaiting') }}<br />
+                <span class="muted">{{ tr('shot.stageWorkflowHint') }}</span>
               </template>
             </div>
           </div>
           <div v-if="sSelected" class="muted selected-info">
-            当前 Selected：<span class="mono">{{ sSelected.id }}</span> · {{ sSelected.duration.toFixed(1) }}s
-            <button class="sm ghost" @click="guarded(() => s.rejectTake(sSelected!.id), '已取消选择')">取消选择</button>
+            {{ tr('shot.currentSelected') }}<span class="mono">{{ sSelected.id }}</span> · {{ sSelected.duration.toFixed(1) }}s
+            <button class="sm ghost" @click="guarded(() => s.rejectTake(sSelected!.id), tr('shot.toast.selectionCancelled'))">{{ tr('shot.takes.cancelSelection') }}</button>
           </div>
         </div>
       </section>
@@ -823,8 +824,8 @@ const TABS = [
       <section class="inspector panel">
         <div class="tabs">
           <button v-for="t in TABS" :key="t.id" :class="['tab', { active: tab === t.id }]" @click="tab = t.id">
-            {{ t.cn }}
-            <span v-if="t.id === 'plan' && planDirty" class="dirty-dot" title="未保存">●</span>
+            {{ t.label }}
+            <span v-if="t.id === 'plan' && planDirty" class="dirty-dot" :title="tr('shot.plan.unsavedChanges')">●</span>
           </button>
         </div>
 
@@ -842,7 +843,7 @@ const TABS = [
             :takes="sDetail.takes"
             :selected-take="sSelected"
             :guide="sDetail.guide.state"
-            :next-action="sDetail.guide.nextAction"
+            :next-action="localizedNextAction(sDetail.guide.nextAction)"
             :next-action-label="guideActionLabel"
             @open="openWorkspaceTarget"
             @action="openGuideAction"
@@ -855,7 +856,7 @@ const TABS = [
             :ai-enabled="aiEnabled"
             :ai-busy="aiBusy"
             :on-ai-suggest="aiSuggest"
-            @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), '导演计划已保存为新版本')"
+            @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), tr('shot.toast.planSaved'))"
             @paste="tab = 'external'"
             @dirty-change="(d: boolean) => (planDirty = d)"
           />
@@ -867,9 +868,9 @@ const TABS = [
             :media="media"
             :current-mode="sShot.h3Mode ?? 't2va'"
             :upload-path="assetUploadPath"
-            :on-add="(input) => guarded(() => s.addBinding(input), '已绑定参考')"
+            :on-add="(input) => guarded(() => s.addBinding(input), tr('shot.toast.referenceBound'))"
             :on-update="s.updateBinding"
-            :on-remove="(id: string) => guarded(() => s.removeBinding(id), '已移除绑定')"
+            :on-remove="(id: string) => guarded(() => s.removeBinding(id), tr('shot.toast.referenceRemoved'))"
           />
         </div>
 
@@ -878,8 +879,8 @@ const TABS = [
             :prompts="sDetail?.prompts ?? []"
             :current-mode="sShot.h3Mode"
             :ai-enabled="aiEnabled"
-            :on-compile="(m: string) => guarded(() => s.compilePrompt(m), '提示词已编译为新版本')"
-            :on-raw="(t: string, m: string) => guarded(() => s.importRawPrompt(t, m), '提示词已保存为新版本')"
+            :on-compile="(m: string) => guarded(() => s.compilePrompt(m), tr('shot.toast.promptCompiled'))"
+            :on-raw="(text: string, m: string) => guarded(() => s.importRawPrompt(text, m), tr('shot.toast.promptSaved'))"
             :on-ai-compile="aiCompile"
           />
         </div>
@@ -893,7 +894,7 @@ const TABS = [
             :duration-seconds="sShot.durationSeconds"
             :aspect-ratio="sShot.aspectRatio"
             :ai-enabled="aiEnabled"
-            :on-basic="(pid: string, mp: number) => guarded(() => s.runPreflight(pid, providerId, mp), '生成检查完成') as never"
+            :on-basic="(pid: string, mp: number) => guarded(() => s.runPreflight(pid, providerId, mp), tr('shot.toast.preflightComplete')) as never"
             :on-ai-check="aiPreflight"
             :on-refresh-prompt="refreshPromptReferences"
             :on-render="doRender"
@@ -903,15 +904,15 @@ const TABS = [
         <div v-show="tab === 'external'" class="tab-body">
           <div class="external-flow">
             <header class="external-intro">
-              <strong>用任意外部 AI 完成镜头设计</strong>
-              <span>适用于 ChatGPT、Claude 等。H3Mise 只负责复制和解析，不会自动调用外部服务。</span>
+              <strong>{{ tr('shot.external.title') }}</strong>
+              <span>{{ tr('shot.external.description') }}</span>
             </header>
 
             <section class="external-step">
               <span class="step-number">1</span>
               <div class="step-content">
                 <label class="field">
-                  <span><strong>选择要 AI 做什么</strong></span>
+                  <span><strong>{{ tr('shot.external.chooseTask') }}</strong></span>
                   <select v-model="externalTask">
                     <option v-for="t in EXTERNAL_TASKS" :key="t.id" :value="t.id">{{ t.label }}</option>
                   </select>
@@ -922,11 +923,11 @@ const TABS = [
             <section class="external-step">
               <span class="step-number">2</span>
               <div class="step-content">
-                <strong>复制提示词，粘贴给外部 AI</strong>
-                <p class="muted">提示词已包含当前故事、镜头、参考素材、四项必填要求和返回格式。</p>
+                <strong>{{ tr('shot.external.copyPromptTitle') }}</strong>
+                <p class="muted">{{ tr('shot.external.copyPromptDescription') }}</p>
                 <div class="row">
-                  <button class="primary sm" @click="copyExternalAiPrompt">复制给 AI 的完整提示词</button>
-                  <button class="sm ghost" @click="copyContextPackageOnly">仅复制数据包</button>
+                  <button class="primary sm" @click="copyExternalAiPrompt">{{ tr('shot.external.copyFullPrompt') }}</button>
+                  <button class="sm ghost" @click="copyContextPackageOnly">{{ tr('shot.external.copyContextOnly') }}</button>
                 </div>
               </div>
             </section>
@@ -935,25 +936,25 @@ const TABS = [
               <span class="step-number">3</span>
               <div class="step-content">
                 <div class="spread">
-                  <strong>把 AI 返回的内容整段贴回来</strong>
-                  <button class="sm ghost" @click="insertDirectorPlanExample">填入示例</button>
+                  <strong>{{ tr('shot.external.pasteResponse') }}</strong>
+                  <button class="sm ghost" @click="insertDirectorPlanExample">{{ tr('shot.external.insertExample') }}</button>
                 </div>
-                <p class="muted">支持 YAML 或 JSON、camelCase 或 snake_case，也兼容 AI 常见的 Markdown 代码围栏。</p>
+                <p class="muted">{{ tr('shot.external.formatSupport') }}</p>
                 <details class="format-example">
-                  <summary>查看最简有效格式</summary>
+                  <summary>{{ tr('shot.external.viewMinimalFormat') }}</summary>
                   <pre>{{ DIRECTOR_PLAN_EXAMPLE }}</pre>
                 </details>
                 <label class="field paste-field">
-                  <span class="sr-only">外部 AI 返回的 DirectorPlan</span>
+                  <span class="sr-only">{{ tr('shot.external.returnedPlan') }}</span>
                   <textarea v-model="pasteText" rows="9" :placeholder="DIRECTOR_PLAN_EXAMPLE"></textarea>
                 </label>
                 <div class="row">
-                  <button class="sm" :disabled="!pasteText.trim()" @click="parsePaste">检查格式</button>
-                  <button v-if="parseResult?.ok && parsedMissingFields.length === 0" class="primary sm" @click="applyParsed">应用为新版本</button>
+                  <button class="sm" :disabled="!pasteText.trim()" @click="parsePaste">{{ tr('shot.external.checkFormat') }}</button>
+                  <button v-if="parseResult?.ok && parsedMissingFields.length === 0" class="primary sm" @click="applyParsed">{{ tr('shot.external.applyNewVersion') }}</button>
                 </div>
-                <div v-if="parseResult && !parseResult.ok" class="parse-message bad">格式无法识别：{{ parseResult.error }}</div>
-                <div v-else-if="parseResult?.ok && parsedMissingFields.length" class="parse-message warn">格式可识别，但还缺：{{ parsedMissingFields.join('、') }}</div>
-                <div v-else-if="parseResult?.ok" class="parse-message ok">格式正确，四项必填内容完整，可以应用。</div>
+                <div v-if="parseResult && !parseResult.ok" class="parse-message bad">{{ tr('shot.external.formatUnrecognized') }}{{ parseResult.error }}</div>
+                <div v-else-if="parseResult?.ok && parsedMissingFields.length" class="parse-message warn">{{ tr('shot.external.formatMissing') }}{{ parsedMissingFields.join(tr('shot.common.listSeparator')) }}</div>
+                <div v-else-if="parseResult?.ok" class="parse-message ok">{{ tr('shot.external.formatValid') }}</div>
               </div>
             </section>
           </div>
@@ -964,8 +965,8 @@ const TABS = [
     <!-- Takes -->
     <section id="takes" ref="takesSection" class="takes-section filmstrip">
       <div class="spread takes-head">
-        <h2>Takes <span class="muted">{{ sDetail?.takes.length ?? 0 }} 条</span></h2>
-        <span class="muted">Shot 是意图，Take 是生成结果</span>
+        <h2>Takes <span class="muted">{{ tr('shot.takes.count', { n: sDetail?.takes.length ?? 0 }) }}</span></h2>
+        <span class="muted">{{ tr('shot.takes.shotVsTake') }}</span>
       </div>
       <TakesPanel
         :takes="sDetail?.takes ?? []"
@@ -987,7 +988,7 @@ const TABS = [
         :on-use-first-frame="(tid: string) => useTakeFrame(tid, 'first')"
       />
       <div v-for="(v, k) in aiResults" :key="k" v-show="k.startsWith('diag:')" class="panel ai-note">
-        <div class="panel-title">AI 诊断 — {{ k }}</div>
+        <div class="panel-title">{{ tr('shot.takes.aiDiagnosis') }} — {{ k }}</div>
         <pre class="ai-text">{{ aiText(v) }}</pre>
       </div>
     </section>

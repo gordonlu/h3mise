@@ -175,11 +175,11 @@ async function pollExport(jobId: string) {
     if (job.status === 'done') {
       playUrl.value = job.result?.url ?? '';
       await load();
-      toasts.push({ kind: 'ok', text: t('workflow.timeline.exportCompleteValue', { v0: job.result?.relPath }) });
+      toasts.push({ kind: 'ok', text: t('workflow.timeline.exportCompleteValue', { v0: job.result?.relPath ?? '' }) });
       return;
     }
     if (job.status === 'failed') {
-      toasts.push({ kind: 'err', text: t('workflow.timeline.exportFailedValue', { v0: job.error }) });
+      toasts.push({ kind: 'err', text: t('workflow.timeline.exportFailedValue', { v0: job.error ?? '' }) });
       return;
     }
   }

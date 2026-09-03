@@ -166,7 +166,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
               @click="switchProject(p.id)"
             >
               <span class="project-menu-title">{{ p.title }}</span>
-              <span class="project-menu-meta">{{ t('shell.shotsCount', { n: p.shotCount }) }}</span>
+              <span class="project-menu-meta">{{ t('shell.shotsCount', { n: p.shotCount ?? 0 }) }}</span>
             </button>
             <router-link to="/projects" class="project-menu-link" @click="projectsOpen = false">{{ t('shell.projectList') }}</router-link>
           </div>

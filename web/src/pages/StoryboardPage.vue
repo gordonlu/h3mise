@@ -165,7 +165,7 @@ function actualCost(): string | null {
   const cost = storyboard.value?.activeJob?.cost;
   if (!cost) return null;
   const money = cost.thirdPartyConsumeMoney ?? cost.consumeMoney;
-  return [money != null ? t('workflow.storyboard.amountValue', { v0: money }) : null, cost.consumeCoins != null ? t('workflow.storyboard.valueCoins', { v0: cost.consumeCoins }) : null, cost.taskCostTime != null ? `${cost.taskCostTime}s` : null].filter(Boolean).join(' · ');
+  return [money != null ? t('workflow.storyboard.amountValue', { v0: Number(money) }) : null, cost.consumeCoins != null ? t('workflow.storyboard.valueCoins', { v0: Number(cost.consumeCoins) }) : null, cost.taskCostTime != null ? `${cost.taskCostTime}s` : null].filter(Boolean).join(' · ');
 }
 
 onMounted(() => void load());

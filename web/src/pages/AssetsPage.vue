@@ -548,7 +548,7 @@ onMounted(load);
           <label class="field"><span>名称</span><input v-model="editing.item.name" /></label>
           <label class="field"><span>类型</span>
             <select v-model="editing.item.kind">
-              <option v-for="k in KINDS" :key="k" :value="k">{{ KIND_LABEL[k] }}</option>
+              <option v-for="k in KINDS" :key="k" :value="k">{{ kindLabel(k) }}</option>
             </select>
           </label>
           <label class="field"><span>描述</span><textarea v-model="editing.item.description" rows="3"></textarea></label>

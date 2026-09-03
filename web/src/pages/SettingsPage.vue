@@ -59,9 +59,9 @@ function localizedProviderNote(note: string | undefined): string {
   };
   if (exact[note]) return t(exact[note]);
   const detected = note.match(/^已检测 (\d+) 个节点；首次真实生图成功后标记为已验证$/);
-  if (detected) return t('pages.settings.noteNodesDetected', { n: detected[1] });
+  if (detected) return t('pages.settings.noteNodesDetected', { n: detected[1] ?? '0' });
   const connected = note.match(/^connected to (.+); workflow has (\d+) nodes — mapping awaits one successful render$/);
-  if (connected) return t('pages.settings.noteComfyConnected', { url: connected[1], n: connected[2] });
+  if (connected) return t('pages.settings.noteComfyConnected', { url: connected[1] ?? '', n: connected[2] ?? '0' });
   return note;
 }
 

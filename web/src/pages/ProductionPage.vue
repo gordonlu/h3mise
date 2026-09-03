@@ -47,7 +47,7 @@ function localizeShotReason(reason: string): string {
   };
   if (exact[reason]) return t(exact[reason]);
   const candidates = reason.match(/^已有 (\d+) 个候选 Take，请先选片或拒绝后再重新生成$/);
-  if (candidates) return t('workflow.production.reasonCandidates', { n: candidates[1] });
+  if (candidates) return t('workflow.production.reasonCandidates', { n: candidates[1] ?? '0' });
   return reason;
 }
 

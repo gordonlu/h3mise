@@ -20,6 +20,8 @@ export interface CompileContext {
   /** Generation mode this prompt is compiled for (set by compileDeterministic). */
   mode?: H3Mode;
   directorStyle?: string;
+  /** Deterministic camera-plan summary (motion wording + bounds note). */
+  cameraPlan?: string;
 }
 
 interface NumberedRef {
@@ -168,6 +170,9 @@ function integratedMultimodalDescription(ctx: CompileContext, num: ReturnType<ty
     line('Camera trigger', plan.camera.trigger),
     line('Speed relation', plan.camera.speedRelation),
     line('Stop condition', plan.camera.stopCondition),
+    line('Camera planning', ctx.cameraPlan ?? ''),
+    screenDirectionLine(ctx),
+    temporalBeatsLine(ctx),
     line('Objective', plan.performance.objective),
     line('Obstacle', plan.performance.obstacle),
     line('Tactic', plan.performance.tactic),
@@ -370,6 +375,9 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
     line('Camera trigger', plan.camera.trigger),
     line('Speed relation', plan.camera.speedRelation),
     line('Stop condition', plan.camera.stopCondition),
+    line('Camera planning', ctx.cameraPlan ?? ''),
+    screenDirectionLine(ctx),
+    temporalBeatsLine(ctx),
     line('Objective', plan.performance.objective),
     line('Obstacle', plan.performance.obstacle),
     line('Tactic', plan.performance.tactic),
@@ -399,4 +407,24 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
 function line(section: string, value: string | null | undefined): string {
   const v = value?.trim() ?? '';
   return v ? `${section}: ${v}` : '';
+}
+
+/** Deterministic screen-direction constraint (skipped for neutral). */
+function screenDirectionLine(ctx: CompileContext): string {
+  const dir = ctx.shot.screenDirection ?? 'neutral';
+  if (dir === 'neutral') return '';
+  const phrase = dir === 'left_to_right' ? 'left to right' : 'right to left';
+  return line('Screen direction', `subjects move from ${phrase}; keep faces, action, and prop placement on their established side — no mirroring, no side swap`);
+}
+
+/** Time progression of temporal beats: "0.0s–2.0s Approach; 2.0s–5.0s Action". */
+function temporalBeatsLine(ctx: CompileContext): string {
+  const beats = ctx.plan.temporalBeats?.filter((b) => b.label.trim()) ?? [];
+  if (!beats.length) return '';
+  const dur = ctx.plan.generation.durationSeconds ?? ctx.shot.durationSeconds ?? 5;
+  const fmt = (f: number) => (f * dur).toFixed(1);
+  const segs = beats
+    .sort((a, b) => a.start - b.start)
+    .map((b) => `${fmt(b.start)}s–${fmt(b.end)}s ${b.label.trim()}`);
+  return line('Time progression', segs.join('; '));
 }

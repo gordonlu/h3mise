@@ -25,6 +25,7 @@ import { applyBeatProposal, materializeMissingBeatShots } from '../modules/story
 import * as shotsMod from '../modules/shots.js';
 import * as assetsMod from '../modules/assets.js';
 import * as directorMod from '../modules/director.js';
+import * as cameraPlanMod from '../modules/camera-plan.js';
 import * as promptMod from '../modules/prompt.js';
 import * as preflightMod from '../modules/preflight.js';
 import * as renderBatchMod from '../modules/render-batch.js';
@@ -550,6 +551,54 @@ export function buildRoutes(services: AppServices): App {
   app.post('/api/shots/:id/context-package', async (c) => {
     const { task } = await c.req.json();
     return c.json(promptMod.buildContextPackage(p(c), c.req.param('id'), String(task ?? 'Plan this shot'), services.providers.getProfile()));
+  });
+
+  // --- camera plan (local, deterministic, no paid API) -----------------------
+
+  app.get('/api/shots/:id/camera-plan', (c) => c.json(cameraPlanMod.getCameraPlan(p(c), c.req.param('id'))));
+
+  app.put('/api/shots/:id/camera-plan', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const plan = cameraPlanMod.saveCameraPlan(ctx, shotId, await c.req.json());
+    services.bus.emit({ type: 'shot.updated', shotId, status: shotsMod.getShot(ctx, shotId).status });
+    return c.json(plan);
+  });
+
+  /** Render a short camera-motion reference clip (background job). */
+  app.post('/api/shots/:id/camera-plan/motion', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const plan = cameraPlanMod.getCameraPlan(ctx, shotId);
+    if (!plan) throw new Error('尚未保存相机计划');
+    if (!plan.sourceAssetId) throw new Error('请先选择一张源图');
+    const source = assetsMod.getMedia(ctx, plan.sourceAssetId);
+    const job = services.jobs.start('camera.render', '相机运动参考视频', async (update) => {
+      const pctx = await services.store.openDetached(ctx.meta.id);
+      try {
+        update({ message: '本地渲染运动参考…' });
+        const asset = await cameraPlanMod.renderCameraMotion(pctx, services.ffmpeg, plan, source);
+        update({ message: 'done' });
+        return { assetId: asset.id };
+      } finally {
+        pctx.close();
+      }
+    });
+    return c.json({ jobId: job.id, status: job.status }, 202);
+  });
+
+  /** Render first/last frame stills; optionally bind as FL2VA frames. */
+  app.post('/api/shots/:id/camera-plan/frames', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const body = await c.req.json();
+    const plan = cameraPlanMod.getCameraPlan(ctx, shotId);
+    if (!plan) throw new Error('尚未保存相机计划');
+    if (!plan.sourceAssetId) throw new Error('请先选择一张源图');
+    const source = assetsMod.getMedia(ctx, plan.sourceAssetId);
+    const result = await cameraPlanMod.renderCameraFrames(ctx, services.ffmpeg, plan, source, shotId, { bind: body.bind === true });
+    services.bus.emit({ type: 'shot.updated', shotId, status: shotsMod.getShot(ctx, shotId).status });
+    return c.json(result, 201);
   });
 
   // --- prompt --------------------------------------------------------------

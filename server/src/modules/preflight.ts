@@ -8,11 +8,21 @@
 // submission via renderIntentHash.
 
 import { createHash } from 'node:crypto';
-import { SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightReport, type PreflightSection } from '@h3mise/shared';
+import { cameraPlanWarnings, normalizeCameraPlan, SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightReport, type PreflightSection } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import { getShot, advanceShotStatus, advanceTo, renderReadiness } from './shots.js';
+import type { Shot } from '@h3mise/shared';
+
+/** Previous shot by editorial order (same sequence when the shot has one). */
+function previousShot(p: ProjectContext, shot: Shot): Shot | null {
+  const row = shot.sequenceId === null
+    ? p.db.get<{ id: string; screen_direction: string; title: string }>('SELECT * FROM shots WHERE sequence_id IS NULL AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.order])
+    : p.db.get<{ id: string; screen_direction: string; title: string }>('SELECT * FROM shots WHERE sequence_id = ? AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.sequenceId, shot.order]);
+  if (!row) return null;
+  return { ...getShot(p, row.id), screenDirection: (row.screen_direction as Shot['screenDirection']) ?? 'neutral' };
+}
 import { getPrompt } from './prompt.js';
 import { ensureShotEntityImageBindings, getMedia } from './assets.js';
 import { pathReadable } from '../ffmpeg.js';
@@ -118,6 +128,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     { key: 'integrity', label: '数据一致性', checks: [] },
     { key: 'credential', label: '访问凭证', checks: [] },
     { key: 'duplicate', label: '重复任务', checks: [] },
+    { key: 'continuity', label: '方向连续性', checks: [] },
   ];
 
   // Prompt
@@ -283,7 +294,11 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       if (nImage === 0) {
         sections[3]!.checks.push({ key: 'ref.image.required', severity: 'error', message: 'Ref2VA 至少需要一张参考图' });
       }
-      if (nVideo > 0) {
+      // A video reference (e.g. a Camera-motion reference clip) is meaningful
+      // only when the workflow exposes video reference slots. Do not claim
+      // that it is unsupported when the capability is merely unknown or
+      // positive — the count check below enforces real caps.
+      if (nVideo > 0 && caps && caps.maxVideoRefs === 0) {
         sections[3]!.checks.push({ key: 'ref.video.unsupported', severity: 'error', message: '当前 Ref2VA 工作流不支持视频参考素材' });
       }
       if (caps.maxImageRefs != null && nImage > caps.maxImageRefs) {
@@ -349,6 +364,34 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
         message: '参考素材在提示词生成后发生了变化，请重新从镜头设计生成提示词后再提交',
       });
     }
+    // CLOSED LOOP GUARD: a deterministic prompt is a snapshot of the plan,
+    // the camera plan, and the screen-direction constraint. If any of them
+    // changed after the prompt was compiled, the user's design would silently
+    // not reach the generator — fail loudly and ask for a recompile.
+    const latestDp = p.db.get<{ id: string }>(
+      'SELECT id FROM director_plan_versions WHERE shot_id = ? ORDER BY version DESC LIMIT 1',
+      [shot.id],
+    );
+    const planChanged = latestDp && prompt.directorPlanVersionId !== latestDp.id;
+    const cam = p.db.get<{ updated_at: string }>('SELECT updated_at FROM camera_plans WHERE shot_id = ?', [shot.id]);
+    const cameraChanged = cam ? cam.updated_at > prompt.createdAt : false;
+    const dir = shot.screenDirection ?? 'neutral';
+    const expectedPhrase = dir === 'left_to_right' ? 'left to right' : dir === 'right_to_left' ? 'right to left' : null;
+    const dirLine = prompt.text.match(/^Screen direction: subjects move from (.+?);/m);
+    const directionChanged = expectedPhrase
+      ? (!dirLine || dirLine[1] !== expectedPhrase)
+      : Boolean(dirLine);
+    const staleReasons: string[] = [];
+    if (planChanged) staleReasons.push('导演计划已更新');
+    if (cameraChanged) staleReasons.push('相机计划已更新');
+    if (directionChanged) staleReasons.push('方向约束已变化');
+    if (staleReasons.length) {
+      sections[4]!.checks.push({
+        key: 'integrity.prompt_stale',
+        severity: 'error',
+        message: `${staleReasons.join('、')}，提示词未反映最新设计——请重新从镜头设计生成提示词后再提交`,
+      });
+    }
   }
   sections[4]!.checks.push({ key: 'integrity.shot', severity: 'info', message: `镜头 ${shot.id} / ${SHOT_STATUS_LABEL[shot.status]}` });
   const dependency = renderReadiness(p, shot);
@@ -374,6 +417,50 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     sections[6]!.checks.push({ key: 'duplicate.active', severity: 'error', message: `当前镜头已有进行中的生成任务（${active.id}）` });
   } else {
     sections[6]!.checks.push({ key: 'duplicate.ok', severity: 'info', message: '没有重复的生成任务' });
+  }
+
+  // Screen direction: warning-only reversal next to the previous shot.
+  // A deliberate cut on the 180° line is expressed via intentionalReversal.
+  const curDir = shot.screenDirection ?? 'neutral';
+  const prev = previousShot(p, shot);
+  const prevDir = prev?.screenDirection ?? 'neutral';
+  if (curDir !== 'neutral' && prevDir !== 'neutral' && prevDir !== curDir) {
+    if (shot.intentionalReversal) {
+      sections[7]!.checks.push({
+        key: 'continuity.screen_direction.intentional',
+        severity: 'info',
+        message: `与上一镜头（${prev?.title ?? prev?.id}）方向相反，已标记为刻意反转`,
+      });
+    } else {
+      sections[7]!.checks.push({
+        key: 'continuity.screen_direction.reversal',
+        severity: 'warning',
+        message: `与上一镜头（${prev?.title ?? prev?.id}）方向相反（${prevDir} → ${curDir}）。若是 180° 法则的刻意改编请标记“刻意反转”，否则建议保持一致`,
+      });
+    }
+  } else if (curDir !== 'neutral') {
+    const message = prevDir === curDir
+      ? `与上一镜头方向一致（${curDir}）`
+      : `镜头方向设置为 ${curDir}（上一镜头方向为 ${prevDir === 'neutral' ? '中性/未设置' : prevDir}）`;
+    sections[7]!.checks.push({ key: prevDir === curDir ? 'continuity.screen_direction.ok' : 'continuity.screen_direction.set', severity: 'info', message });
+  } else {
+    sections[7]!.checks.push({ key: 'continuity.screen_direction.none', severity: 'info', message: '未设置镜头方向约束' });
+  }
+
+  // Camera plan out-of-safe-area noise surfaces here as a warning so the
+  // render gate is aware of a clamped motion plan (never blocks; UI also warns).
+  {
+    const camPlan = p.db.get<{ plan_json: string }>('SELECT plan_json FROM camera_plans WHERE shot_id = ?', [shot.id]);
+    if (camPlan) {
+      const warnings = cameraPlanWarnings(normalizeCameraPlan(jget<unknown>(camPlan.plan_json, null)));
+      if (warnings.length) {
+        sections[7]!.checks.push({
+          key: 'continuity.camera_plan.bounds',
+          severity: 'warning',
+          message: `相机计划：${[...new Set(warnings.map((w) => w.message))].join('；')}`,
+        });
+      }
+    }
   }
 
   const report = finalizePreflight(p, sections, intent.shotId, intent.promptVersionId, intent.providerId, null, false);

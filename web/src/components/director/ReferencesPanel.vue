@@ -38,10 +38,15 @@ interface RefGroup { id: string; label: string; limit: number; items: MediaAsset
 const groups = computed<RefGroup[]>(() => {
   const images = props.media.filter((m) => m.kind === 'image');
   const audios = props.media.filter((m) => m.kind === 'audio');
+  const videos = props.media.filter((m) => m.kind === 'video');
   const out: RefGroup[] = [];
   if (props.currentMode === 'ref2va') {
     if (slots.value.images > 0) out.push({ id: 'refimg', label: t('shot.references.refImages'), limit: slots.value.images, items: images });
     if (slots.value.audios > 0) out.push({ id: 'refaudio', label: t('shot.references.refAudio'), limit: slots.value.audios, items: audios });
+    // Camera-motion reference clips are real consumable inputs where the
+    // workflow supports video references (ComfyUI). RunningHub has no video
+    // slots — preflight reports that honestly, instead of hiding the bind.
+    if (videos.length) out.push({ id: 'refvideo', label: t('shot.references.refVideo'), limit: 12, items: videos, role: 'camera_motion' });
     return out;
   }
   if ((props.currentMode === 'i2va' || props.currentMode === 'fl2va') && slots.value.firstFrame) {
@@ -54,6 +59,7 @@ const groups = computed<RefGroup[]>(() => {
 });
 
 const hasSlots = computed(() => groups.value.length > 0);
+const videosAvailable = computed(() => props.media.some((m) => m.kind === 'video'));
 const modeHint = computed(() => t(`shot.references.modeHint.${props.currentMode}`));
 /** Ref2VA is slower and pricier — if the shot only has frame images and no
  * other references, the dedicated frame modes do the same job for less. */
@@ -148,6 +154,9 @@ function selectAsset(group: RefGroup, assetId: string) {
             <template v-if="currentMode === 'ref2va'">
               {{ t('shot.references.refModeLimits', { images: slots.images, audios: slots.audios, total: refTotalCap }) }}
               {{ t('shot.references.firstFrameBehavior') }}
+              <template v-if="videosAvailable">
+                {{ t('shot.references.videoRefNote') }}
+              </template>
             </template>
             <template v-else>
               {{ t('shot.references.frameControlModeBefore') }} <strong>{{ currentMode.toUpperCase() }}</strong>{{ t('shot.references.frameControlModeAfter') }}

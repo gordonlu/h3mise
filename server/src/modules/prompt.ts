@@ -2,8 +2,10 @@
 // never overwrites history. Raw Prompt path bypasses DirectorPlan entirely.
 
 import type { H3Mode, PromptSource, PromptVersion } from '@h3mise/shared';
+import { cameraPlanWarnings, describeCameraPlan, normalizeCameraPlan } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
+import { jget } from '../db/sqlite.js';
 import { compileDeterministic, type CompileContext } from './prompt-templates.js';
 import { latestPlan } from './director.js';
 import { getShot } from './shots.js';
@@ -82,9 +84,11 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
         aspectRatio: shot.aspectRatio,
         audioIntent: '',
       },
+      temporalBeats: [],
     },
     references: refs,
     directorStyle: directorStylePromptDirective(p),
+    cameraPlan: cameraPlanPromptSummary(p, shotId, shot.durationSeconds),
   };
   const text = compileDeterministic(ctx, mode);
   return createPrompt(p, {
@@ -94,6 +98,19 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
     text,
     directorPlanVersionId: plan?.id ?? null,
   });
+}
+
+/** Deterministic camera-plan summary embedded as a compiler constraint. The
+ * plan's real consumable outputs are its motion-reference video and derived
+ * first/last frames; this line is only the textual constraint on top. */
+function cameraPlanPromptSummary(p: ProjectContext, shotId: string, durationSeconds?: number): string {
+  const row = p.db.get<{ plan_json: string }>('SELECT plan_json FROM camera_plans WHERE shot_id = ?', [shotId]);
+  if (!row) return '';
+  const plan = normalizeCameraPlan(jget<unknown>(row.plan_json, null));
+  const description = describeCameraPlan(plan, durationSeconds);
+  if (!description || description === 'Static camera') return '';
+  const warnings = cameraPlanWarnings(plan);
+  return warnings.length ? `${description} (note: ${warnings.map((w) => w.message).join('; ')})` : description;
 }
 
 /** Store a user-authored or AI-optimized prompt as an immutable version. */

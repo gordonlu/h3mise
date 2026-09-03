@@ -92,6 +92,11 @@ export interface FfmpegCapabilities {
 export class Ffmpeg {
   constructor() {}
 
+  /** Generic raw invocation with our spawn/timeout/error semantics. */
+  async runRaw(args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<void> {
+    await run('ffmpeg', args, inputLabel, timeoutMs);
+  }
+
   async capabilityCheck(): Promise<FfmpegCapabilities> {
     try {
       const [ffmpegOut, ffprobeOut] = await Promise.all([

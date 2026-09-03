@@ -11,6 +11,7 @@ import { createBinding, deleteBinding, listBindings } from './assets.js';
 const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
 const H3_MODES = new Set(['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
 const DEPENDENCY_MODES = new Set(['auto', 'independent', 'planned', 'previous_take', 'manual_frame']);
+const SCREEN_DIRECTIONS = new Set(['left_to_right', 'right_to_left', 'neutral']);
 
 function validateShotPatch(input: CreateShotInput): void {
   if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0)) {
@@ -20,6 +21,7 @@ function validateShotPatch(input: CreateShotInput): void {
   if (input.h3Mode !== undefined && input.h3Mode !== null && !H3_MODES.has(input.h3Mode)) throw new Error('invalid h3Mode');
   if (input.aspectRatio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(input.aspectRatio)) throw new Error('invalid aspectRatio');
   if (input.renderDependencyMode !== undefined && !DEPENDENCY_MODES.has(input.renderDependencyMode)) throw new Error('invalid renderDependencyMode');
+  if (input.screenDirection !== undefined && !SCREEN_DIRECTIONS.has(input.screenDirection)) throw new Error('invalid screenDirection');
 }
 
 interface ShotRow {
@@ -38,6 +40,8 @@ interface ShotRow {
   scene_id: string | null;
   render_dependency_mode: string;
   depends_on_shot_id: string | null;
+  screen_direction: string;
+  intentional_reversal: number;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +63,8 @@ function shotFromRow(r: ShotRow): Shot {
     sceneId: r.scene_id,
     renderDependencyMode: r.render_dependency_mode as Shot['renderDependencyMode'],
     dependsOnShotId: r.depends_on_shot_id,
+    screenDirection: (r.screen_direction as Shot['screenDirection']) ?? 'neutral',
+    intentionalReversal: Boolean(r.intentional_reversal),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -87,6 +93,8 @@ export interface CreateShotInput {
   sceneId?: string | null;
   renderDependencyMode?: Shot['renderDependencyMode'];
   dependsOnShotId?: string | null;
+  screenDirection?: Shot['screenDirection'];
+  intentionalReversal?: boolean;
   order?: number;
 }
 
@@ -96,8 +104,8 @@ export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot
   const now = new Date().toISOString();
   const ord = input.order ?? p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM shots')!.m;
   p.db.run(
-    `INSERT INTO shots (id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, render_dependency_mode, depends_on_shot_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO shots (id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, render_dependency_mode, depends_on_shot_id, screen_direction, intentional_reversal, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.sequenceId ?? null,
@@ -113,6 +121,8 @@ export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot
       input.sceneId ?? null,
       input.renderDependencyMode ?? 'auto',
       input.dependsOnShotId ?? null,
+      input.screenDirection ?? 'neutral',
+      input.intentionalReversal ? 1 : 0,
       now,
       now,
     ],
@@ -227,6 +237,8 @@ export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Sh
     sceneId: 'scene_id',
     renderDependencyMode: 'render_dependency_mode',
     dependsOnShotId: 'depends_on_shot_id',
+    screenDirection: 'screen_direction',
+    intentionalReversal: 'intentional_reversal',
   };
   const cols: string[] = [];
   const vals: unknown[] = [];
@@ -235,7 +247,7 @@ export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Sh
     const col = map[k];
     if (!col) continue;
     cols.push(`${col} = ?`);
-    vals.push(v === null ? null : v);
+    vals.push(k === 'intentionalReversal' ? (v ? 1 : 0) : v === null ? null : v);
   }
   if (cols.length === 0) return getShot(p, id);
   vals.push(now, id);

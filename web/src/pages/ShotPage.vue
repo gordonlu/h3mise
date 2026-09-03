@@ -14,6 +14,7 @@ import PromptPanel from '../components/director/PromptPanel.vue';
 import PreflightPanel from '../components/director/PreflightPanel.vue';
 import TakesPanel from '../components/director/TakesPanel.vue';
 import ReferencesPanel from '../components/director/ReferencesPanel.vue';
+import CameraPlanner from '../components/director/CameraPlanner.vue';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import GuideStepper from '../components/GuideStepper.vue';
 import WorkspacePanel from '../components/director/WorkspacePanel.vue';
@@ -76,7 +77,7 @@ const currentActualContinuity = computed(() => [...(sDetail.value?.continuity ??
   .reverse()
   .find((entry) => entry.scope === 'visual' && entry.kind === 'actual') ?? null);
 
-const tab = ref<'workspace' | 'plan' | 'references' | 'prompt' | 'preflight' | 'external'>('workspace');
+const tab = ref<'workspace' | 'plan' | 'camera' | 'references' | 'prompt' | 'preflight' | 'external'>('workspace');
 const media = ref<MediaAsset[]>([]);
 const aiJobs = ref<Record<string, string>>({}); // actionKey -> jobId
 const aiResults = ref<Record<string, unknown>>({});
@@ -601,6 +602,7 @@ onUnmounted(() => {
 const TABS = computed(() => [
   { id: 'workspace', label: tr('shot.tab.workspace') },
   { id: 'plan', label: tr('shot.tab.plan') },
+  { id: 'camera', label: tr('shot.tab.camera') },
   { id: 'references', label: tr('shot.tab.references') },
   { id: 'prompt', label: tr('shot.tab.prompt') },
   { id: 'preflight', label: tr('shot.tab.preflight') },
@@ -675,6 +677,18 @@ function localizeRequirement(value: string): string {
             <option value="previous_take">{{ tr('shot.dependency.previousTake') }}</option>
             <option value="manual_frame">{{ tr('shot.dependency.manualFrame') }}</option>
           </select>
+        </label>
+        <label class="ctl" :title="tr('shot.screenDirection.intentionalHint')">
+          <span class="ctl-label">{{ tr('shot.screenDirection.label') }}</span>
+          <select :value="sShot.screenDirection ?? 'neutral'" @change="s.updateShot({ screenDirection: ($event.target as HTMLSelectElement).value as 'left_to_right' | 'right_to_left' | 'neutral' })">
+            <option value="left_to_right">{{ tr('shot.screenDirection.left_to_right') }}</option>
+            <option value="right_to_left">{{ tr('shot.screenDirection.right_to_left') }}</option>
+            <option value="neutral">{{ tr('shot.screenDirection.neutral') }}</option>
+          </select>
+        </label>
+        <label class="ctl check-ctl" :title="tr('shot.screenDirection.intentionalHint')">
+          <input type="checkbox" :checked="sShot.intentionalReversal" @change="s.updateShot({ intentionalReversal: ($event.target as HTMLInputElement).checked })" />
+          <span class="ctl-label">{{ tr('shot.screenDirection.intentional') }}</span>
         </label>
         <button v-if="renderReadiness?.canResolveFrame && !renderReadiness.ready" class="sm" @click="resolveRenderDependency">{{ tr('shot.bindPreviousLastFrame') }}</button>
         <label class="ctl">
@@ -862,6 +876,15 @@ function localizeRequirement(value: string): string {
           />
         </div>
 
+        <div v-show="tab === 'camera'" class="tab-body camera-body">
+          <CameraPlanner
+            :shot="sShot"
+            :media="media"
+            :bindings="sDetail?.bindings ?? []"
+            @assets-added="loadMedia"
+          />
+        </div>
+
         <div v-show="tab === 'references'" class="tab-body">
           <ReferencesPanel
             :bindings="sDetail?.bindings ?? []"
@@ -1043,6 +1066,8 @@ function localizeRequirement(value: string): string {
 .dirty-dot { color: var(--warn); font-size: 9px; margin-left: 3px; }
 .tab-body { padding: 14px; max-height: calc(100vh - 230px); overflow: auto; }
 .workspace-body { padding: 12px; }
+.camera-body { max-height: none; overflow: visible; }
+.check-ctl { gap: 4px; }
 .external-flow { display: grid; gap: 10px; }
 .external-intro { display: flex; flex-direction: column; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .external-intro strong { font-size: 15px; }

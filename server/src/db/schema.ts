@@ -464,6 +464,27 @@ UPDATE storyboards SET series_id = id WHERE series_id = '';
 CREATE INDEX idx_storyboards_series_page ON storyboards(series_id, page_number);
 `,
   },
+  {
+    version: 17,
+    name: 'camera-planning',
+    sql: `
+-- Screen direction: a deterministic editorial constraint the compiler can use
+-- and preflight can compare against the previous shot. intentional_reversal
+-- dissolves the reversal warning (deliberate cut on the 180° rule).
+ALTER TABLE shots ADD COLUMN screen_direction TEXT NOT NULL DEFAULT 'neutral';
+ALTER TABLE shots ADD COLUMN intentional_reversal INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_shots_screen_dir ON shots(screen_direction);
+
+-- Camera planner / start-end framing plans (one active plan per shot).
+CREATE TABLE camera_plans (
+  id TEXT PRIMARY KEY,
+  shot_id TEXT NOT NULL UNIQUE REFERENCES shots(id) ON DELETE CASCADE,
+  plan_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

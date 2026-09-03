@@ -96,6 +96,16 @@ export interface PlanGeneration {
   audioIntent: string;
 }
 
+/** Experimental temporal beat: a simple named time segment of the shot.
+ * start/end are [0..1] fractions of the shot duration, sequential and
+ * non-overlapping; the compiler understands "Approach → Action → Recovery". */
+export interface TemporalBeat {
+  id: string;
+  label: string;
+  start: number;
+  end: number;
+}
+
 export interface DirectorPlan {
   version: number;
   intent: PlanIntent;
@@ -107,6 +117,7 @@ export interface DirectorPlan {
   reality: { mode: RealityMode; constraints: string[] };
   continuity: PlanContinuity;
   generation: PlanGeneration;
+  temporalBeats: TemporalBeat[];
 }
 
 export function emptyDirectorPlan(): DirectorPlan {
@@ -165,6 +176,7 @@ export function emptyDirectorPlan(): DirectorPlan {
     reality: { mode: 'strict_realism', constraints: [] },
     continuity: { plannedStartState: '', plannedEndState: '' },
     generation: { requestedMode: '', durationSeconds: 5, aspectRatio: '16:9', audioIntent: '' },
+    temporalBeats: [],
   };
 }
 

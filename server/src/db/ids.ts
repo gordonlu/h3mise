@@ -24,7 +24,8 @@ export type IdKind =
   | 'storyboard-series'
   | 'storyboard-panel'
   | 'storyboard-panel-version'
-  | 'storyboard-job';
+  | 'storyboard-job'
+  | 'camera-plan';
 
 export function nextId(db: Db, kind: IdKind): string {
   const row = db.get<{ value: string }>('SELECT value FROM kv WHERE key = ?', [`counter:${kind}`]);

@@ -3,6 +3,7 @@ import { ref, watch, computed, toRaw } from 'vue';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan } from '@h3mise/shared';
 import { t } from '../../stores/locale';
+import TemporalBeatsEditor from './TemporalBeatsEditor.vue';
 
 const props = defineProps<{ plan: DirectorPlan; aiEnabled: boolean; onAiSuggest: (plan: DirectorPlan) => void; aiBusy?: boolean }>();
 const emit = defineEmits<{ save: [plan: DirectorPlan]; paste: []; dirtyChange: [dirty: boolean] }>();
@@ -13,8 +14,11 @@ const savedSnapshot = ref('');
 watch(
   () => props.plan,
   (p) => {
-    draft.value = structuredClone(toRaw(p));
-    savedSnapshot.value = JSON.stringify(p);
+    const cloned = structuredClone(toRaw(p));
+    // Older plans (pre temporal-beats) come back with the field missing.
+    if (!Array.isArray(cloned.temporalBeats)) cloned.temporalBeats = [];
+    draft.value = cloned;
+    savedSnapshot.value = JSON.stringify(cloned);
   },
   { immediate: true, deep: true },
 );
@@ -305,6 +309,10 @@ function requestAiSuggestion() {
       <div v-else class="required-hint complete">{{ t('shot.plan.designComplete') }}</div>
     </section>
 
+    <section class="beats-wrap">
+      <TemporalBeatsEditor :beats="draft.temporalBeats" />
+    </section>
+
     <section class="advanced-wrap">
       <div class="advanced-head">
         <button class="advanced-toggle" :aria-expanded="advancedVisible" @click="advancedVisible = !advancedVisible">
@@ -353,6 +361,7 @@ function requestAiSuggestion() {
 .required-progress { padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 700; }
 .required-progress.complete { background: var(--ok-soft); color: var(--ok); }
 .essential-card { overflow: hidden; }
+.beats-wrap { padding: 2px 0 10px; }
 .essential-intro { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .essential-intro strong { font-size: 15px; }
 .essential-intro span { color: var(--text-2); font-size: 12px; }

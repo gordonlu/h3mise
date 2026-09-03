@@ -95,6 +95,18 @@ export const SHOT_USER_STATUS_LABEL: Record<ShotUserStatus, string> = {
   done: '已完成',
 };
 
+/** Editorial direction of screen space: which side the action travels toward.
+ * left_to_right and right_to_left conflict; neutral is unset/no constraint. */
+export type ScreenDirection = 'left_to_right' | 'right_to_left' | 'neutral';
+
+export const SCREEN_DIRECTIONS: ScreenDirection[] = ['left_to_right', 'right_to_left', 'neutral'];
+
+export const SCREEN_DIRECTION_LABEL: Record<ScreenDirection, string> = {
+  left_to_right: '左→右',
+  right_to_left: '右→左',
+  neutral: '中性',
+};
+
 import type { H3Mode } from './director.js';
 
 export interface Shot {
@@ -113,6 +125,10 @@ export interface Shot {
   sceneId: string | null;
   renderDependencyMode: ShotRenderDependencyMode;
   dependsOnShotId: string | null;
+  /** Screen-direction constraint for the compiler. */
+  screenDirection: ScreenDirection;
+  /** "I intend this reversal" — dissolves the preflight reversal warning. */
+  intentionalReversal: boolean;
   createdAt: string;
   updatedAt: string;
 }

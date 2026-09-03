@@ -1,7 +1,7 @@
 // Director module — PRD §12-13. DirectorPlan versions are immutable:
 // editing always creates a new version (never overwrites history).
 
-import type { DirectorPlan, DirectorPlanVersion } from '@h3mise/shared';
+import type { DirectorPlan, DirectorPlanVersion, TemporalBeat } from '@h3mise/shared';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
@@ -111,6 +111,25 @@ const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'in
 const REALITY_MODES = new Set(['strict_realism', 'plausible_stylized', 'deliberate_fantasy']);
 const GENERATION_MODES = new Set(['', 't2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
 
+/** Norm temporalBeat arrays to sequential, non-overlapping [0..1] segments. */
+export function normalizeTemporalBeats(raw: unknown): TemporalBeat[] {
+  if (!Array.isArray(raw)) return [];
+  const beats: TemporalBeat[] = [];
+  let cursor = 0;
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const o = item as Record<string, unknown>;
+    const label = typeof o.label === 'string' ? o.label.trim() : '';
+    if (!label) continue;
+    let start = typeof o.start === 'number' && Number.isFinite(o.start) ? Math.min(1, Math.max(0, o.start)) : cursor;
+    let end = typeof o.end === 'number' && Number.isFinite(o.end) ? Math.min(1, Math.max(0, o.end)) : 1;
+    if (end <= start) end = Math.min(1, Math.max(start + 0.05, end));
+    beats.push({ id: typeof o.id === 'string' && o.id ? o.id : `beat-${beats.length + 1}`, label, start, end });
+    cursor = end;
+  }
+  return beats;
+}
+
 /** Normalize untrusted AI/user JSON into the known DirectorPlan structure.
  * Unknown keys and invalid value types are discarded; common response wrappers
  * and snake_case keys are accepted. */
@@ -123,7 +142,7 @@ export function normalizeDirectorPlan(
   }
 
   const root = raw as Record<string, unknown>;
-  const knownSections = ['intent', 'subject', 'blocking', 'camera', 'performance', 'environment', 'reality', 'continuity', 'generation'];
+  const knownSections = ['intent', 'subject', 'blocking', 'camera', 'performance', 'environment', 'reality', 'continuity', 'generation', 'temporalBeats'];
   const hasKnownSection = knownSections.some((key) => key in root);
   const wrapped = root.plan ?? root.directorPlan ?? root.director_plan ?? root.result ?? root.data;
   const source = !hasKnownSection && wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)
@@ -136,6 +155,10 @@ export function normalizeDirectorPlan(
     for (const [rawKey, value] of Object.entries(src as Record<string, unknown>)) {
       const key = rawKey.replace(/[_-]([a-z])/g, (_, c: string) => c.toUpperCase());
       if (!(key in dst) || value === null || value === undefined) continue;
+      if (key === 'temporalBeats') {
+        dst[key] = normalizeTemporalBeats(value);
+        continue;
+      }
       const expected = dst[key];
       if (Array.isArray(expected)) {
         if (Array.isArray(value)) dst[key] = value.filter((item): item is string => typeof item === 'string');
@@ -156,6 +179,7 @@ export function normalizeDirectorPlan(
   if (plan.generation.durationSeconds < 1 || plan.generation.durationSeconds > 60) {
     plan.generation.durationSeconds = base.generation.durationSeconds;
   }
+  plan.temporalBeats = normalizeTemporalBeats(plan.temporalBeats);
   return { ok: true, plan };
 }
 

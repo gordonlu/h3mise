@@ -5,6 +5,7 @@ export * from './project.js';
 export * from './assets.js';
 export * from './shots.js';
 export * from './director.js';
+export * from './camera.js';
 export * from './prompt.js';
 export * from './preflight.js';
 export * from './render.js';

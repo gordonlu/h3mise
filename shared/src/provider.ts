@@ -70,6 +70,20 @@ export interface AiAppProfile {
   /** Per-key node bindings for providerParams (P0-4): unknown params are
    * rejected, never guessed into an arbitrary node. */
   providerParamBindings?: Record<string, { nodeId: string; fieldName: string }>;
+  /** Secondary AI App for camera motion reference video generation. When set,
+   * the Camera Planner can submit the source image to this app instead of
+   * using local FFmpeg zoompan. The app must accept an image input node. */
+  refVideoAppId?: string;
+  /** User-managed list of AI Apps. The primary appId is always apps[0].
+   * Additional entries let the user bind different workflows (e.g. reference
+   * video generation) without losing the main generation app. */
+  apps?: Array<{
+    id: string;
+    name: string;
+    appId: string;
+    /** Optional description shown in the UI (e.g. "参考视频生成"). */
+    description?: string;
+  }>;
   verification: ProviderVerification;
 }
 

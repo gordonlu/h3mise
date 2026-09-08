@@ -16,6 +16,10 @@ const emit = defineEmits<{ assetsAdded: [] }>();
 
 const toasts = useToastStore();
 
+// AI Apps available for motion rendering
+const aiApps = ref<Array<{ id: string; name: string; appId: string; description?: string }>>([]);
+const motionProvider = ref<'local' | 'ai'>('local');
+
 const plan = ref<CameraMotionPlan>({
   ...emptyCameraPlan(),
   durationSeconds: props.shot.durationSeconds,
@@ -285,7 +289,8 @@ async function renderMotion(): Promise<void> {
     return;
   }
   try {
-    const res = await post<{ jobId: string; status: string }>(`/api/shots/${props.shot.id}/camera-plan/motion`);
+    const provider = motionProvider.value === 'ai' && aiApps.value.length ? 'runninghub' : 'local';
+    const res = await post<{ jobId: string; status: string }>(`/api/shots/${props.shot.id}/camera-plan/motion`, { provider });
     motionJob.value = res.jobId;
     toasts.push({ kind: 'info', text: `${tr('shot.camera.motionLabel')} …` });
     motionAssetId.value = null;
@@ -352,9 +357,14 @@ function onKey(e: KeyboardEvent): void {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   void loadPlan();
   window.addEventListener('keydown', onKey);
+  // Fetch available AI Apps for motion rendering
+  try {
+    const profile = await get<{ apps?: Array<{ id: string; name: string; appId: string; description?: string }> } | null>('/api/providers/runninghub/profile');
+    aiApps.value = profile?.apps?.slice(1) ?? [];
+  } catch { /* ignore */ }
 });
 onUnmounted(() => {
   cancelAnimationFrame(raf);
@@ -535,18 +545,28 @@ const sourceOptions = computed(() => {
 
       <!-- Render actions -->
       <section class="panel render-panel">
-        <div class="panel-body row wrap render-actions">
-          <button class="primary sm" :disabled="Boolean(motionJob) || !sourceAsset" @click="renderMotion">
-            {{ motionJob ? (tr('shot.camera.motionLabel') + ' …') : tr('shot.camera.renderMotion') }}
-          </button>
-          <button class="sm" :disabled="framesBusy || !sourceAsset" @click="renderFrames">
-            {{ framesBusy ? tr('common.loading') : tr('shot.camera.renderFrames') }}
-          </button>
-          <label class="row muted bind-tick">
-            <input v-model="bindAfter" type="checkbox" />
-            <span>{{ tr('shot.camera.renderFramesBind') }}</span>
-          </label>
-          <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
+        <div class="panel-body col render-actions">
+          <div v-if="aiApps.length" class="row">
+            <label class="field inline">{{ tr('shot.camera.motionSource') }}
+              <select v-model="motionProvider">
+                <option value="local">{{ tr('shot.camera.localRender') }}</option>
+                <option value="ai">{{ tr('shot.camera.aiRender') }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="row wrap">
+            <button class="primary sm" :disabled="Boolean(motionJob) || !sourceAsset" @click="renderMotion">
+              {{ motionJob ? (tr('shot.camera.motionLabel') + ' …') : tr('shot.camera.renderMotion') }}
+            </button>
+            <button class="sm" :disabled="framesBusy || !sourceAsset" @click="renderFrames">
+              {{ framesBusy ? tr('common.loading') : tr('shot.camera.renderFrames') }}
+            </button>
+            <label class="row muted bind-tick">
+              <input v-model="bindAfter" type="checkbox" />
+              <span>{{ tr('shot.camera.renderFramesBind') }}</span>
+            </label>
+            <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
+          </div>
         </div>
         <div v-if="motionAssetId" class="panel-body">
           <video :src="mediaUrl(motionAssetId)" controls playsinline class="motion-mini" />

@@ -23,6 +23,8 @@ const verifyingComfy = ref(false);
 const storyboardProfile = ref<StoryboardProviderProfile | null>(null);
 const verifyingStoryboard = ref(false);
 const savingRegion = ref(false);
+const aiApps = ref<Array<{ id: string; name: string; appId: string; description?: string }>>([]);
+const savingAiApps = ref(false);
 const directorStyles = ref<DirectorStylePreset[]>([]);
 
 // P0-6 semantics: only a successful real submit marks the profile verified;
@@ -93,6 +95,10 @@ async function load() {
   try {
     profile.value = await get<AiAppProfile | null>('/api/providers/runninghub/profile');
     profileJson.value = JSON.stringify(profile.value, null, 2);
+    // Sync AI Apps list from profile
+    aiApps.value = profile.value?.apps?.length
+      ? [...profile.value.apps]
+      : [{ id: 'app-primary', name: '主视频生成', appId: profile.value?.appId ?? '', description: '默认 H3 视频生成 App' }];
   } catch {
     /* profile stays null */
   }
@@ -185,6 +191,37 @@ async function saveApiKey() {
     notice.value = t('pages.settings.apiKeySaveFailed', { msg: errorMessage(e) });
   } finally {
     savingKey.value = false;
+  }
+}
+
+function addAiApp() {
+  aiApps.value.push({
+    id: `app-${Date.now()}`,
+    name: '',
+    appId: '',
+    description: '',
+  });
+}
+
+function removeAiApp(id: string) {
+  aiApps.value = aiApps.value.filter((a) => a.id !== id);
+}
+
+async function saveAiApps() {
+  savingAiApps.value = true;
+  try {
+    const updated = await put<AiAppProfile>('/api/providers/runninghub/profile', {
+      ...profile.value,
+      apps: aiApps.value,
+      // Keep primary appId in sync with apps[0]
+      appId: aiApps.value[0]?.appId ?? profile.value?.appId ?? '',
+    });
+    profile.value = updated;
+    notice.value = t('pages.settings.aiAppsSaved');
+  } catch (e) {
+    notice.value = t('pages.settings.aiAppsSaveFailed', { msg: errorMessage(e) });
+  } finally {
+    savingAiApps.value = false;
   }
 }
 
@@ -328,9 +365,22 @@ async function verifyStoryboardProfile() {
           <div class="row">
             <button class="sm" :disabled="savingKey" @click="saveApiKey">{{ savingKey ? t('pages.settings.saving') : t('pages.settings.saveApiKey') }}</button>
           </div>
-          <p class="muted">
-            AI App: <span class="mono">{{ profile?.appId }}</span> — {{ t('pages.settings.aiAppHelp') }}
-          </p>
+          <p class="muted">{{ t('pages.settings.aiAppHelp') }}</p>
+          <div class="ai-apps">
+            <div v-for="(app, idx) in aiApps" :key="app.id" class="ai-app-card">
+              <div class="ai-app-header row">
+                <span class="badge" :class="idx === 0 ? 'ok' : 'muted'">{{ idx === 0 ? t('pages.settings.primaryApp') : t('pages.settings.secondaryApp') }}</span>
+                <button v-if="aiApps.length > 1" class="sm danger" @click="removeAiApp(app.id)">{{ t('pages.settings.deleteApp') }}</button>
+              </div>
+              <label class="field">{{ t('pages.settings.appName') }}<input v-model="app.name" /></label>
+              <label class="field">{{ t('pages.settings.appIdLabel') }}<input v-model="app.appId" class="mono" /></label>
+              <label class="field">{{ t('pages.settings.appDescription') }}<input v-model="app.description" :placeholder="t('pages.settings.appDescriptionPlaceholder')" /></label>
+            </div>
+            <div class="row">
+              <button class="sm" @click="addAiApp">+ {{ t('pages.settings.addApp') }}</button>
+              <button class="sm primary" :disabled="savingAiApps" @click="saveAiApps">{{ savingAiApps ? t('pages.settings.saving') : t('pages.settings.saveAiApps') }}</button>
+            </div>
+          </div>
           <label class="field">
             {{ t('pages.settings.concurrency') }}
             <input type="number" min="1" max="4" :value="profile?.concurrency ?? 1" @change="saveProviderConcurrency('runninghub', Number(($event.target as HTMLInputElement).value))" />
@@ -452,5 +502,10 @@ h1 { font-size: 21px; margin: 0 0 16px; }
   text-decoration: none;
 }
 .file-button:hover, .button-link:hover { background: var(--accent-soft); border-color: var(--accent-line); text-decoration: none; }
+.ai-apps { display: flex; flex-direction: column; gap: 10px; }
+.ai-app-card { border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--bg-2); }
+.ai-app-header { justify-content: space-between; margin-bottom: 6px; }
+.danger { color: var(--err); border-color: var(--err-line); }
+.danger:hover { background: var(--err-soft); }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 </style>

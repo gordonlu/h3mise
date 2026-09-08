@@ -398,4 +398,42 @@ export class RunningHubAiAppProvider implements VideoProvider {
     // not possible — so cancel is a local no-op that stops polling.
     void handle;
   }
+
+  /** Submit the source image to the reference-video AI App. Returns a handle
+   * that can be polled for the result video URL. The caller is responsible for
+   * uploading the source image first and passing the RunningHub fileName. */
+  async submitRefVideoApp(options: {
+    sourceFileName: string;
+    aspectRatio?: string;
+    megapixels?: string;
+    durationSeconds?: number;
+    steps?: number;
+  }): Promise<RenderJobHandle> {
+    const appId = this.profile.refVideoAppId;
+    if (!appId) throw new ProviderError('refVideoAppId is not configured', 'submit');
+    const nodeInfoList: Array<{ nodeId: string; fieldName: string; fieldValue: string }> = [];
+    // Node 7: source image
+    nodeInfoList.push({ nodeId: '7', fieldName: 'image', fieldValue: options.sourceFileName });
+    // Node 11: aspect ratio + megapixels
+    if (options.aspectRatio) nodeInfoList.push({ nodeId: '11', fieldName: 'aspect_ratio', fieldValue: options.aspectRatio });
+    if (options.megapixels) nodeInfoList.push({ nodeId: '11', fieldName: 'megapixels', fieldValue: options.megapixels });
+    // Node 10: duration
+    if (options.durationSeconds != null) nodeInfoList.push({ nodeId: '10', fieldName: 'value', fieldValue: String(options.durationSeconds) });
+    // Node 18: steps
+    if (options.steps != null) nodeInfoList.push({ nodeId: '18', fieldName: 'steps', fieldValue: String(options.steps) });
+    const body = { nodeInfoList, instanceType: 'default', usePersonalQueue: 'false' };
+    return this.v2(`/openapi/v2/run/ai-app/${appId}`, body).then((raw) => {
+      const r = raw as { taskId?: string; status?: string; errorCode?: string; errorMessage?: string; results?: unknown };
+      if (!r.taskId || (r.errorCode && r.errorCode !== '')) {
+        const capacity = String(r.errorCode ?? '') === '421';
+        throw new ProviderError(
+          `ref video submit failed: ${r.errorCode ?? '?'} ${r.errorMessage ?? JSON.stringify(raw)?.slice(0, 300)}`,
+          'submit',
+          raw,
+          capacity ? { reason: 'provider_capacity', afterMs: 30_000 } : undefined,
+        );
+      }
+      return { providerTaskId: String(r.taskId), raw: raw as Record<string, unknown> };
+    });
+  }
 }

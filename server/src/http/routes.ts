@@ -565,19 +565,24 @@ export function buildRoutes(services: AppServices): App {
     return c.json(plan);
   });
 
-  /** Render a short camera-motion reference clip (background job). */
+  /** Render a short camera-motion reference clip (background job).
+   *  POST body: { provider?: "local" | "runninghub" } — defaults to "local". */
   app.post('/api/shots/:id/camera-plan/motion', async (c) => {
     const ctx = p(c);
     const shotId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { provider?: string };
     const plan = cameraPlanMod.getCameraPlan(ctx, shotId);
     if (!plan) throw new Error('尚未保存相机计划');
     if (!plan.sourceAssetId) throw new Error('请先选择一张源图');
     const source = assetsMod.getMedia(ctx, plan.sourceAssetId);
-    const job = services.jobs.start('camera.render', '相机运动参考视频', async (update) => {
+    const useAi = body.provider === 'runninghub';
+    const job = services.jobs.start('camera.render', useAi ? 'AI 运动参考视频' : '相机运动参考视频', async (update) => {
       const pctx = await services.store.openDetached(ctx.meta.id);
       try {
-        update({ message: '本地渲染运动参考…' });
-        const asset = await cameraPlanMod.renderCameraMotion(pctx, services.ffmpeg, plan, source);
+        update({ message: useAi ? '提交 RunningHub AI 生成…' : '本地渲染运动参考…' });
+        const asset = useAi
+          ? await cameraPlanMod.renderCameraMotionViaRunningHub(pctx, plan, source, services.providers)
+          : await cameraPlanMod.renderCameraMotion(pctx, services.ffmpeg, plan, source);
         update({ message: 'done' });
         return { assetId: asset.id };
       } finally {

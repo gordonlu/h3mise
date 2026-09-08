@@ -13,7 +13,8 @@ import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import { createBinding, insertMedia } from './assets.js';
 import type { Ffmpeg } from '../ffmpeg.js';
-import { mkdir, stat, rename } from 'node:fs/promises';
+import { ProviderError } from '../providers/types.js';
+import { mkdir, stat, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 interface CameraPlanRow {
@@ -304,6 +305,63 @@ export async function renderCameraFrames(
     }
   }
   return { firstAssetId: first.id, lastAssetId: last.id, firstBindingId, lastBindingId };
+}
+
+/** Submit the source image to the RunningHub reference-video AI App for
+ * higher-quality AI-generated camera motion. Returns the media asset on
+ * success. The caller must ensure the RunningHub provider is configured and
+ * the refVideoAppId is set. */
+export async function renderCameraMotionViaRunningHub(
+  p: ProjectContext,
+  plan: CameraMotionPlan,
+  sourceAsset: MediaAsset,
+  registry: import('../providers/registry.js').ProviderRegistry,
+): Promise<MediaAsset> {
+  if (sourceAsset.kind !== 'image') throw new Error('AI 参考视频基于单张源图，请先选择一张图片素材');
+  const provider = registry.get('runninghub');
+  if (!provider || !('submitRefVideoApp' in provider)) throw new ProviderError('RunningHub provider 未配置或不支持参考视频 App', 'submit');
+  const rh = provider as unknown as import('../providers/runninghub.js').RunningHubAiAppProvider;
+  if (!rh.profile.refVideoAppId) throw new ProviderError('refVideoAppId 未配置——请在 Settings → Provider 中设置参考视频 App ID', 'submit');
+  const sourceAbs = p.resolveProjectPath(sourceAsset.fileName);
+  const uploaded = await rh.uploadAsset(sourceAsset, sourceAbs);
+  const handle = await rh.submitRefVideoApp({
+    sourceFileName: uploaded.providerRef,
+    aspectRatio: plan.aspectRatio,
+    megapixels: '0.6',
+    durationSeconds: plan.durationSeconds,
+    steps: 20,
+  });
+  // Poll until done (max 10 minutes).
+  const deadline = Date.now() + 600_000;
+  let resultUrl: string | null = null;
+  while (Date.now() < deadline) {
+    const st = await rh.status(handle);
+    if (st.status === 'SUCCEEDED' && st.resultUrl) { resultUrl = st.resultUrl; break; }
+    if (st.status === 'FAILED') throw new ProviderError(`AI 参考视频生成失败: ${st.error ?? 'unknown'}`, 'submit');
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  if (!resultUrl) throw new ProviderError('AI 参考视频生成超时（10 分钟）', 'submit');
+  // Download result into local assets.
+  const res = await fetch(resultUrl);
+  if (!res.ok) throw new ProviderError(`下载 AI 参考视频失败: HTTP ${res.status}`, 'submit');
+  const buf = Buffer.from(await res.arrayBuffer());
+  const id = nextId(p.db, 'media');
+  const outName = `camera-motion-ai-${Date.now()}.mp4`;
+  const outAbs = join(p.paths.assets, outName);
+  await mkdir(dirname(outAbs), { recursive: true });
+  await writeFile(outAbs, buf);
+  return insertMedia(p, {
+    id,
+    kind: 'video',
+    fileName: `assets/${outName}`,
+    mimeType: 'video/mp4',
+    sizeBytes: buf.length,
+    width: 0,
+    height: 0,
+    durationSeconds: plan.durationSeconds,
+    source: 'other',
+    label: 'Camera motion reference (AI)',
+  });
 }
 
 export { viewAt };

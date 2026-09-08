@@ -148,6 +148,8 @@ RunningHub 分为两个站点：
 
 如果不熟悉 Provider，可以让编码助手先阅读 [AGENTS.md](AGENTS.md)。RunningHub 的安全配置、自动节点检测与首次低成本验证写在其中；ComfyUI 的 Agent 接入协议、Profile 映射和排错步骤在 [ComfyUI.md](ComfyUI.md)。助手不能未经确认发起真实渲染。
 
+Codex 或其他 MCP Agent 可以通过本地桥接直接读取项目、处理 DirectorPlan、编译 Prompt、评审 Take 和运行 Preflight。运行 `pnpm mcp` 可启动 stdio 服务，完整接入方式见 [Agent MCP](docs/agent-mcp.md)。该桥接不提供付费渲染、Take 选择或删除工具。
+
 ## 页面
 
 - **快速剪辑（待完善）**：目前提供简化入口，但剪辑操作仍跳转到专业时间线，尚未形成独立的新手闭环。

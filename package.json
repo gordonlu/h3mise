@@ -11,6 +11,7 @@
     "dev": "pnpm --parallel --filter @h3mise/server --filter @h3mise/web dev",
     "dev:server": "pnpm --filter @h3mise/server dev",
     "dev:web": "pnpm --filter @h3mise/web dev",
+    "mcp": "node tools/h3mise-mcp.mjs",
     "build": "pnpm -r build",
     "start": "pnpm --filter @h3mise/server start",
     "typecheck": "pnpm -r typecheck",

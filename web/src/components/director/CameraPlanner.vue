@@ -401,8 +401,8 @@ const sourceOptions = computed(() => {
         </select>
       </label>
       <div class="row">
-        <button class="sm" :class="{ primary: !advancedOpen }" @click="plan.frameMode = false; pushHistory(); scheduleSave()">{{ tr('shot.camera.moveMode') }}</button>
-        <button class="sm" :class="{ primary: advancedOpen }" @click="plan.frameMode = true; pushHistory(); scheduleSave()">{{ tr('shot.camera.framingMode') }}</button>
+        <button class="sm" :class="{ primary: !plan.frameMode }" @click="plan.frameMode = false; pushHistory(); scheduleSave()">{{ tr('shot.camera.moveMode') }}</button>
+        <button class="sm" :class="{ primary: plan.frameMode }" @click="plan.frameMode = true; pushHistory(); scheduleSave()">{{ tr('shot.camera.framingMode') }}</button>
       </div>
       <div class="grow" />
       <button class="sm ghost" :title="tr('shot.camera.undo')" :disabled="!past.length" @click="undo">↩</button>
@@ -467,8 +467,8 @@ const sourceOptions = computed(() => {
           </div>
           <div class="muted hints">
             <template v-if="plan.frameMode">
-              <button class="sm ghost" @click="setActiveBox('start')">Start</button>
-              <button class="sm ghost" @click="setActiveBox('end')">End</button>
+              <button class="sm ghost" @click="setActiveBox('start')">{{ tr('shot.camera.startBox') }}</button>
+              <button class="sm ghost" @click="setActiveBox('end')">{{ tr('shot.camera.endBox') }}</button>
               <span class="muted">{{ tr('shot.camera.dragHint') }}</span>
             </template>
             <template v-else>
@@ -502,12 +502,12 @@ const sourceOptions = computed(() => {
 
       <!-- Controls -->
       <section class="panel controls-panel">
-        <div class="panel-title">{{ tr('shot.camera.moveMode') }}</div>
+        <div class="panel-title">{{ plan.frameMode ? tr('shot.camera.framingMode') : tr('shot.camera.moveMode') }}</div>
         <div class="panel-body col">
           <template v-if="plan.frameMode">
             <div class="muted">{{ tr('shot.camera.framingMode') }}</div>
             <label class="ctl">
-              <span class="ctl-label">Zoom ({{ activeBox }})</span>
+              <span class="ctl-label">{{ tr('shot.camera.zoom') }} ({{ activeBox === 'start' ? tr('shot.camera.startBox') : tr('shot.camera.endBox') }})</span>
               <input type="range" min="-60" max="60" step="1" :value="0" class="grow" @change="applyZoomToBox(Number(($event.target as HTMLInputElement).value)); pushHistory(); scheduleSave()" />
             </label>
             <label class="ctl">
@@ -545,6 +545,7 @@ const sourceOptions = computed(() => {
 
       <!-- Render actions -->
       <section class="panel render-panel">
+        <div class="panel-title">{{ tr('shot.camera.renderActions') }}</div>
         <div class="panel-body col render-actions">
           <div v-if="aiApps.length" class="row">
             <label class="field inline">{{ tr('shot.camera.motionSource') }}
@@ -554,19 +555,19 @@ const sourceOptions = computed(() => {
               </select>
             </label>
           </div>
-          <div class="row wrap">
+          <div class="render-buttons">
             <button class="primary sm" :disabled="Boolean(motionJob) || !sourceAsset" @click="renderMotion">
               {{ motionJob ? (tr('shot.camera.motionLabel') + ' …') : tr('shot.camera.renderMotion') }}
             </button>
             <button class="sm" :disabled="framesBusy || !sourceAsset" @click="renderFrames">
               {{ framesBusy ? tr('common.loading') : tr('shot.camera.renderFrames') }}
             </button>
-            <label class="row muted bind-tick">
-              <input v-model="bindAfter" type="checkbox" />
-              <span>{{ tr('shot.camera.renderFramesBind') }}</span>
-            </label>
-            <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
           </div>
+          <label class="row muted bind-tick">
+            <input v-model="bindAfter" type="checkbox" />
+            <span>{{ tr('shot.camera.renderFramesBind') }}</span>
+          </label>
+          <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
         </div>
         <div v-if="motionAssetId" class="panel-body">
           <video :src="mediaUrl(motionAssetId)" controls playsinline class="motion-mini" />
@@ -602,13 +603,17 @@ const sourceOptions = computed(() => {
 .scrub { margin-top: 8px; }
 .scrub input { width: 100%; }
 .controls-panel { min-width: 0; }
+.ctl { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.ctl .grow { flex: 1; min-width: 0; }
+.ctl-label { font-size: 12px; color: var(--text-2); min-width: 80px; }
 .slider-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 34px; gap: 8px; align-items: center; }
 .val { font-size: 11px; color: var(--text-3); text-align: right; }
 .adv-toggle { margin: 4px 0; }
 .move-list { display: grid; gap: 4px; margin-top: 6px; }
 .move-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
-.render-actions { gap: 10px; align-items: center; }
-.bind-tick { gap: 4px; }
+.render-actions { gap: 8px; align-items: stretch; }
+.render-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.bind-tick { gap: 4px; margin-top: 2px; }
 .motion-mini { width: 100%; max-width: 320px; border-radius: 6px; }
 .warn-flag { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); background: var(--warn-soft); padding: 8px 10px; }
 </style>

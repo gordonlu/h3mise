@@ -485,6 +485,19 @@ CREATE TABLE camera_plans (
 );
 `,
   },
+  {
+    version: 18,
+    name: 'take-review-iteration-lineage',
+    sql: `
+-- V1 director decision loop: persist what was usable, what must change, and
+-- which observed Take motivated a revised immutable PromptVersion.
+ALTER TABLE takes ADD COLUMN review_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE prompt_versions ADD COLUMN source_take_id TEXT REFERENCES takes(id) ON DELETE SET NULL;
+ALTER TABLE prompt_versions ADD COLUMN revision_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE prompt_versions ADD COLUMN preserved_aspects_json TEXT NOT NULL DEFAULT '[]';
+CREATE INDEX idx_prompt_source_take ON prompt_versions(source_take_id);
+`,
+  },
 ];
 
 export const REGISTRY_MIGRATIONS: Migration[] = [

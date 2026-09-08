@@ -361,6 +361,23 @@ async function aiDiagnose(takeId: string) {
   });
 }
 
+async function createTakeRevision(input: {
+  text: string;
+  mode: string;
+  sourceTakeId: string;
+  revisionReason: string;
+  preservedAspects: string[];
+}) {
+  const prompt = await s.importRawPrompt(input.text, input.mode, 'manual', {
+    sourceTakeId: input.sourceTakeId,
+    revisionReason: input.revisionReason,
+    preservedAspects: input.preservedAspects,
+  });
+  tab.value = 'prompt';
+  toasts.push({ kind: 'ok', text: tr('shot.toast.revisionPromptSaved') });
+  return prompt;
+}
+
 async function aiContinuity(takeId: string): Promise<{ state: import('@h3mise/shared').VisualContinuityState }> {
   const result = await runAi('analyze_take_continuity', { takeId }) as { state?: import('@h3mise/shared').VisualContinuityState };
   if (!result.state) throw new Error(tr('shot.toast.aiNoContinuity'));
@@ -994,6 +1011,7 @@ function localizeRequirement(value: string): string {
       </div>
       <TakesPanel
         :takes="sDetail?.takes ?? []"
+        :prompts="sDetail?.prompts ?? []"
         :selected-take-id="sSelected?.id ?? null"
         :ai-enabled="aiEnabled"
         :actual-state="currentActualContinuity?.state ?? null"
@@ -1005,6 +1023,7 @@ function localizeRequirement(value: string): string {
         :on-reject="s.rejectTake"
         :on-delete="s.deleteTake"
         :on-update="s.updateTake"
+        :on-create-revision="createTakeRevision"
         :on-ai-diagnose="aiDiagnose"
         :on-ai-continuity="aiContinuity"
         :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"

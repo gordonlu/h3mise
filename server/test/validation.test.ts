@@ -6,6 +6,7 @@ import { createSequence, updateSequence, updateStory, getStory } from '../src/mo
 import { createShot, deleteShotAndFiles } from '../src/modules/shots.js';
 import { addClip, getTimeline, updateClip } from '../src/modules/timeline.js';
 import { selectTake, updateTake } from '../src/modules/takes.js';
+import { importRawPrompt } from '../src/modules/prompt.js';
 import { mkdir, writeFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -45,6 +46,38 @@ test('domain validation rejects invalid entities, shots, and timeline trims', as
   const take = await fakeTake(p, shotId, promptVersionId, 'trim');
   assert.throws(() => updateTake(p, take.id, { rating: 6 }), /rating/);
   assert.throws(() => updateTake(p, take.id, { failureTags: ['unknown'] as never }), /failure tag/);
+  const reviewed = updateTake(p, take.id, {
+    review: {
+      pictureVerdict: 'partial',
+      audioVerdict: 'usable',
+      usableRanges: [
+        { start: 0, end: 2.5, media: 'picture' },
+        { start: 0, end: 3, media: 'audio' },
+      ],
+      changeRequest: 'Reduce motion after 2.5 seconds',
+      preservedAspects: ['identity', 'composition'],
+      iterationOutcome: 'unreviewed',
+    },
+  });
+  assert.equal(reviewed.review.pictureVerdict, 'partial');
+  assert.equal(reviewed.review.usableRanges.length, 2);
+  assert.throws(() => updateTake(p, take.id, {
+    review: { ...reviewed.review, usableRanges: [{ start: 0, end: 4, media: 'picture' }] },
+  }), /Take duration/);
+  assert.throws(() => updateTake(p, take.id, {
+    review: { ...reviewed.review, iterationOutcome: 'better' as never },
+  }), /iteration outcome/);
+
+  const revision = importRawPrompt(p, shotId, 'Keep identity; reduce late motion.', 't2va', 'manual', {
+    sourceTakeId: take.id,
+    revisionReason: 'Face drifts after 2.5 seconds',
+    preservedAspects: ['identity', 'composition'],
+  });
+  assert.equal(revision.sourceTakeId, take.id);
+  assert.equal(revision.revisionReason, 'Face drifts after 2.5 seconds');
+  assert.deepEqual(revision.preservedAspects, ['identity', 'composition']);
+  const otherShot = createShot(p, { title: 'Other' });
+  assert.throws(() => importRawPrompt(p, otherShot.id, 'Wrong lineage', 't2va', 'manual', { sourceTakeId: take.id }), /same shot/);
   const media = insertMedia(p, { kind: 'image', fileName: 'assets/ref.png', mimeType: 'image/png', sizeBytes: 1 });
   assert.throws(() => createBinding(p, { assetId: media.id, roles: ['unknown'] as never }), /reference role/);
   selectTake(p, take.id);

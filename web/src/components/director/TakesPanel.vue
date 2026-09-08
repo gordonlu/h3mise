@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, toRaw } from 'vue';
-import type { Take, VisualContinuityState } from '@h3mise/shared';
+import type { PromptVersion, Take, TakeReview, TakeUsableRange, VisualContinuityState } from '@h3mise/shared';
 import { FAILURE_TAGS } from '@h3mise/shared';
 import { takeVideoUrl, fileUrl } from '../../api/client';
 import { confirmDialog } from '../../stores/confirm';
@@ -21,6 +21,7 @@ interface StateLite {
 
 const props = defineProps<{
   takes: Take[];
+  prompts: PromptVersion[];
   selectedTakeId: string | null;
   aiEnabled: boolean;
   /** Latest committed actual visual continuity (prefill for select+commit). */
@@ -33,6 +34,13 @@ const props = defineProps<{
   onReject: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onUpdate: (id: string, patch: Partial<Take>) => Promise<void>;
+  onCreateRevision: (input: {
+    text: string;
+    mode: string;
+    sourceTakeId: string;
+    revisionReason: string;
+    preservedAspects: string[];
+  }) => Promise<PromptVersion>;
   onAiDiagnose: (takeId: string) => Promise<void>;
   onAiContinuity: (takeId: string) => Promise<{ state: VisualContinuityState }>;
   onSelectCommit: (takeId: string, state: VisualContinuityState) => Promise<void>;
@@ -54,11 +62,38 @@ const busyId = ref<string | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
 const importBusy = ref(false);
 const importError = ref('');
+const reviewOpen = ref<Record<string, boolean>>({});
+const reviewDrafts = ref<Record<string, TakeReview>>({});
+const pictureRanges = ref<Record<string, string>>({});
+const audioRanges = ref<Record<string, string>>({});
+const reviewError = ref<Record<string, string>>({});
+const revisionTarget = ref<string | null>(null);
+const revisionText = ref('');
+const revisionReason = ref('');
+const revisionPreserve = ref('');
+const revisionBusy = ref(false);
 
 const activeTake = computed(() => props.takes.find((t) => t.id === active.value) ?? null);
 const takeA = computed(() => props.takes.find((t) => t.id === slotA.value) ?? null);
 const takeB = computed(() => props.takes.find((t) => t.id === slotB.value) ?? null);
 const compareMode = computed(() => !!(takeA.value && takeB.value));
+const compareRelation = computed(() => {
+  if (!takeA.value || !takeB.value) return null;
+  const promptA = promptForTake(takeA.value);
+  const promptB = promptForTake(takeB.value);
+  if (promptB?.sourceTakeId === takeA.value.id) return { source: takeA.value, candidate: takeB.value, prompt: promptB };
+  if (promptA?.sourceTakeId === takeB.value.id) return { source: takeB.value, candidate: takeA.value, prompt: promptA };
+  return null;
+});
+
+function promptForTake(take: Take): PromptVersion | null {
+  return props.prompts.find((prompt) => prompt.id === take.promptVersionId) ?? null;
+}
+
+function sourceTakeFor(take: Take): Take | null {
+  const sourceTakeId = promptForTake(take)?.sourceTakeId;
+  return sourceTakeId ? props.takes.find((item) => item.id === sourceTakeId) ?? null : null;
+}
 
 async function run(id: string, fn: () => Promise<void>) {
   busyId.value = id;
@@ -139,6 +174,104 @@ function toggleTag(take: Take, tag: string) {
 // --- rating -----------------------------------------------------------------
 function setRating(take: Take, n: number) {
   void props.onUpdate(take.id, { rating: take.rating === n ? null : n });
+}
+
+function compareWithSource(take: Take) {
+  const source = sourceTakeFor(take);
+  if (!source) return;
+  slotA.value = source.id;
+  slotB.value = take.id;
+}
+
+async function confirmComparisonOutcome(outcome: TakeReview['iterationOutcome']) {
+  const relation = compareRelation.value;
+  if (!relation) return;
+  const review = relation.candidate.review;
+  await run(relation.candidate.id, () => props.onUpdate(relation.candidate.id, {
+    review: {
+      ...review,
+      usableRanges: review.usableRanges.map((range) => ({ ...range })),
+      preservedAspects: [...review.preservedAspects],
+      iterationOutcome: outcome,
+    },
+  }));
+}
+
+function rangesToText(take: Take, media: 'picture' | 'audio'): string {
+  return take.review.usableRanges
+    .filter((range) => range.media === media)
+    .map((range) => `${range.start}-${range.end}`)
+    .join(', ');
+}
+
+function openReview(take: Take) {
+  reviewOpen.value[take.id] = !reviewOpen.value[take.id];
+  if (!reviewOpen.value[take.id]) return;
+  reviewDrafts.value[take.id] = {
+    ...toRaw(take.review),
+    usableRanges: take.review.usableRanges.map((range) => ({ ...toRaw(range) })),
+    preservedAspects: [...take.review.preservedAspects],
+  };
+  pictureRanges.value[take.id] = rangesToText(take, 'picture');
+  audioRanges.value[take.id] = rangesToText(take, 'audio');
+  reviewError.value[take.id] = '';
+}
+
+function reviewDraft(take: Take): TakeReview {
+  return reviewDrafts.value[take.id] ?? take.review;
+}
+
+function parseRanges(text: string, media: 'picture' | 'audio'): TakeUsableRange[] {
+  if (!text.trim()) return [];
+  return text.split(',').map((part) => {
+    const match = part.trim().match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/);
+    if (!match) throw new Error(tr('shot.takes.rangeFormatError'));
+    return { start: Number(match[1]), end: Number(match[2]), media };
+  });
+}
+
+async function saveReview(take: Take) {
+  const draft = reviewDrafts.value[take.id];
+  if (!draft) return;
+  reviewError.value[take.id] = '';
+  try {
+    draft.usableRanges = [
+      ...parseRanges(pictureRanges.value[take.id] ?? '', 'picture'),
+      ...parseRanges(audioRanges.value[take.id] ?? '', 'audio'),
+    ];
+    draft.preservedAspects = draft.preservedAspects.map((item) => item.trim()).filter(Boolean);
+    await run(take.id, () => props.onUpdate(take.id, { review: draft }));
+    reviewOpen.value[take.id] = false;
+  } catch (error) {
+    reviewError.value[take.id] = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function openRevision(take: Take) {
+  const prompt = props.prompts.find((item) => item.id === take.promptVersionId);
+  revisionTarget.value = take.id;
+  revisionText.value = prompt?.text ?? take.provenance.prompt ?? '';
+  revisionReason.value = take.review.changeRequest || take.notes || take.failureTags.join(', ');
+  revisionPreserve.value = take.review.preservedAspects.join(', ');
+}
+
+async function createRevision() {
+  const take = props.takes.find((item) => item.id === revisionTarget.value);
+  if (!take || !revisionText.value.trim() || !revisionReason.value.trim()) return;
+  const prompt = props.prompts.find((item) => item.id === take.promptVersionId);
+  revisionBusy.value = true;
+  try {
+    await props.onCreateRevision({
+      text: revisionText.value.trim(),
+      mode: prompt?.h3Mode ?? 't2va',
+      sourceTakeId: take.id,
+      revisionReason: revisionReason.value.trim(),
+      preservedAspects: revisionPreserve.value.split(',').map((item) => item.trim()).filter(Boolean),
+    });
+    revisionTarget.value = null;
+  } finally {
+    revisionBusy.value = false;
+  }
 }
 
 // --- continuity commit form --------------------------------------------------
@@ -289,6 +422,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             <div class="row cmp-label">
               <span class="badge accent no-dot">A</span>
               <span class="mono">{{ takeA.id }}</span>
+              <span v-if="compareRelation?.source.id === takeA.id" class="badge no-dot">{{ tr('shot.takes.sourceTake') }}</span>
+              <span v-if="compareRelation?.candidate.id === takeA.id" class="badge info no-dot">{{ tr('shot.takes.revisionCandidate') }}</span>
               <span class="muted">{{ takeA.duration.toFixed(1) }}s</span>
               <span class="grow" />
               <button class="sm ghost" @click="slotA = null">✕</button>
@@ -310,6 +445,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             <div class="row cmp-label">
               <span class="badge info no-dot">B</span>
               <span class="mono">{{ takeB.id }}</span>
+              <span v-if="compareRelation?.source.id === takeB.id" class="badge no-dot">{{ tr('shot.takes.sourceTake') }}</span>
+              <span v-if="compareRelation?.candidate.id === takeB.id" class="badge info no-dot">{{ tr('shot.takes.revisionCandidate') }}</span>
               <span class="muted">{{ takeB.duration.toFixed(1) }}s</span>
               <span class="grow" />
               <button class="sm ghost" @click="slotB = null">✕</button>
@@ -317,6 +454,45 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           </template>
           <div v-else class="cmp-empty muted">{{ tr('shot.takes.assignCompareBefore') }} <span class="kbd">B</span> {{ tr('shot.takes.assignCompareAfter', { slot: 'B' }) }}</div>
         </div>
+      </div>
+      <div v-if="compareMode" class="comparison-decision">
+        <template v-if="compareRelation">
+          <div class="decision-context">
+            <div class="row wrap">
+              <strong>{{ tr('shot.takes.revisionComparison') }}</strong>
+              <span class="mono">{{ compareRelation.source.id }}</span>
+              <span>→</span>
+              <span class="mono">{{ compareRelation.candidate.id }}</span>
+            </div>
+            <p>{{ compareRelation.prompt.revisionReason }}</p>
+            <div v-if="compareRelation.prompt.preservedAspects.length" class="row wrap preserve-row">
+              <span class="muted">{{ tr('shot.takes.preserve') }}:</span>
+              <span v-for="item in compareRelation.prompt.preservedAspects" :key="item" class="tag active">{{ item }}</span>
+            </div>
+          </div>
+          <div class="outcome-actions">
+            <span>{{ tr('shot.takes.didItImprove') }}</span>
+            <button
+              class="sm"
+              :class="{ primary: compareRelation.candidate.review.iterationOutcome === 'improved' }"
+              :disabled="busyId === compareRelation.candidate.id"
+              @click="confirmComparisonOutcome('improved')"
+            >{{ tr('shot.takes.improved') }}</button>
+            <button
+              class="sm"
+              :class="{ primary: compareRelation.candidate.review.iterationOutcome === 'same' }"
+              :disabled="busyId === compareRelation.candidate.id"
+              @click="confirmComparisonOutcome('same')"
+            >{{ tr('shot.takes.same') }}</button>
+            <button
+              class="sm"
+              :class="{ danger: compareRelation.candidate.review.iterationOutcome === 'worse' }"
+              :disabled="busyId === compareRelation.candidate.id"
+              @click="confirmComparisonOutcome('worse')"
+            >{{ tr('shot.takes.worse') }}</button>
+          </div>
+        </template>
+        <span v-else class="muted">{{ tr('shot.takes.noDirectRelation') }}</span>
       </div>
     </div>
 
@@ -409,6 +585,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       </div>
     </div>
 
+    <div v-if="revisionTarget" class="panel revision-panel">
+      <div class="panel-title spread">
+        <span>{{ tr('shot.takes.reviseFrom') }} <span class="mono">{{ revisionTarget }}</span></span>
+        <button class="sm ghost" @click="revisionTarget = null">{{ tr('common.close') }}</button>
+      </div>
+      <div class="panel-body col">
+        <p class="revision-intro">{{ tr('shot.takes.revisionSafety') }}</p>
+        <label class="field">{{ tr('shot.takes.changeRequest') }}<textarea v-model="revisionReason" rows="2" /></label>
+        <label class="field">{{ tr('shot.takes.preserve') }}<input v-model="revisionPreserve" :placeholder="tr('shot.takes.preservePlaceholder')" /></label>
+        <label class="field">{{ tr('shot.takes.revisedPrompt') }}<textarea v-model="revisionText" rows="8" /></label>
+        <div class="row">
+          <button class="primary sm" :disabled="revisionBusy || !revisionReason.trim() || !revisionText.trim()" @click="createRevision">
+            {{ revisionBusy ? tr('shot.common.saving') : tr('shot.takes.saveRevision') }}
+          </button>
+          <span class="muted">{{ tr('shot.takes.preflightStillRequired') }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- take cards -->
     <div class="takes grid">
       <div
@@ -460,6 +655,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             <button class="sm ghost" :title="tr('shot.takes.lastFrameBridgeTitle')" @click="onUseLastFrame(t.id)">↗ {{ tr('shot.takes.lastFrameAsFirst') }}</button>
             <button class="sm ghost" :title="tr('shot.takes.firstFrameReferenceTitle')" @click="onUseFirstFrame(t.id)">↗ {{ tr('shot.takes.firstFrameAsReference') }}</button>
             <button v-if="aiEnabled" class="sm ghost" @click="onAiDiagnose(t.id)">{{ tr('shot.takes.aiDiagnosis') }}</button>
+            <button v-if="sourceTakeFor(t)" class="sm ghost" @click="compareWithSource(t)">{{ tr('shot.takes.compareWithSource') }}</button>
+            <button class="sm ghost" @click="openReview(t)">{{ tr('shot.takes.reviewRecord') }}</button>
+            <button class="sm ghost" @click="openRevision(t)">{{ tr('shot.takes.startRevision') }}</button>
           </div>
 
           <!-- failure tags, collapsible -->
@@ -481,6 +679,55 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             <div v-else-if="t.failureTags.length" class="tags static">
               <span v-for="tag in t.failureTags" :key="tag" class="tag active">{{ tag }}</span>
             </div>
+          </div>
+
+          <div v-if="reviewOpen[t.id] && reviewDrafts[t.id]" class="review-editor col">
+            <div class="grid review-verdicts">
+              <label class="field">{{ tr('shot.takes.pictureVerdict') }}
+                <select v-model="reviewDraft(t).pictureVerdict">
+                  <option value="unreviewed">{{ tr('shot.takes.unreviewed') }}</option>
+                  <option value="usable">{{ tr('shot.takes.usable') }}</option>
+                  <option value="partial">{{ tr('shot.takes.partial') }}</option>
+                  <option value="unusable">{{ tr('shot.takes.unusable') }}</option>
+                </select>
+              </label>
+              <label class="field">{{ tr('shot.takes.audioVerdict') }}
+                <select v-model="reviewDraft(t).audioVerdict">
+                  <option value="unreviewed">{{ tr('shot.takes.unreviewed') }}</option>
+                  <option value="usable">{{ tr('shot.takes.usable') }}</option>
+                  <option value="partial">{{ tr('shot.takes.partial') }}</option>
+                  <option value="unusable">{{ tr('shot.takes.unusable') }}</option>
+                </select>
+              </label>
+            </div>
+            <div class="grid review-verdicts">
+              <label class="field">{{ tr('shot.takes.pictureRanges') }}<input v-model="pictureRanges[t.id]" placeholder="0-4, 6-8" /></label>
+              <label class="field">{{ tr('shot.takes.audioRanges') }}<input v-model="audioRanges[t.id]" placeholder="0-8" /></label>
+            </div>
+            <label class="field">{{ tr('shot.takes.changeRequest') }}<textarea v-model="reviewDraft(t).changeRequest" rows="2" /></label>
+            <label class="field">{{ tr('shot.takes.preserve') }}
+              <input
+                :value="reviewDraft(t).preservedAspects.join(', ')"
+                :placeholder="tr('shot.takes.preservePlaceholder')"
+                @input="reviewDraft(t).preservedAspects = ($event.target as HTMLInputElement).value.split(',')"
+              />
+            </label>
+            <label v-if="prompts.find((prompt) => prompt.id === t.promptVersionId)?.sourceTakeId" class="field">{{ tr('shot.takes.iterationOutcome') }}
+              <select v-model="reviewDraft(t).iterationOutcome">
+                <option value="unreviewed">{{ tr('shot.takes.unreviewed') }}</option>
+                <option value="improved">{{ tr('shot.takes.improved') }}</option>
+                <option value="same">{{ tr('shot.takes.same') }}</option>
+                <option value="worse">{{ tr('shot.takes.worse') }}</option>
+              </select>
+            </label>
+            <div v-if="reviewError[t.id]" class="bad review-error">{{ reviewError[t.id] }}</div>
+            <div class="row"><button class="primary sm" :disabled="busyId === t.id" @click="saveReview(t)">{{ tr('shot.takes.saveReview') }}</button></div>
+          </div>
+
+          <div v-else-if="t.review.pictureVerdict !== 'unreviewed' || t.review.audioVerdict !== 'unreviewed'" class="review-summary">
+            <span>{{ tr('shot.takes.pictureVerdict') }}: {{ tr(`shot.takes.${t.review.pictureVerdict}`) }}</span>
+            <span>{{ tr('shot.takes.audioVerdict') }}: {{ tr(`shot.takes.${t.review.audioVerdict}`) }}</span>
+            <span v-if="t.review.usableRanges.length">{{ tr('shot.takes.usableRangesCount', { n: t.review.usableRanges.length }) }}</span>
           </div>
 
           <textarea
@@ -540,11 +787,23 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 .chev-sm { font-size: 10px; }
 .tags { display: flex; flex-wrap: wrap; margin-top: 4px; }
 .note-btn { text-align: left; justify-content: flex-start; }
+.revision-panel { border-color: var(--accent); }
+.revision-intro { margin: 0; color: var(--text-2); font-size: 12px; }
+.review-editor { padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-subtle); }
+.review-verdicts { grid-template-columns: 1fr 1fr; }
+.review-summary { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--text-2); font-size: 11.5px; }
+.review-error { font-size: 12px; }
 .takes-empty { padding: 20px 0; }
 .compare-tray { border-color: var(--line-2); }
 .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; }
 .cmp-label { margin-top: 6px; }
 .cmp-empty { display: flex; align-items: center; justify-content: center; min-height: 140px; border: 1.5px dashed var(--line-2); border-radius: var(--radius-sm); gap: 4px; }
+.comparison-decision { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 14px 14px; padding: 11px 12px; border: 1px solid var(--info); border-radius: var(--radius-sm); background: var(--info-soft); }
+.decision-context { display: grid; gap: 5px; min-width: 0; }
+.decision-context p { margin: 0; color: var(--text-2); font-size: 12px; }
+.preserve-row { gap: 5px; }
+.outcome-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; flex: none; }
+.outcome-actions > span { width: 100%; color: var(--text-2); font-size: 11.5px; text-align: right; }
 .sync-toggle { gap: 5px; cursor: pointer; font-size: 12px; }
 .sync-toggle input { width: auto; }
 .commit-panel { border-color: var(--accent); }
@@ -563,4 +822,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 .char-block { border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .char-head select { width: auto; }
 .shortcuts { display: flex; align-items: center; gap: 4px; padding-top: 4px; }
+@media (max-width: 760px) {
+  .compare-grid, .review-verdicts, .commit-grid { grid-template-columns: 1fr; }
+  .comparison-decision { align-items: stretch; flex-direction: column; }
+  .outcome-actions { justify-content: flex-start; }
+  .outcome-actions > span { text-align: left; }
+}
 </style>

@@ -19,5 +19,10 @@ export interface PromptVersion {
   directorPlanVersionId: string | null;
   h3Mode: H3Mode;
   text: string;
+  /** Optional iteration lineage. A revised prompt points at the Take whose
+   * observed problem motivated it; rendering remains a separate, confirmed step. */
+  sourceTakeId: string | null;
+  revisionReason: string;
+  preservedAspects: string[];
   createdAt: string;
 }

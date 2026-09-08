@@ -76,8 +76,13 @@ export function useShot(shotId: string) {
     return pv;
   }
 
-  async function importRawPrompt(text: string, mode: string, source: 'manual' | 'ai_compiler' = 'manual') {
-    const pv = await post<PromptVersion>(`/api/shots/${shotId}/prompts/raw`, { text, mode, source });
+  async function importRawPrompt(
+    text: string,
+    mode: string,
+    source: 'manual' | 'ai_compiler' = 'manual',
+    iteration?: { sourceTakeId: string; revisionReason: string; preservedAspects: string[] },
+  ) {
+    const pv = await post<PromptVersion>(`/api/shots/${shotId}/prompts/raw`, { text, mode, source, ...iteration });
     await load();
     return pv;
   }

@@ -19,6 +19,9 @@ interface PvRow {
   director_plan_version_id: string | null;
   h3_mode: string;
   text: string;
+  source_take_id: string | null;
+  revision_reason: string;
+  preserved_aspects_json: string;
   created_at: string;
 }
 
@@ -30,6 +33,9 @@ function pvFromRow(r: PvRow): PromptVersion {
     directorPlanVersionId: r.director_plan_version_id,
     h3Mode: r.h3_mode as H3Mode,
     text: r.text,
+    sourceTakeId: r.source_take_id,
+    revisionReason: r.revision_reason,
+    preservedAspects: jget<string[]>(r.preserved_aspects_json, []),
     createdAt: r.created_at,
   };
 }
@@ -46,13 +52,34 @@ export function getPrompt(p: ProjectContext, id: string): PromptVersion {
 
 export function createPrompt(
   p: ProjectContext,
-  input: { shotId: string; source: PromptSource; h3Mode: H3Mode; text: string; directorPlanVersionId?: string | null },
+  input: {
+    shotId: string;
+    source: PromptSource;
+    h3Mode: H3Mode;
+    text: string;
+    directorPlanVersionId?: string | null;
+    sourceTakeId?: string | null;
+    revisionReason?: string;
+    preservedAspects?: string[];
+  },
 ): PromptVersion {
+  const sourceTakeId = input.sourceTakeId ?? null;
+  if (sourceTakeId) {
+    const source = p.db.get<{ shot_id: string }>('SELECT shot_id FROM takes WHERE id = ?', [sourceTakeId]);
+    if (!source) throw new Error('source take not found');
+    if (source.shot_id !== input.shotId) throw new Error('source take must belong to the same shot');
+  }
   const id = nextId(p.db, 'prompt');
   const now = new Date().toISOString();
   p.db.run(
-    'INSERT INTO prompt_versions (id, shot_id, source, director_plan_version_id, h3_mode, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [id, input.shotId, input.source, input.directorPlanVersionId ?? null, input.h3Mode, input.text, now],
+    `INSERT INTO prompt_versions (
+       id, shot_id, source, director_plan_version_id, h3_mode, text,
+       source_take_id, revision_reason, preserved_aspects_json, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id, input.shotId, input.source, input.directorPlanVersionId ?? null, input.h3Mode, input.text,
+      sourceTakeId, input.revisionReason?.trim() ?? '', JSON.stringify(input.preservedAspects ?? []), now,
+    ],
   );
   return getPrompt(p, id);
 }
@@ -120,8 +147,9 @@ export function importRawPrompt(
   text: string,
   mode: H3Mode,
   source: Extract<PromptSource, 'manual' | 'ai_compiler'> = 'manual',
+  iteration?: { sourceTakeId?: string | null; revisionReason?: string; preservedAspects?: string[] },
 ): PromptVersion {
-  return createPrompt(p, { shotId, source, h3Mode: mode, text });
+  return createPrompt(p, { shotId, source, h3Mode: mode, text, ...iteration });
 }
 
 /** Copy Context Package for external AI (PRD §21/§39). */

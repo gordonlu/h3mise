@@ -128,6 +128,34 @@ export const FAILURE_TAGS = [
 
 export type FailureTag = (typeof FAILURE_TAGS)[number];
 
+export type TakeReviewVerdict = 'unreviewed' | 'usable' | 'partial' | 'unusable';
+export type TakeIterationOutcome = 'unreviewed' | 'improved' | 'same' | 'worse';
+
+export interface TakeUsableRange {
+  start: number;
+  end: number;
+  media: 'picture' | 'audio';
+  note?: string;
+}
+
+export interface TakeReview {
+  pictureVerdict: TakeReviewVerdict;
+  audioVerdict: TakeReviewVerdict;
+  usableRanges: TakeUsableRange[];
+  changeRequest: string;
+  preservedAspects: string[];
+  iterationOutcome: TakeIterationOutcome;
+}
+
+export const EMPTY_TAKE_REVIEW: TakeReview = {
+  pictureVerdict: 'unreviewed',
+  audioVerdict: 'unreviewed',
+  usableRanges: [],
+  changeRequest: '',
+  preservedAspects: [],
+  iterationOutcome: 'unreviewed',
+};
+
 export interface Take {
   id: string;
   shotId: string;
@@ -145,5 +173,6 @@ export interface Take {
   rating: number | null;
   failureTags: FailureTag[];
   notes: string;
+  review: TakeReview;
   createdAt: string;
 }

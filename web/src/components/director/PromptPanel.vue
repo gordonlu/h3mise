@@ -99,6 +99,13 @@ async function copy(text: string) {
           </div>
           <button class="sm ghost" @click="copy(pv.text)">{{ t('shot.common.copy') }}</button>
         </div>
+        <div v-if="pv.sourceTakeId" class="iteration-lineage">
+          <div class="row wrap">
+            <span class="badge info no-dot">{{ t('shot.prompt.revisionFrom') }} {{ pv.sourceTakeId }}</span>
+            <span v-for="item in pv.preservedAspects" :key="item" class="tag active">{{ t('shot.prompt.preserve') }} {{ item }}</span>
+          </div>
+          <p>{{ pv.revisionReason }}</p>
+        </div>
         <pre class="prompt-text">{{ pv.text || t('shot.prompt.emptyPrompt') }}</pre>
       </div>
       <div v-if="!prompts.length" class="muted">{{ t('shot.prompt.noPrompts') }}</div>
@@ -109,6 +116,8 @@ async function copy(text: string) {
 <style scoped>
 .wrap { flex-wrap: wrap; }
 .prompt-item { padding: 10px 12px; }
+.iteration-lineage { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--info); background: var(--info-soft); border-radius: 4px; }
+.iteration-lineage p { margin: 6px 0 0; color: var(--text-2); font-size: 12px; }
 .prompt-text {
   font-family: var(--mono);
   font-size: 12px;

@@ -4,7 +4,15 @@
 
 import { extname, join } from 'node:path';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
-import { FAILURE_TAGS, type FailureTag, type Take, type TakeProvenance, type TakeSource } from '@h3mise/shared';
+import {
+  EMPTY_TAKE_REVIEW,
+  FAILURE_TAGS,
+  type FailureTag,
+  type Take,
+  type TakeProvenance,
+  type TakeReview,
+  type TakeSource,
+} from '@h3mise/shared';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import type { ProjectContext } from '../project-store.js';
@@ -31,7 +39,24 @@ interface TakeRow {
   rating: number | null;
   failure_tags_json: string;
   notes: string;
+  review_json: string;
   created_at: string;
+}
+
+const REVIEW_VERDICTS = ['unreviewed', 'usable', 'partial', 'unusable'] as const;
+const ITERATION_OUTCOMES = ['unreviewed', 'improved', 'same', 'worse'] as const;
+
+function normalizeReview(value: unknown): TakeReview {
+  if (!value || typeof value !== 'object') return { ...EMPTY_TAKE_REVIEW, usableRanges: [], preservedAspects: [] };
+  const review = value as Partial<TakeReview>;
+  return {
+    pictureVerdict: REVIEW_VERDICTS.includes(review.pictureVerdict as never) ? review.pictureVerdict! : 'unreviewed',
+    audioVerdict: REVIEW_VERDICTS.includes(review.audioVerdict as never) ? review.audioVerdict! : 'unreviewed',
+    usableRanges: Array.isArray(review.usableRanges) ? review.usableRanges : [],
+    changeRequest: typeof review.changeRequest === 'string' ? review.changeRequest : '',
+    preservedAspects: Array.isArray(review.preservedAspects) ? review.preservedAspects.filter((item): item is string => typeof item === 'string') : [],
+    iterationOutcome: ITERATION_OUTCOMES.includes(review.iterationOutcome as never) ? review.iterationOutcome! : 'unreviewed',
+  };
 }
 
 export function takeFromRow(r: TakeRow): Take {
@@ -52,6 +77,7 @@ export function takeFromRow(r: TakeRow): Take {
     rating: r.rating,
     failureTags: jget<FailureTag[]>(r.failure_tags_json, []),
     notes: r.notes,
+    review: normalizeReview(jget<unknown>(r.review_json, {})),
     createdAt: r.created_at,
   };
 }
@@ -246,13 +272,32 @@ export async function importTake(
 export function updateTake(
   p: ProjectContext,
   id: string,
-  patch: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes'>>,
+  patch: Partial<Pick<Take, 'rating' | 'failureTags' | 'notes' | 'review'>>,
 ): Take {
+  const existing = getTake(p, id);
   if (patch.rating !== undefined && patch.rating !== null && (!Number.isInteger(patch.rating) || patch.rating < 1 || patch.rating > 5)) {
     throw new Error('take rating must be an integer from 1 to 5');
   }
   if (patch.failureTags !== undefined && patch.failureTags.some((tag) => !FAILURE_TAGS.includes(tag))) {
     throw new Error('invalid failure tag');
+  }
+  if (patch.review !== undefined) {
+    if (!patch.review || typeof patch.review !== 'object') throw new Error('invalid Take review');
+    if (!REVIEW_VERDICTS.includes(patch.review.pictureVerdict as never) || !REVIEW_VERDICTS.includes(patch.review.audioVerdict as never)) {
+      throw new Error('invalid Take review verdict');
+    }
+    if (!ITERATION_OUTCOMES.includes(patch.review.iterationOutcome as never)) throw new Error('invalid Take iteration outcome');
+    if (!Array.isArray(patch.review.usableRanges) || !Array.isArray(patch.review.preservedAspects) || patch.review.preservedAspects.some((item) => typeof item !== 'string')) {
+      throw new Error('invalid Take review details');
+    }
+    const review = normalizeReview(patch.review);
+    for (const range of review.usableRanges) {
+      if (!range || !['picture', 'audio'].includes(range.media)) throw new Error('invalid usable range media');
+      if (!Number.isFinite(range.start) || !Number.isFinite(range.end) || range.start < 0 || range.end <= range.start || range.end > existing.duration) {
+        throw new Error('usable range must stay within the Take duration');
+      }
+    }
+    patch.review = review;
   }
   const cols: string[] = [];
   const vals: unknown[] = [];
@@ -267,6 +312,10 @@ export function updateTake(
   if (patch.notes !== undefined) {
     cols.push('notes = ?');
     vals.push(patch.notes);
+  }
+  if (patch.review !== undefined) {
+    cols.push('review_json = ?');
+    vals.push(j(patch.review));
   }
   if (cols.length) {
     vals.push(id);

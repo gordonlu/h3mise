@@ -619,7 +619,14 @@ export function buildRoutes(services: AppServices): App {
   app.post('/api/shots/:id/prompts/raw', async (c) => {
     const body = await c.req.json();
     const source = body.source === 'ai_compiler' ? 'ai_compiler' : 'manual';
-    return c.json(promptMod.importRawPrompt(p(c), c.req.param('id'), String(body.text ?? ''), body.mode ?? 't2va', source), 201);
+    return c.json(promptMod.importRawPrompt(
+      p(c), c.req.param('id'), String(body.text ?? ''), body.mode ?? 't2va', source,
+      {
+        sourceTakeId: body.sourceTakeId ?? null,
+        revisionReason: String(body.revisionReason ?? ''),
+        preservedAspects: Array.isArray(body.preservedAspects) ? body.preservedAspects.map(String) : [],
+      },
+    ), 201);
   });
 
   // --- preflight -----------------------------------------------------------

@@ -212,6 +212,7 @@ function openGuideAction(action: NextAction) {
 }
 
 function applyGuideQuery() {
+  if (route.query.tab === 'references') tab.value = 'references';
   const target = route.query.guide;
   if (target === 'design') tab.value = 'plan';
   else if (target === 'references') tab.value = 'references';
@@ -602,7 +603,7 @@ onUnmounted(() => {
 const TABS = computed(() => [
   { id: 'workspace', label: tr('shot.tab.workspace') },
   { id: 'plan', label: tr('shot.tab.plan') },
-  { id: 'camera', label: tr('shot.tab.camera') },
+  // camera tab hidden — feature has unresolved bugs; code and v-show kept for re-enable
   { id: 'references', label: tr('shot.tab.references') },
   { id: 'prompt', label: tr('shot.tab.prompt') },
   { id: 'preflight', label: tr('shot.tab.preflight') },
@@ -881,7 +882,7 @@ function localizeRequirement(value: string): string {
             :shot="sShot"
             :media="media"
             :bindings="sDetail?.bindings ?? []"
-            @assets-added="loadMedia"
+            @assets-added="async () => { await loadMedia(); await s.load(); }"
           />
         </div>
 
@@ -1067,6 +1068,9 @@ function localizeRequirement(value: string): string {
 .tab-body { padding: 14px; max-height: calc(100vh - 230px); overflow: auto; }
 .workspace-body { padding: 12px; }
 .camera-body { max-height: none; overflow: visible; }
+.core:has(.camera-body:not([style*="display: none"])) { grid-template-columns: 220px minmax(0, 1fr); }
+.core:has(.camera-body:not([style*="display: none"])) .stage { display: none; }
+.tabs { overflow-x: auto; }
 .check-ctl { gap: 4px; }
 .external-flow { display: grid; gap: 10px; }
 .external-intro { display: flex; flex-direction: column; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }

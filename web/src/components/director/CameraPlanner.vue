@@ -226,20 +226,34 @@ function removeMove(index: number): void {
   scheduleSave();
 }
 
-// Live view — throttled via rAF to prevent flickering
-const liveView = ref(viewAt(plan.value, 0.5));
+// Live view — NON-REACTIVE. Updated via rAF + direct DOM manipulation.
+// This avoids Vue reactivity entirely, so preview updates never trigger
+// a template re-render or the flickering that comes with it.
+const liveRectEl = ref<SVGRectElement | null>(null);
+const liveRect = { x: 0.25, y: 0.25, w: 0.5 };
 let previewRaf = 0;
+function applyLiveView(): void {
+  const el = liveRectEl.value;
+  if (!el) return;
+  el.setAttribute('x', String(liveRect.x));
+  el.setAttribute('y', String(liveRect.y));
+  el.setAttribute('width', String(liveRect.w));
+  el.setAttribute('height', String(liveRect.w));
+}
 function schedulePreview(): void {
   if (previewRaf) return;
   previewRaf = requestAnimationFrame(() => {
     previewRaf = 0;
     const t = playing.value ? playTime.value : 0.5;
-    // Stack active slider as preview move
     const active = AXES.map((axis) => [axis, sliderValue.value[axis] ?? 0] as const).find(([, v]) => v !== 0);
     const effective = active
       ? { ...plan.value, frameMode: false, steps: [...plan.value.steps, { id: '_preview', axis: active[0], amount: active[1], start: 0, end: 1, ease: 'linear' as const }] }
       : plan.value;
-    liveView.value = viewAt(effective, t);
+    const v = viewAt(effective, t);
+    liveRect.x = v.rect.x;
+    liveRect.y = v.rect.y;
+    liveRect.w = v.rect.w;
+    applyLiveView();
   });
 }
 
@@ -383,8 +397,8 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
               <text class="cp-fbox-label end" :x="(plan.endFraming ?? plan.startFraming).x + (plan.endFraming ?? plan.startFraming).w / 2"
                 :y="(plan.endFraming ?? plan.startFraming).y - 0.015" text-anchor="middle">E</text>
             </template>
-            <!-- Live view outline -->
-            <rect class="cp-live" :x="liveView.rect.x" :y="liveView.rect.y" :width="liveView.rect.w" :height="liveView.rect.w" />
+            <!-- Live view outline — ref, NOT reactive -->
+            <rect ref="liveRectEl" class="cp-live" x="0.25" y="0.25" width="0.5" height="0.5" />
           </svg>
           <span class="cp-time">{{ fmtTime(playTime) }} / {{ plan.durationSeconds }}s</span>
         </div>

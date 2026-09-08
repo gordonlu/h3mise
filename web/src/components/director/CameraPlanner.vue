@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { CameraMotionPlan, FramingRect, MediaAsset, ReferenceBinding, Shot } from '@h3mise/shared';
 import { cameraPlanWarnings, viewAt, normalizeCameraPlan, emptyCameraPlan } from '@h3mise/shared';
 import { get, post, put, mediaUrl } from '../../api/client';
@@ -16,33 +16,44 @@ const emit = defineEmits<{ assetsAdded: [] }>();
 
 const toasts = useToastStore();
 
-// AI Apps available for motion rendering
+// AI Apps
 const aiApps = ref<Array<{ id: string; name: string; appId: string; description?: string }>>([]);
 const motionProvider = ref<'local' | 'ai'>('local');
 
+// Plan state
 const plan = ref<CameraMotionPlan>({
   ...emptyCameraPlan(),
   durationSeconds: props.shot.durationSeconds,
   aspectRatio: props.shot.aspectRatio,
 });
 const loaded = ref(false);
+
+// Preview
 const playing = ref(false);
 const playTime = ref(0);
-const advancedOpen = ref(false);
-const sliderValue = ref<Record<string, number>>({ horizontal: 0, vertical: 0, zoom: 0, pan: 0, tilt: 0, roll: 0 });
+const stageSvg = ref<SVGSVGElement | null>(null);
+
+// Framing mode
 const activeBox = ref<'start' | 'end'>('start');
 const dragState = ref<'start' | 'end' | null>(null);
+const dragStart = ref<{ mx: number; my: number; fx: number; fy: number } | null>(null);
+
+// Move mode
+const AXES = ['horizontal', 'vertical', 'zoom', 'pan', 'tilt', 'roll'] as const;
+const advancedOpen = ref(false);
+const sliderValue = ref<Record<string, number>>({ horizontal: 0, vertical: 0, zoom: 0, pan: 0, tilt: 0, roll: 0 });
+
+// Render
 const motionJob = ref<string | null>(null);
 const motionAssetId = ref<string | null>(null);
 const framesBusy = ref(false);
 const bindAfter = ref(true);
 const lastSaved = ref('');
 
-// --- history (undo / redo) --------------------------------------------------
+// History
 const past = ref<string[]>([]);
 const future = ref<string[]>([]);
 const MAX_HISTORY = 60;
-
 const planJson = computed(() => JSON.stringify(plan.value));
 
 function pushHistory(): void {
@@ -52,8 +63,7 @@ function pushHistory(): void {
 }
 
 function applySnapshot(json: string): void {
-  const restored = normalizeCameraPlan(JSON.parse(json) as unknown);
-  plan.value = restored;
+  plan.value = normalizeCameraPlan(JSON.parse(json) as unknown);
   playing.value = false;
 }
 
@@ -79,21 +89,15 @@ function resetAll(): void {
   scheduleSave();
 }
 
-// --- loading / saving -------------------------------------------------------
+// Loading / saving
 async function loadPlan(): Promise<void> {
   try {
     const saved = await get<CameraMotionPlan | null>(`/api/shots/${props.shot.id}/camera-plan`);
     if (saved) {
       plan.value = normalizeCameraPlan(saved);
-      // The plan's timeline stays a snapshot of the shot's settings; keep the
-      // two in sync on load so a rendered reference clip matches the shot.
       plan.value.durationSeconds = plan.value.durationSeconds > 0 ? plan.value.durationSeconds : props.shot.durationSeconds;
     } else {
-      plan.value = {
-        ...emptyCameraPlan(),
-        durationSeconds: props.shot.durationSeconds,
-        aspectRatio: props.shot.aspectRatio,
-      };
+      plan.value = { ...emptyCameraPlan(), durationSeconds: props.shot.durationSeconds, aspectRatio: props.shot.aspectRatio };
       pickDefaultSource();
     }
   } catch (e) {
@@ -103,22 +107,11 @@ async function loadPlan(): Promise<void> {
 }
 
 function pickDefaultSource(): void {
-  const boundImages = props.bindings
-    .filter((b) => b.type === 'image')
-    .map((b) => b.assetId);
-  const images = imagesOf(props.media);
+  const boundImages = props.bindings.filter((b) => b.type === 'image').map((b) => b.assetId);
+  const images = sourceImages.value;
   const first = boundImages[0] ?? images[0]?.id ?? null;
   if (first) plan.value.sourceAssetId = first;
 }
-
-function imagesOf(media: MediaAsset[]): MediaAsset[] {
-  return media.filter((m) => m.kind === 'image');
-}
-
-const sourceImages = computed(() => imagesOf(props.media));
-const sourceAsset = computed(() => sourceImages.value.find((m) => m.id === plan.value.sourceAssetId) ?? null);
-const sourceUrl = computed(() => (plan.value.sourceAssetId ? mediaUrl(plan.value.sourceAssetId) : null));
-const mediaLabel = (asset: MediaAsset | null): string => asset?.label || asset?.id || ''; // resolved below for select
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleSave(): void {
@@ -134,15 +127,82 @@ async function persist(): Promise<void> {
   }
 }
 
-// --- building moves ---------------------------------------------------------
-/** Even-split the duration across the current step count (sequential windows). */
+// Source images
+const sourceImages = computed(() => props.media.filter((m) => m.kind === 'image'));
+const sourceAsset = computed(() => sourceImages.value.find((m) => m.id === plan.value.sourceAssetId) ?? null);
+const sourceUrl = computed(() => (plan.value.sourceAssetId ? mediaUrl(plan.value.sourceAssetId) : null));
+const mediaLabel = (asset: MediaAsset | null): string => asset?.label || asset?.id || '';
+
+// Stage aspect
+const stageAspect = computed(() => {
+  const [rw, rh] = plan.value.aspectRatio.split(':').map((v) => Number(v) || 1);
+  return `${Math.max(1, rw ?? 16)}/${Math.max(1, rh ?? 9)}`;
+});
+
+// Framing helpers
+function clampRect(r: FramingRect): FramingRect {
+  const size = Math.min(1, Math.max(0.15, r.w));
+  return { x: Math.min(Math.max(0, r.x), 1 - size), y: Math.min(Math.max(0, r.y), 1 - size), w: size, h: size };
+}
+
+function svgXY(e: PointerEvent): { nx: number; ny: number } | null {
+  const svg = stageSvg.value;
+  if (!svg) return null;
+  const rect = svg.getBoundingClientRect();
+  return { nx: (e.clientX - rect.left) / rect.width, ny: (e.clientY - rect.top) / rect.height };
+}
+
+function beginRectDrag(box: 'start' | 'end', e: PointerEvent): void {
+  activeBox.value = box;
+  dragState.value = box;
+  const cur = (box === 'start' ? plan.value.startFraming : plan.value.endFraming) ?? { x: 0, y: 0, w: 1, h: 1 };
+  dragStart.value = { mx: e.clientX, my: e.clientY, fx: cur.x, fy: cur.y };
+  (e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function dragRect(e: PointerEvent): void {
+  const box = dragState.value;
+  const start = dragStart.value;
+  const svg = stageSvg.value;
+  if (!box || !start || !svg) return;
+  const rect = svg.getBoundingClientRect();
+  const dx = (e.clientX - start.mx) / rect.width;
+  const dy = (e.clientY - start.my) / rect.height;
+  const cur = (box === 'start' ? plan.value.startFraming : plan.value.endFraming) ?? { x: 0, y: 0, w: 1, h: 1 };
+  const next = clampRect({ x: start.fx + dx, y: start.fy + dy, w: cur.w, h: cur.w });
+  if (box === 'start') plan.value.startFraming = next;
+  else plan.value.endFraming = next;
+}
+
+function endRectDrag(): void {
+  if (!dragState.value) return;
+  dragState.value = null;
+  dragStart.value = null;
+  pushHistory();
+  scheduleSave();
+}
+
+// Framing box resize via pointer wheel on the SVG
+function onStageWheel(e: WheelEvent): void {
+  if (!plan.value.frameMode) return;
+  e.preventDefault();
+  const box = activeBox.value;
+  const cur = (box === 'start' ? plan.value.startFraming : plan.value.endFraming) ?? { x: 0, y: 0, w: 1, h: 1 };
+  const delta = -e.deltaY * 0.001;
+  const w = Math.min(1, Math.max(0.15, cur.w + delta));
+  const next = clampRect({ x: cur.x + (cur.w - w) / 2, y: cur.y + (cur.w - w) / 2, w, h: w });
+  if (box === 'start') plan.value.startFraming = next;
+  else plan.value.endFraming = next;
+  pushHistory();
+  scheduleSave();
+}
+
+// Moves
 function tidyWindows(p: CameraMotionPlan): void {
   const n = p.steps.length;
   if (!n) return;
-  p.steps.forEach((step, i) => {
-    step.start = i / n;
-    step.end = (i + 1) / n;
-  });
+  p.steps.forEach((step, i) => { step.start = i / n; step.end = (i + 1) / n; });
 }
 
 function commitSliderMove(axis: string, value: number): void {
@@ -152,9 +212,7 @@ function commitSliderMove(axis: string, value: number): void {
     id: `move-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
     axis: axis as never,
     amount: Math.min(1, Math.max(-1, value)),
-    start: 0,
-    end: 1,
-    ease: 'smooth',
+    start: 0, end: 1, ease: 'smooth',
   });
   tidyWindows(plan.value);
   sliderValue.value = { horizontal: 0, vertical: 0, zoom: 0, pan: 0, tilt: 0, roll: 0 };
@@ -168,126 +226,45 @@ function removeMove(index: number): void {
   scheduleSave();
 }
 
-// --- framing ----------------------------------------------------------------
-function setActiveBox(box: 'start' | 'end'): void {
-  activeBox.value = box;
+// Live view — throttled via rAF to prevent flickering
+const liveView = ref(viewAt(plan.value, 0.5));
+let previewRaf = 0;
+function schedulePreview(): void {
+  if (previewRaf) return;
+  previewRaf = requestAnimationFrame(() => {
+    previewRaf = 0;
+    const t = playing.value ? playTime.value : 0.5;
+    // Stack active slider as preview move
+    const active = AXES.map((axis) => [axis, sliderValue.value[axis] ?? 0] as const).find(([, v]) => v !== 0);
+    const effective = active
+      ? { ...plan.value, frameMode: false, steps: [...plan.value.steps, { id: '_preview', axis: active[0], amount: active[1], start: 0, end: 1, ease: 'linear' as const }] }
+      : plan.value;
+    liveView.value = viewAt(effective, t);
+  });
 }
 
-function clampRect(r: FramingRect): FramingRect {
-  const size = Math.min(1, Math.max(0.15, r.w));
-  return {
-    x: Math.min(Math.max(0, r.x), 1 - size),
-    y: Math.min(Math.max(0, r.y), 1 - size),
-    w: size,
-    h: size,
-  };
-}
-
-function beginRectDrag(box: 'start' | 'end', event: PointerEvent): void {
-  activeBox.value = box;
-  dragState.value = box;
-  (event.currentTarget as SVGElement).setPointerCapture(event.pointerId);
-}
-
-function dragRect(event: PointerEvent): void {
-  const box = dragState.value;
-  const svg = stageSvg.value;
-  if (!box || !svg) return;
-  const rect = svg.getBoundingClientRect();
-  const nx = (event.clientX - rect.left) / rect.width;
-  const ny = (event.clientY - rect.top) / rect.height;
-  const cur = (box === 'start' ? plan.value.startFraming : plan.value.endFraming) ?? { x: 0, y: 0, w: 1, h: 1 };
-  const next = clampRect({ x: nx - cur.w / 2, y: ny - cur.w / 2, w: cur.w, h: cur.w });
-  if (box === 'start') plan.value.startFraming = next;
-  else plan.value.endFraming = next;
-}
-
-function endRectDrag(): void {
-  if (!dragState.value) return;
-  dragState.value = null;
-  pushHistory();
-  scheduleSave();
-}
-
-function applyZoomToBox(value: number): void {
-  const box = activeBox.value;
-  const cur = (box === 'start' ? plan.value.startFraming : plan.value.endFraming) ?? { x: 0, y: 0, w: 1, h: 1 };
-  const delta = Number(value) / 100;
-  const w = Math.min(1, Math.max(0.15, cur.w * (1 + delta)));
-  const next = clampRect({ x: cur.x + (cur.w - w) / 2, y: cur.y + (cur.w - w) / 2, w, h: w });
-  if (box === 'start') plan.value.startFraming = next;
-  else plan.value.endFraming = next;
-}
-
-// --- live view --------------------------------------------------------------
-const stageSvg = ref<SVGSVGElement | null>(null);
-
-/** stage aspect from plan (keep the plan's AR in live geometry). */
-const stageAspect = computed(() => {
-  const [rw, rh] = plan.value.aspectRatio.split(':').map((v) => Number(v) || 1);
-  const w = Math.max(1, rw ?? 16);
-  const h = Math.max(1, rh ?? 9);
-  return `${w}/${h}`;
-});
-
-/** While a slider is being dragged it only PREVIEWS; the move is committed on
- * release (the @change handler). The live plan stacks the active slider value
- * as an extra trailing move over the whole duration. */
-const livePlan = computed(() => {
-  const active = AXES.map((axis) => [axis, sliderValue.value[axis] ?? 0] as const).find(([, v]) => v !== 0);
-  if (!active) return plan.value;
-  const [axis, amount] = active;
-  return {
-    ...plan.value,
-    frameMode: false,
-    steps: [
-      ...plan.value.steps,
-      { id: 'preview', axis, amount, start: 0, end: 1, ease: 'linear' as const },
-    ],
-  };
-});
-
-const liveView = computed(() => viewAt(livePlan.value, playing.value || clipPlaying.value ? playTime.value : normTime.value));
-const normTime = ref(0.5);
-const clipPlaying = ref(false);
-
-function setTime(t: number): void {
-  playTime.value = Math.min(1, Math.max(0, t));
-  clipPlaying.value = false;
-}
-
-// animation loop
+// Play
 let raf = 0;
 let lastStamp = 0;
 function tick(stamp: number): void {
-  if (!playing.value && !clipPlaying.value) return;
+  if (!playing.value) return;
   const dt = lastStamp ? (stamp - lastStamp) / 1000 : 0;
   lastStamp = stamp;
   playTime.value = (playTime.value + dt / plan.value.durationSeconds) % 1;
+  schedulePreview();
   raf = requestAnimationFrame(tick);
 }
 function togglePlay(): void {
   playing.value = !playing.value;
-  if (playing.value) {
-    clipPlaying.value = false;
-    raf = requestAnimationFrame(tick);
-  }
-}
-function playClip(): void {
-  clipPlaying.value = true;
-  playing.value = false;
-  playTime.value = 0;
-  raf = requestAnimationFrame(tick);
+  if (playing.value) { lastStamp = 0; raf = requestAnimationFrame(tick); }
 }
 
+// Warnings
 const warnings = computed(() => cameraPlanWarnings(plan.value));
 
-// --- rendering --------------------------------------------------------------
+// Rendering
 async function renderMotion(): Promise<void> {
-  if (!sourceAsset.value) {
-    toasts.push({ kind: 'info', text: tr('shot.camera.warnNoSource') });
-    return;
-  }
+  if (!sourceAsset.value) { toasts.push({ kind: 'info', text: tr('shot.camera.warnNoSource') }); return; }
   try {
     const provider = motionProvider.value === 'ai' && aiApps.value.length ? 'runninghub' : 'local';
     const res = await post<{ jobId: string; status: string }>(`/api/shots/${props.shot.id}/camera-plan/motion`, { provider });
@@ -295,9 +272,7 @@ async function renderMotion(): Promise<void> {
     toasts.push({ kind: 'info', text: `${tr('shot.camera.motionLabel')} …` });
     motionAssetId.value = null;
     pollMotion(res.jobId);
-  } catch (e) {
-    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
-  }
+  } catch (e) { toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) }); }
 }
 
 async function pollMotion(jobId: string): Promise<void> {
@@ -305,62 +280,36 @@ async function pollMotion(jobId: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 1500));
     try {
       const job = await get<{ status: string; result: { assetId?: string } | null; error: string | null }>(`/api/jobs/${jobId}`);
-      if (job.status === 'done') {
-        motionJob.value = null;
-        motionAssetId.value = job.result?.assetId ?? null;
-        toasts.push({ kind: 'ok', text: tr('shot.camera.motionDone') });
-        emit('assetsAdded');
-        return;
-      }
-      if (job.status === 'failed') {
-        motionJob.value = null;
-        throw new Error(job.error ?? 'render failed');
-      }
-    } catch (e) {
-      motionJob.value = null;
-      toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
-      return;
-    }
+      if (job.status === 'done') { motionJob.value = null; motionAssetId.value = job.result?.assetId ?? null; toasts.push({ kind: 'ok', text: tr('shot.camera.motionDone') }); emit('assetsAdded'); return; }
+      if (job.status === 'failed') { motionJob.value = null; throw new Error(job.error ?? 'render failed'); }
+    } catch (e) { motionJob.value = null; toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) }); return; }
   }
 }
 
 async function renderFrames(): Promise<void> {
-  if (!sourceAsset.value) {
-    toasts.push({ kind: 'info', text: tr('shot.camera.warnNoSource') });
-    return;
-  }
+  if (!sourceAsset.value) { toasts.push({ kind: 'info', text: tr('shot.camera.warnNoSource') }); return; }
   framesBusy.value = true;
   try {
     await post(`/api/shots/${props.shot.id}/camera-plan/frames`, { bind: bindAfter.value });
     toasts.push({ kind: 'ok', text: tr('shot.camera.framesDone', { bound: bindAfter.value ? tr('shot.camera.bound') : '' }) });
     emit('assetsAdded');
-  } catch (e) {
-    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
-  } finally {
-    framesBusy.value = false;
-  }
+  } catch (e) { toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) }); }
+  finally { framesBusy.value = false; }
 }
 
-// --- keyboard ---------------------------------------------------------------
-function isTyping(e: KeyboardEvent): boolean {
-  const el = e.target as HTMLElement;
-  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable;
-}
+// Keyboard
+function isTyping(e: KeyboardEvent): boolean { const el = e.target as HTMLElement; return ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable; }
 function onKey(e: KeyboardEvent): void {
-  if (!(e.ctrlKey || e.metaKey)) return;
   if (isTyping(e)) return;
-  const k = e.key.toLowerCase();
-  if (k === 'z') {
-    e.preventDefault();
-    if (e.shiftKey) redo();
-    else undo();
-  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) { e.preventDefault(); redo(); }
+  else if ((e.metaKey || e.ctrlKey) && e.key === 'y') { e.preventDefault(); redo(); }
 }
 
+// Init
 onMounted(async () => {
   void loadPlan();
   window.addEventListener('keydown', onKey);
-  // Fetch available AI Apps for motion rendering
   try {
     const profile = await get<{ apps?: Array<{ id: string; name: string; appId: string; description?: string }> } | null>('/api/providers/runninghub/profile');
     aiApps.value = profile?.apps?.slice(1) ?? [];
@@ -368,252 +317,227 @@ onMounted(async () => {
 });
 onUnmounted(() => {
   cancelAnimationFrame(raf);
+  cancelAnimationFrame(previewRaf);
   window.removeEventListener('keydown', onKey);
   if (saveTimer) clearTimeout(saveTimer);
 });
 
-// helper formatter for move chips
-function fmtTime(f: number): string {
-  return `${(f * plan.value.durationSeconds).toFixed(1)}s`;
-}
-
-const AXES = ['horizontal', 'vertical', 'zoom', 'pan', 'tilt', 'roll'] as const;
-
-// select options merge binding-derived images + library images
-const sourceOptions = computed(() => {
-  const set = new Map<string, MediaAsset>();
-  for (const m of sourceImages.value) set.set(m.id, m);
-  for (const b of props.bindings) {
-    const m = sourceImages.value.find((x) => x.id === b.assetId);
-    if (m) set.set(m.id, m);
-  }
-  return [...set.values()];
-});
+function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds).toFixed(1)}s`; }
 </script>
 
 <template>
-  <div class="col camera-planner">
-    <div class="row wrap source-row">
+  <div class="camera-planner">
+    <!-- Source + mode -->
+    <div class="cp-header">
       <label class="field source-field">
-        <span class="muted">{{ tr('shot.camera.chooseSource') }}</span>
+        <span class="field-label">{{ tr('shot.camera.chooseSource') }}</span>
         <select v-model="plan.sourceAssetId" @change="pushHistory(); scheduleSave()">
-          <option v-for="m in sourceOptions" :key="m.id" :value="m.id">{{ mediaLabel(m) }}</option>
+          <option v-for="m in sourceImages" :key="m.id" :value="m.id">{{ mediaLabel(m) }}</option>
         </select>
       </label>
-      <div class="row">
+      <div class="mode-toggle">
         <button class="sm" :class="{ primary: !plan.frameMode }" @click="plan.frameMode = false; pushHistory(); scheduleSave()">{{ tr('shot.camera.moveMode') }}</button>
         <button class="sm" :class="{ primary: plan.frameMode }" @click="plan.frameMode = true; pushHistory(); scheduleSave()">{{ tr('shot.camera.framingMode') }}</button>
       </div>
-      <div class="grow" />
-      <button class="sm ghost" :title="tr('shot.camera.undo')" :disabled="!past.length" @click="undo">↩</button>
-      <button class="sm ghost" :title="tr('shot.camera.redo')" :disabled="!future.length" @click="redo">↪</button>
-      <button class="sm ghost" :title="tr('shot.camera.reset')" @click="resetAll">⟲</button>
+      <div class="cp-spacer" />
+      <button class="icon-btn" :disabled="!past.length" :title="tr('shot.camera.undo')" @click="undo">↩</button>
+      <button class="icon-btn" :disabled="!future.length" :title="tr('shot.camera.redo')" @click="redo">↪</button>
+      <button class="icon-btn" :title="tr('shot.camera.reset')" @click="resetAll">⟲</button>
     </div>
 
-    <div v-if="!loaded" class="muted">{{ tr('common.loading') }}</div>
+    <div v-if="!loaded" class="muted cp-loading">{{ tr('common.loading') }}</div>
 
     <template v-else>
-      <div v-if="warnings.length" class="panel warn-flag">
+      <div v-if="warnings.length" class="cp-warn">
         <span class="badge warn no-dot">!</span>
-        <span>{{ warnings.map((w) => w.message).join('；') }} — {{ tr('shot.camera.warnBounds') }}</span>
+        <span>{{ warnings.map((w) => w.message).join('；') }}</span>
       </div>
 
-      <div class="stage-row">
-        <!-- Source + framing overlay -->
-        <div class="stage-wrap">
-          <div class="stage-box" :style="{ aspectRatio: stageAspect }">
-            <svg
-              ref="stageSvg"
-              class="stage-svg"
-              :viewBox="'0 0 1 1'"
-              preserveAspectRatio="none"
-              @pointermove="dragRect"
-              @pointerup="endRectDrag"
-            >
-              <image
-                v-if="sourceUrl"
-                :href="sourceUrl"
-                x="0" y="0" width="1" height="1"
-                preserveAspectRatio="xMidYMid meet"
-                class="stage-img"
-              />
-              <!-- move path ghosts -->
-              <template v-if="!plan.frameMode">
-                <rect class="ghost" v-for="i in 9" :key="i" v-bind="{ x: viewAt(plan, i / 10).rect.x, y: viewAt(plan, i / 10).rect.y, width: viewAt(plan, i / 10).rect.w, height: viewAt(plan, i / 10).rect.w }" />
-              </template>
-              <!-- framing boxes -->
-              <template v-else>
-                <rect
-                  class="fm-box start"
-                  :class="{ on: activeBox === 'start', drag: dragState === 'start' }"
-                  v-bind="{ x: plan.startFraming.x, y: plan.startFraming.y, width: plan.startFraming.w, height: plan.startFraming.w }"
-                  :data-box="'start'"
-                  @pointerdown="beginRectDrag('start', $event)"
-                />
-                <rect
-                  class="fm-box end"
-                  :class="{ on: activeBox === 'end', drag: dragState === 'end' }"
-                  v-bind="{ x: (plan.endFraming ?? plan.startFraming).x, y: (plan.endFraming ?? plan.startFraming).y, width: (plan.endFraming ?? plan.startFraming).w, height: (plan.endFraming ?? plan.startFraming).w }"
-                  :data-box="'end'"
-                  @pointerdown="beginRectDrag('end', $event)"
-                />
-                <text class="fm-tag" :x="plan.startFraming.x + plan.startFraming.w / 2" :y="plan.startFraming.y - 0.02" text-anchor="middle">START</text>
-                <text class="fm-tag end" :x="(plan.endFraming ?? plan.startFraming).x + (plan.endFraming ?? plan.startFraming).w / 2" :y="(plan.endFraming ?? plan.startFraming).y - 0.02" text-anchor="middle">END</text>
-              </template>
-              <!-- live view -->
-              <rect class="live" v-bind="{ x: liveView.rect.x, y: liveView.rect.y, width: liveView.rect.w, height: liveView.rect.w }" />
-            </svg>
-            <span class="stage-time mono">{{ fmtTime(playTime) }} / {{ plan.durationSeconds }}s</span>
-          </div>
-          <div class="muted hints">
-            <template v-if="plan.frameMode">
-              <button class="sm ghost" @click="setActiveBox('start')">{{ tr('shot.camera.startBox') }}</button>
-              <button class="sm ghost" @click="setActiveBox('end')">{{ tr('shot.camera.endBox') }}</button>
-              <span class="muted">{{ tr('shot.camera.dragHint') }}</span>
+      <!-- Canvas -->
+      <div class="cp-canvas-wrap">
+        <div class="cp-canvas" :style="{ aspectRatio: stageAspect }">
+          <svg
+            ref="stageSvg"
+            class="cp-svg"
+            :viewBox="'0 0 1 1'"
+            preserveAspectRatio="none"
+            @pointermove="dragRect"
+            @pointerup="endRectDrag"
+            @wheel.prevent="onStageWheel"
+          >
+            <image v-if="sourceUrl" :href="sourceUrl" x="0" y="0" width="1" height="1" preserveAspectRatio="xMidYMid meet" class="cp-img" />
+            <!-- Move ghosts -->
+            <template v-if="!plan.frameMode">
+              <rect v-for="i in 9" :key="i" class="cp-ghost" :x="viewAt(plan, i / 10).rect.x" :y="viewAt(plan, i / 10).rect.y" :width="viewAt(plan, i / 10).rect.w" :height="viewAt(plan, i / 10).rect.w" />
             </template>
+            <!-- Framing boxes -->
             <template v-else>
-              <span class="muted">{{ tr('shot.camera.movesEmpty') }}</span>
+              <rect class="cp-fbox start" :class="{ on: activeBox === 'start', drag: dragState === 'start' }"
+                :x="plan.startFraming.x" :y="plan.startFraming.y" :width="plan.startFraming.w" :height="plan.startFraming.w"
+                @pointerdown="beginRectDrag('start', $event)" />
+              <rect class="cp-fbox end" :class="{ on: activeBox === 'end', drag: dragState === 'end' }"
+                :x="(plan.endFraming ?? plan.startFraming).x" :y="(plan.endFraming ?? plan.startFraming).y"
+                :width="(plan.endFraming ?? plan.startFraming).w" :height="(plan.endFraming ?? plan.startFraming).w"
+                @pointerdown="beginRectDrag('end', $event)" />
+              <text class="cp-fbox-label start" :x="plan.startFraming.x + plan.startFraming.w / 2" :y="plan.startFraming.y - 0.015" text-anchor="middle">S</text>
+              <text class="cp-fbox-label end" :x="(plan.endFraming ?? plan.startFraming).x + (plan.endFraming ?? plan.startFraming).w / 2"
+                :y="(plan.endFraming ?? plan.startFraming).y - 0.015" text-anchor="middle">E</text>
             </template>
-          </div>
+            <!-- Live view outline -->
+            <rect class="cp-live" :x="liveView.rect.x" :y="liveView.rect.y" :width="liveView.rect.w" :height="liveView.rect.w" />
+          </svg>
+          <span class="cp-time">{{ fmtTime(playTime) }} / {{ plan.durationSeconds }}s</span>
         </div>
-
-        <!-- Camera view preview + scrubbing -->
-        <div class="camera-preview">
-          <div class="preview-head spread">
-            <span class="pb-title">{{ tr('shot.camera.framePreview') }}</span>
-            <div class="row">
-              <button class="sm" @click="togglePlay">{{ playing ? tr('shot.camera.pausePreview') : tr('shot.camera.playPreview') }}</button>
-            </div>
-          </div>
-          <div class="preview-box" :style="{ aspectRatio: stageAspect }">
-            <svg :viewBox="`${liveView.rect.x} ${liveView.rect.y} ${liveView.rect.w} ${liveView.rect.h}`" preserveAspectRatio="none">
-              <image :href="sourceUrl || ''" :width="1 / liveView.rect.w" :height="1 / liveView.rect.h" preserveAspectRatio="xMidYMid meet" class="stage-img" />
-            </svg>
-          </div>
-          <div class="row scrub">
-            <input
-              type="range" min="0" max="1" step="0.001"
-              :value="playTime"
-              @input="setTime(Number(($event.target as HTMLInputElement).value))"
-            />
-          </div>
+        <!-- Preview bar -->
+        <div class="cp-preview-bar">
+          <button class="icon-btn" @click="togglePlay">{{ playing ? '⏸' : '▶' }}</button>
+          <input type="range" min="0" max="1" step="0.002" :value="playTime" @input="playTime = Number(($event.target as HTMLInputElement).value); schedulePreview()" class="cp-scrub" />
+        </div>
+        <!-- Framing hints -->
+        <div v-if="plan.frameMode" class="cp-hints">
+          <button class="sm" :class="{ primary: activeBox === 'start' }" @click="activeBox = 'start'">{{ tr('shot.camera.startBox') }}</button>
+          <button class="sm" :class="{ primary: activeBox === 'end' }" @click="activeBox = 'end'">{{ tr('shot.camera.endBox') }}</button>
+          <span class="muted">{{ tr('shot.camera.dragHint') }}</span>
         </div>
       </div>
 
-      <!-- Controls -->
-      <section class="panel controls-panel">
-        <div class="panel-title">{{ plan.frameMode ? tr('shot.camera.framingMode') : tr('shot.camera.moveMode') }}</div>
-        <div class="panel-body col">
-          <template v-if="plan.frameMode">
-            <div class="muted">{{ tr('shot.camera.framingMode') }}</div>
-            <label class="ctl">
-              <span class="ctl-label">{{ tr('shot.camera.zoom') }} ({{ activeBox === 'start' ? tr('shot.camera.startBox') : tr('shot.camera.endBox') }})</span>
-              <input type="range" min="-60" max="60" step="1" :value="0" class="grow" @change="applyZoomToBox(Number(($event.target as HTMLInputElement).value)); pushHistory(); scheduleSave()" />
-            </label>
-            <label class="ctl">
-              <span class="ctl-label">{{ tr('shot.camera.timeIndicator') }}</span>
-              <input type="range" min="0" max="1" step="0.001" :value="playTime" class="grow" @input="setTime(Number(($event.target as HTMLInputElement).value))" />
-            </label>
-          </template>
-          <template v-else>
-            <div v-for="axis in AXES" :key="axis">
-              <div v-if="axis !== 'roll' || advancedOpen" class="ctl slider-row">
-                <span class="ctl-label">{{ tr(`shot.camera.axis.${axis}`) }}</span>
-                <input
-                  type="range" min="-100" max="100" step="5"
-                  :value="Math.round((sliderValue[axis] ?? 0) * 100)"
-                  class="grow"
-                  @input="sliderValue[axis] = Number(($event.target as HTMLInputElement).value) / 100"
-                  @change="commitSliderMove(axis, sliderValue[axis] ?? 0)"
-                />
-                <span class="mono val">{{ Math.round((sliderValue[axis] ?? 0) * 100) }}</span>
-              </div>
-            </div>
-            <button class="sm ghost adv-toggle" @click="advancedOpen = !advancedOpen">▸ {{ tr('shot.camera.advancedRoll') }}</button>
-            <div class="move-list">
-              <span v-if="!plan.steps.length" class="muted">{{ tr('shot.camera.movesEmpty') }}</span>
-              <div v-for="(step, i) in plan.steps" :key="step.id" class="move-chip">
-                <span class="badge accent no-dot">{{ tr(`shot.camera.axis.${step.axis}`) }}</span>
-                <span class="mono">{{ (step.amount > 0 ? '+' : '') + step.amount.toFixed(2) }}</span>
-                <span class="mono muted">{{ fmtTime(step.start) }}–{{ fmtTime(step.end) }}</span>
-                <button class="sm ghost" :title="tr('shot.camera.deleteMove')" @click="removeMove(i)">✕</button>
-              </div>
-            </div>
-          </template>
-        </div>
-      </section>
+      <!-- Controls panel -->
+      <div class="cp-controls">
+        <div class="cp-ctl-title">{{ plan.frameMode ? tr('shot.camera.framingMode') : tr('shot.camera.moveMode') }}</div>
 
-      <!-- Render actions -->
-      <section class="panel render-panel">
-        <div class="panel-title">{{ tr('shot.camera.renderActions') }}</div>
-        <div class="panel-body col render-actions">
-          <div v-if="aiApps.length" class="row">
-            <label class="field inline">{{ tr('shot.camera.motionSource') }}
-              <select v-model="motionProvider">
-                <option value="local">{{ tr('shot.camera.localRender') }}</option>
-                <option value="ai">{{ tr('shot.camera.aiRender') }}</option>
-              </select>
-            </label>
+        <!-- Framing mode controls -->
+        <template v-if="plan.frameMode">
+          <label class="cp-ctl-row">
+            <span class="cp-ctl-label">{{ tr('shot.camera.boxSize') }} ({{ activeBox === 'start' ? tr('shot.camera.startBox') : tr('shot.camera.endBox') }})</span>
+            <input type="range" min="15" max="100" step="1"
+              :value="Math.round(((activeBox === 'start' ? plan.startFraming : (plan.endFraming ?? plan.startFraming)).w) * 100)"
+              class="cp-ctl-slider"
+              @change="(e: Event) => {
+                const v = Number((e.target as HTMLInputElement).value) / 100;
+                const box = activeBox;
+                const cur = (box === 'start' ? plan.startFraming : (plan.endFraming ?? plan.startFraming));
+                const next = clampRect({ x: cur.x + (cur.w - v) / 2, y: cur.y + (cur.w - v) / 2, w: v, h: v });
+                if (box === 'start') plan.startFraming = next;
+                else plan.endFraming = next;
+                pushHistory(); scheduleSave();
+              }" />
+            <span class="cp-ctl-val">{{ Math.round(((activeBox === 'start' ? plan.startFraming : (plan.endFraming ?? plan.startFraming)).w) * 100) }}%</span>
+          </label>
+        </template>
+
+        <!-- Move mode controls -->
+        <template v-else>
+          <div v-for="axis in AXES" :key="axis">
+            <div v-if="axis !== 'roll' || advancedOpen" class="cp-ctl-row">
+              <span class="cp-ctl-label">{{ tr(`shot.camera.axis.${axis}`) }}</span>
+              <input type="range" min="-100" max="100" step="5"
+                :value="Math.round((sliderValue[axis] ?? 0) * 100)"
+                class="cp-ctl-slider"
+                @input="sliderValue[axis] = Number(($event.target as HTMLInputElement).value) / 100; schedulePreview()"
+                @change="commitSliderMove(axis, sliderValue[axis] ?? 0)" />
+              <span class="cp-ctl-val">{{ Math.round((sliderValue[axis] ?? 0) * 100) }}</span>
+            </div>
           </div>
-          <div class="render-buttons">
-            <button class="primary sm" :disabled="Boolean(motionJob) || !sourceAsset" @click="renderMotion">
-              {{ motionJob ? (tr('shot.camera.motionLabel') + ' …') : tr('shot.camera.renderMotion') }}
-            </button>
-            <button class="sm" :disabled="framesBusy || !sourceAsset" @click="renderFrames">
-              {{ framesBusy ? tr('common.loading') : tr('shot.camera.renderFrames') }}
-            </button>
+          <button class="sm ghost cp-adv-toggle" @click="advancedOpen = !advancedOpen">▸ {{ tr('shot.camera.advancedRoll') }}</button>
+        </template>
+
+        <!-- Move list (always visible in move mode) -->
+        <template v-if="!plan.frameMode">
+          <div v-if="!plan.steps.length" class="muted cp-moves-empty">{{ tr('shot.camera.movesEmpty') }}</div>
+          <div v-for="(step, i) in plan.steps" :key="step.id" class="cp-move">
+            <span class="badge accent no-dot">{{ tr(`shot.camera.axis.${step.axis}`) }}</span>
+            <span class="mono">{{ (step.amount > 0 ? '+' : '') + step.amount.toFixed(2) }}</span>
+            <span class="muted">{{ fmtTime(step.start) }}–{{ fmtTime(step.end) }}</span>
+            <button class="icon-btn sm" :title="tr('shot.camera.deleteMove')" @click="removeMove(i)">✕</button>
           </div>
-          <label class="row muted bind-tick">
+        </template>
+      </div>
+
+      <!-- Render -->
+      <div class="cp-render">
+        <div class="cp-render-header">{{ tr('shot.camera.renderActions') }}</div>
+        <div v-if="aiApps.length" class="cp-render-row">
+          <label class="field inline">
+            <span class="field-label">{{ tr('shot.camera.motionSource') }}</span>
+            <select v-model="motionProvider">
+              <option value="local">{{ tr('shot.camera.localRender') }}</option>
+              <option value="ai">{{ tr('shot.camera.aiRender') }}</option>
+            </select>
+          </label>
+        </div>
+        <div class="cp-render-row">
+          <button class="primary sm" :disabled="Boolean(motionJob) || !sourceAsset" @click="renderMotion">
+            {{ motionJob ? (tr('shot.camera.motionLabel') + ' …') : tr('shot.camera.renderMotion') }}
+          </button>
+          <button class="sm" :disabled="framesBusy || !sourceAsset" @click="renderFrames">
+            {{ framesBusy ? tr('common.loading') : tr('shot.camera.renderFrames') }}
+          </button>
+          <label class="cp-bind">
             <input v-model="bindAfter" type="checkbox" />
             <span>{{ tr('shot.camera.renderFramesBind') }}</span>
           </label>
-          <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
         </div>
-        <div v-if="motionAssetId" class="panel-body">
-          <video :src="mediaUrl(motionAssetId)" controls playsinline class="motion-mini" />
-        </div>
-      </section>
+        <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
+        <video v-if="motionAssetId" :src="mediaUrl(motionAssetId)" controls playsinline class="cp-motion-video" />
+      </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.camera-planner { min-width: 0; }
-.source-row { gap: 10px; align-items: end; }
-.source-field { min-width: 220px; }
-.stage-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 340px); gap: 12px; align-items: start; }
-.stage-wrap { min-width: 0; }
-.stage-box { position: relative; width: 100%; background: radial-gradient(120% 120% at 50% 0%, var(--bg-4), var(--bg-3)); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
-.stage-svg { width: 100%; height: 100%; display: block; touch-action: none; }
-.stage-img { opacity: 0.92; }
-.ghost { fill: none; stroke: rgba(140, 140, 140, 0.22); stroke-width: 0.004; pointer-events: none; }
-.live { fill: none; stroke: var(--accent); stroke-width: 0.008; pointer-events: none; }
-.fm-box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 0.008; cursor: move; }
-.fm-box.start { fill: rgba(46, 155, 103, 0.14); stroke: var(--ok); }
-.fm-box.end { fill: rgba(78, 120, 168, 0.14); stroke: var(--info); }
-.fm-box.drag { stroke-width: 0.012; }
-.fm-tag { fill: var(--ok); font-size: 0.035px; font-weight: 800; pointer-events: none; }
-.fm-tag.end { fill: var(--info); }
-.stage-time { position: absolute; left: 8px; bottom: 6px; font-size: 11px; color: var(--text-2); background: rgba(0, 0, 0, 0.45); padding: 1px 8px; border-radius: 999px; }
-.hints { margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.camera-preview { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-subtle); padding: 10px; }
-.pb-title { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.08em; }
-.preview-box { width: 100%; background: #000; border-radius: 4px; overflow: hidden; }
-.preview-box svg { width: 100%; height: 100%; display: block; }
-.scrub { margin-top: 8px; }
-.scrub input { width: 100%; }
-.controls-panel { min-width: 0; }
-.ctl { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-.ctl .grow { flex: 1; min-width: 0; }
-.ctl-label { font-size: 12px; color: var(--text-2); min-width: 80px; }
-.slider-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 34px; gap: 8px; align-items: center; }
-.val { font-size: 11px; color: var(--text-3); text-align: right; }
-.adv-toggle { margin: 4px 0; }
-.move-list { display: grid; gap: 4px; margin-top: 6px; }
-.move-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
-.render-actions { gap: 8px; align-items: stretch; }
-.render-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-.bind-tick { gap: 4px; margin-top: 2px; }
-.motion-mini { width: 100%; max-width: 320px; border-radius: 6px; }
-.warn-flag { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); background: var(--warn-soft); padding: 8px 10px; }
+.camera-planner { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Header */
+.cp-header { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+.source-field { min-width: 180px; flex: 0 0 auto; }
+.source-field select { width: 100%; }
+.mode-toggle { display: flex; gap: 4px; }
+.cp-spacer { flex: 1; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-2); color: var(--text); cursor: pointer; font-size: 14px; }
+.icon-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-line); }
+.icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Canvas */
+.cp-canvas-wrap { display: flex; flex-direction: column; gap: 6px; }
+.cp-canvas { position: relative; width: 100%; background: radial-gradient(120% 120% at 50% 0%, var(--bg-4), var(--bg-3)); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.cp-svg { width: 100%; height: 100%; display: block; touch-action: none; }
+.cp-img { opacity: 0.92; }
+.cp-ghost { fill: none; stroke: rgba(140, 140, 140, 0.22); stroke-width: 0.004; pointer-events: none; }
+.cp-live { fill: none; stroke: var(--accent); stroke-width: 0.008; pointer-events: none; }
+.cp-fbox { fill: rgba(46, 155, 103, 0.12); stroke: var(--ok); stroke-width: 0.008; cursor: move; }
+.cp-fbox.end { fill: rgba(78, 120, 168, 0.12); stroke: var(--info); }
+.cp-fbox.on { stroke-width: 0.012; }
+.cp-fbox.drag { stroke-width: 0.014; filter: drop-shadow(0 0 4px rgba(46, 155, 103, 0.4)); }
+.cp-fbox.end.drag { filter: drop-shadow(0 0 4px rgba(78, 120, 168, 0.4)); }
+.cp-fbox-label { font-size: 0.04px; font-weight: 800; pointer-events: none; }
+.cp-fbox-label.start { fill: var(--ok); }
+.cp-fbox-label.end { fill: var(--info); }
+.cp-time { position: absolute; left: 8px; bottom: 6px; font-size: 11px; color: var(--text-2); background: rgba(0, 0, 0, 0.5); padding: 2px 8px; border-radius: 999px; }
+
+/* Preview bar */
+.cp-preview-bar { display: flex; align-items: center; gap: 8px; }
+.cp-scrub { flex: 1; min-width: 0; }
+.cp-hints { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* Controls */
+.cp-controls { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--bg-subtle); }
+.cp-ctl-title { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.cp-ctl-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.cp-ctl-label { font-size: 12px; color: var(--text-2); min-width: 80px; flex-shrink: 0; }
+.cp-ctl-slider { flex: 1; min-width: 0; }
+.cp-ctl-val { font-size: 11px; color: var(--text-3); min-width: 32px; text-align: right; font-family: monospace; }
+.cp-adv-toggle { margin: 4px 0; }
+.cp-moves-empty { font-size: 12px; margin: 6px 0; }
+.cp-move { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; margin: 3px 0; }
+
+/* Render */
+.cp-render { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; }
+.cp-render-header { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.08em; }
+.cp-render-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cp-bind { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-3); }
+.cp-motion-video { width: 100%; max-width: 320px; border-radius: 6px; margin-top: 4px; }
+
+/* Warn */
+.cp-warn { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); background: var(--warn-soft); padding: 8px 10px; border-radius: var(--radius-sm); }
+.cp-loading { padding: 16px; text-align: center; }
 </style>

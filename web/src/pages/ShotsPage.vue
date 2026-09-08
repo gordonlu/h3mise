@@ -320,6 +320,7 @@ onMounted(load);
         <div class="cover" :class="{ 'no-cover': !s.cover }">
           <img v-if="s.cover" :src="fileUrl(s.cover)" :alt="s.title" />
           <span v-else class="cover-idx">SHOT<br />{{ String(i + 1).padStart(2, '0') }}</span>
+          <span class="cover-duration">{{ s.durationSeconds }}s</span>
           <span v-if="s.activeJobs > 0" class="badge warn render-badge">{{ t('workflow.shots.generating2') }}</span>
           <span v-else-if="SHOT_USER_STATUS[s.status] === 'review'" class="badge violet review-badge">{{ t('workflow.shots.selectTake3') }}</span>
         </div>
@@ -333,7 +334,6 @@ onMounted(load);
           </div>
           <div class="row wrap">
             <span class="badge accent no-dot">{{ modeLabel(s.h3Mode ?? 't2va') }}</span>
-            <span class="badge no-dot">{{ s.durationSeconds }}s</span>
             <span class="badge no-dot">{{ s.shotFunction }}</span>
             <span v-if="entityName(s.primaryCharacterId)" class="badge no-dot">{{ entityName(s.primaryCharacterId) }}</span>
             <span v-if="entityName(s.sceneId)" class="badge info no-dot">{{ entityName(s.sceneId) }}</span>
@@ -342,7 +342,6 @@ onMounted(load);
             </span>
           </div>
           <div class="muted purpose">{{ s.purpose || '—' }}</div>
-          <!-- PRD §9 card fields: missing assets + risk flag -->
           <div v-if="s.missing?.length" class="missing-row">
             <span class="badge bad no-dot">⚠ {{ t('workflow.shots.missingAssets2') }}</span>
             <span class="muted">{{ s.missing.join('、') }}</span>
@@ -350,6 +349,7 @@ onMounted(load);
           <div class="spread card-foot">
             <span class="muted">{{ s.takeCount }} Takes · {{ s.selectedTakeId ? t('workflow.shots.selected') : t('workflow.shots.notSelected') }}</span>
             <span v-if="s.risk" :class="['badge', RISK_BADGE[s.risk]]" title="最近一次 Preflight 风险">Risk {{ s.risk }}</span>
+            <span class="edit-link">编辑镜头 →</span>
           </div>
         </div>
       </router-link>
@@ -375,16 +375,23 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .shot-delete { margin-left: auto; padding: 2px 10px; font-size: 11px; flex: none; }
 .card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
 .card:hover { border-color: var(--accent-line); transform: translateY(-2px); box-shadow: var(--shadow-2); text-decoration: none; }
-.cover { position: relative; height: 142px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.cover { position: relative; height: 180px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
 .cover-idx { font-family: var(--mono); letter-spacing: 0.25em; color: var(--text-3); text-align: center; line-height: 1.8; font-size: 12px; }
+.cover-duration {
+  position: absolute; bottom: 8px; right: 8px;
+  background: rgba(0,0,0,0.65); color: #fff; font-size: 12px; font-weight: 600;
+  padding: 3px 8px; border-radius: 5px; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 .render-badge, .review-badge { position: absolute; top: 8px; right: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); }
-.card-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
+.card-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .card-title { font-weight: 600; font-size: 14.5px; }
 .purpose { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px; }
 .wrap { flex-wrap: wrap; }
 .missing-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
 .card-foot { border-top: 1px dashed var(--line); padding-top: 7px; }
+.edit-link { font-size: 12.5px; color: var(--accent-text); font-weight: 500; white-space: nowrap; }
 @media (max-width: 760px) {
   .batch-row { grid-template-columns: 24px minmax(100px, 1fr) max-content; }
   .batch-reason { grid-column: 2 / -1; white-space: normal; }

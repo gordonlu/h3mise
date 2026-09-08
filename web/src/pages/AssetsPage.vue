@@ -21,7 +21,16 @@ const media = ref<MediaAsset[]>([]);
 /** System frame assets (Take first/last frames) are working files for Frame
  * Bridge — hidden by default so the library only shows user-imported media. */
 const showSystemFrames = ref(false);
-const visibleMedia = computed(() => (showSystemFrames.value ? media.value : media.value.filter((m) => m.source !== 'frame_extract')));
+const visibleMedia = computed(() => {
+  let list = showSystemFrames.value ? media.value : media.value.filter((m) => m.source !== 'frame_extract');
+  return list.filter((m) => m.kind !== 'video');
+});
+const videos = computed(() => media.value.filter((m) => m.kind === 'video'));
+function formatDuration(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${sec}s`;
+}
 const bindings = ref<ReferenceBinding[]>([]);
 const kindFilter = ref('');
 
@@ -38,6 +47,7 @@ const importing = ref(false);
 const uploading = ref(0);
 const imageInput = ref<HTMLInputElement | null>(null);
 const audioInput = ref<HTMLInputElement | null>(null);
+const videoInput = ref<HTMLInputElement | null>(null);
 const relatedImageInput = ref<HTMLInputElement | null>(null);
 const relatedImageTarget = ref<{ kind: 'entity' | 'state'; id: string } | null>(null);
 const linkedOnVisit = ref(false);
@@ -172,12 +182,8 @@ async function removeState(st: CharacterState) {
 }
 
 async function importFile(file: File): Promise<MediaAsset | null> {
-  if (file.type.startsWith('video/')) {
-    toasts.push({ kind: 'err', text: `不支持上传视频：${file.name}` });
-    return null;
-  }
-  if (!file.type.startsWith('image/') && !file.type.startsWith('audio/')) {
-    toasts.push({ kind: 'err', text: `只支持图片或参考音频：${file.name}` });
+  if (!file.type.startsWith('image/') && !file.type.startsWith('audio/') && !file.type.startsWith('video/')) {
+    toasts.push({ kind: 'err', text: `只支持图片、视频或参考音频：${file.name}` });
     return null;
   }
   uploading.value += 1;
@@ -465,7 +471,7 @@ onMounted(load);
 
     <!-- Media -->
     <section v-if="tab === 'media'" class="panel">
-      <div class="panel-title">媒体库 <span class="panel-note">图片与参考音频 — 视频不进入媒体库</span></div>
+      <div class="panel-title">媒体库 <span class="panel-note">图片 · 参考音频 · 视频拉片</span></div>
       <div class="panel-body">
         <div v-if="shotUploadContext" class="context-note">
           <strong>当前上传将关联到来源镜头</strong>
@@ -476,18 +482,47 @@ onMounted(load);
           <input ref="audioInput" class="file-input" type="file" accept="audio/mpeg,audio/wav,audio/aac,audio/flac,audio/mp4" multiple @change="onFilePick" />
           <button class="primary" :disabled="uploading > 0" @click="imageInput?.click()">{{ uploading ? '上传中…' : '＋ 上传图片' }}</button>
           <button :disabled="uploading > 0" @click="audioInput?.click()">＋ 上传参考音频</button>
+          <input ref="videoInput" class="file-input" type="file" accept="video/mp4,video/webm,video/quicktime" multiple @change="onFilePick" />
+          <button :disabled="uploading > 0" @click="videoInput?.click()">＋ 导入拉片视频</button>
           <span class="muted">图片用于首尾帧或 Ref2VA；音频仅用于 Ref2VA。</span>
         </div>
         <div class="drop" @dragover.prevent @drop.prevent="onDrop">
           <div class="drop-icon">⇩</div>
-          <div>也可以拖拽图片或音频到这里</div>
-          <div class="drop-hint">png · jpg · webp · gif · mp3 · wav · m4a · flac</div>
+          <div>拖拽图片、视频或音频到这里</div>
+          <div class="drop-hint">png · jpg · webp · gif · mp3 · wav · m4a · flac · mp4 · mov · webm（最大 100 MB）</div>
         </div>
         <form class="toolbar" @submit.prevent="importLocalPath">
-          <input v-model="importPath" placeholder="或输入图片 / 音频的本地绝对路径" class="grow mono" />
+          <input v-model="importPath" placeholder="或输入图片 / 视频 / 音频的本地绝对路径" class="grow mono" />
           <button class="primary" :disabled="importing || !importPath">{{ importing ? '导入中…' : '导入路径' }}</button>
         </form>
-        <EmptyState v-if="!visibleMedia.length" icon="▦" title="媒体库为空" desc="上传首尾帧、Ref2VA 参考图片或参考音频，之后再到 Shot 中绑定用途。" />
+        <EmptyState v-if="!visibleMedia.length && !videos.length" icon="▦" :title="t('pages.assets.noVideosTitle')" :desc="t('pages.assets.noVideosDesc')" />
+        <!-- Video Showcase — 拉片入口 -->
+        <div v-if="videos.length" class="video-showcase">
+          <div class="video-showcase-head">
+            <h3>{{ t('pages.assets.videoShowcase') }}</h3>
+            <span class="muted">{{ t('pages.assets.videoShowcaseDesc') }}</span>
+          </div>
+          <div class="video-grid">
+            <router-link
+              v-for="v in videos"
+              :key="v.id"
+              :to="`/assets/${v.id}/breakdown`"
+              class="video-card"
+            >
+              <div class="video-thumb">
+                <img v-if="thumbOf(v)" :src="thumbOf(v)!" :alt="v.label" loading="lazy" />
+                <span v-else class="thumb-glyph">▶</span>
+                <span class="video-play">▶</span>
+                <span v-if="v.durationSeconds" class="video-duration">{{ formatDuration(v.durationSeconds) }}</span>
+              </div>
+              <div class="video-info">
+                <span class="video-title">{{ v.label || v.fileName }}</span>
+                <span class="video-meta">{{ v.width }}×{{ v.height }} · {{ (v.sizeBytes / 1024 / 1024).toFixed(1) }} MB</span>
+                <span class="video-action">{{ t('pages.assets.enterBreakdown') }}</span>
+              </div>
+            </router-link>
+          </div>
+        </div>
         <label v-if="media.some((m) => m.source === 'frame_extract')" class="muted sys-toggle">
           <input v-model="showSystemFrames" type="checkbox" />
           显示系统帧资产（Take 首尾帧，供尾帧桥接使用）
@@ -496,9 +531,7 @@ onMounted(load);
           <article v-for="m in visibleMedia" :key="m.id" class="card media-card">
             <div class="thumb">
               <img v-if="thumbOf(m)" :src="thumbOf(m)!" :alt="m.label" loading="lazy" />
-              <span v-else class="thumb-glyph">{{ m.kind === 'video' ? '▶' : m.kind === 'audio' ? '♪' : '▧' }}</span>
-              <span v-if="m.kind === 'video'" class="kind-chip">▶</span>
-              <button v-if="m.kind === 'video'" class="extract" title="抽取首帧为新资产" @click="extractFrame(m.id)">抽帧</button>
+              <span v-else class="thumb-glyph">{{ m.kind === 'audio' ? '♪' : '▧' }}</span>
             </div>
             <div class="media-body">
               <div class="card-top">
@@ -692,10 +725,45 @@ onMounted(load);
   opacity: 0; transition: opacity 0.15s;
 }
 .media-card:hover .extract { opacity: 1; }
+.breakdown-link { position: absolute; bottom: 8px; left: 8px; padding: 6px 10px; background: var(--bg-2); border-radius: 6px; font-size: 12px; color: var(--accent-text); }
 .extract:hover { color: var(--text); border-color: var(--line-2); }
 .media-body { padding: 10px 2px 0; display: flex; flex-direction: column; gap: 4px; }
 .media-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- video showcase (拉片入口) ---------- */
+.video-showcase { margin-bottom: 20px; }
+.video-showcase-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.video-showcase-head h3 { font-size: 15px; font-weight: 600; margin: 0; }
+.video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.video-card {
+  display: block; text-decoration: none; color: inherit;
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  background: var(--bg-2); box-shadow: var(--shadow-1);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.video-card:hover { border-color: var(--accent-line); transform: translateY(-2px); box-shadow: var(--shadow-2); text-decoration: none; }
+.video-thumb {
+  position: relative; height: 160px; background: #14191c;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.video-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.video-play {
+  position: absolute; width: 44px; height: 44px; border-radius: 50%;
+  background: rgba(0,0,0,0.55); color: #fff; font-size: 18px;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s;
+}
+.video-card:hover .video-play { opacity: 1; }
+.video-duration {
+  position: absolute; bottom: 6px; right: 6px;
+  background: rgba(0,0,0,0.7); color: #fff; font-size: 11px; font-weight: 600;
+  padding: 2px 7px; border-radius: 4px; font-variant-numeric: tabular-nums;
+}
+.video-info { padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+.video-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-meta { font-size: 11.5px; color: var(--text-3); font-family: var(--mono); }
+.video-action { font-size: 12px; color: var(--accent-text); font-weight: 500; margin-top: 2px; }
 
 /* ---------- bindings ---------- */
 .bind-list { display: flex; flex-direction: column; gap: 8px; }

@@ -21,6 +21,7 @@ const groups: Array<{
       { to: '/story', label: () => t('nav.storyBeats'), description: () => t('nav.storyBeatsDesc') },
       { to: '/storyboard', label: () => t('nav.storyboard'), description: () => t('nav.storyboardDesc') },
       { to: '/assets', label: () => t('nav.assetLibrary'), description: () => t('nav.assetLibraryDesc') },
+      { to: '/assets?tab=media', label: () => t('nav.referenceBreakdown'), description: () => t('nav.referenceBreakdownDesc') },
     ],
   },
   {

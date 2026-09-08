@@ -13,6 +13,7 @@ export const zh = {
     storyBeats: '故事与节拍', storyBeatsDesc: '整理剧情、结构和Beat',
     storyboard: 'Storyboard', storyboardDesc: '可选的视觉分镜规划',
     assetLibrary: '素材库', assetLibraryDesc: '管理角色、场景和参考素材',
+    referenceBreakdown: '参考拉片', referenceBreakdownDesc: '导入参考视频，提取导演方法',
     shotWorkspace: '镜头工作台', shotWorkspaceDesc: '设计Shot、Prompt和Take',
     quickEdit: '快速剪辑', quickEditDesc: '简化选片和成片整理',
     timelineExport: '时间线与导出', timelineExportDesc: '微调转场、声音和交付',
@@ -76,6 +77,8 @@ export const zh = {
       title: '资产',
       subtitle: '资产由 Shot 需求驱动：Entity 是「谁 / 什么」，CharacterState 是「当前剧情状态」，MediaAsset 通过 ReferenceBinding 承担用途。',
       tabs: { entities: '实体', states: '角色状态', media: '媒体资产', bindings: '全局绑定' },
+      videoShowcase: '参考拉片', videoShowcaseDesc: '选择视频进入拉片工作台，提取导演方法并应用到自己的作品。',
+      enterBreakdown: '进入拉片 →', noVideosTitle: '还没有视频', noVideosDesc: '导入参考视频后可进入拉片工作台，提取运镜、动作和构图方法。',
     },
     timeline: {
       title: '时间线',
@@ -126,6 +129,7 @@ export const en: typeof zh = {
     storyBeats: 'Story & Beats', storyBeatsDesc: 'Shape the plot, structure, and beats',
     storyboard: 'Storyboard', storyboardDesc: 'Optional visual planning',
     assetLibrary: 'Asset Library', assetLibraryDesc: 'Characters, scenes, and references',
+    referenceBreakdown: 'Reference Breakdown', referenceBreakdownDesc: 'Import reference videos, extract directing methods',
     shotWorkspace: 'Shot Workspace', shotWorkspaceDesc: 'Design Shots, Prompts, and Takes',
     quickEdit: 'Quick Edit', quickEditDesc: 'Simple take selection and assembly',
     timelineExport: 'Timeline & Export', timelineExportDesc: 'Transitions, sound, and delivery',
@@ -189,6 +193,8 @@ export const en: typeof zh = {
       title: 'Assets',
       subtitle: 'Assets are driven by shot requirements: Entity is "who / what", CharacterState is "current story state", MediaAsset serves a purpose via ReferenceBinding.',
       tabs: { entities: 'Entities', states: 'CharacterStates', media: 'Media', bindings: 'Global bindings' },
+      videoShowcase: 'Reference Breakdown', videoShowcaseDesc: 'Select a video to enter the breakdown workspace and extract directing methods.',
+      enterBreakdown: 'Open Breakdown →', noVideosTitle: 'No videos yet', noVideosDesc: 'Import reference videos to extract camera, action, and composition methods.',
     },
     timeline: {
       title: 'Timeline',
@@ -239,6 +245,7 @@ export const ja: typeof zh = {
     storyBeats: 'ストーリーと Beats', storyBeatsDesc: '物語、構成、Beat を整理',
     storyboard: 'Storyboard', storyboardDesc: '任意のビジュアル絵コンテ',
     assetLibrary: 'アセットライブラリ', assetLibraryDesc: 'キャラクター、シーン、参考素材を管理',
+    referenceBreakdown: '参考ブレークダウン', referenceBreakdownDesc: '参考動画をインポートし、演出方法を抽出',
     shotWorkspace: 'Shot ワークスペース', shotWorkspaceDesc: 'Shot、Prompt、Take を設計',
     quickEdit: 'クイック編集', quickEditDesc: 'Take 選択と本編整理を簡略化',
     timelineExport: 'タイムラインと書き出し', timelineExportDesc: 'トランジション、音声、納品',
@@ -274,6 +281,8 @@ export const ja: typeof zh = {
     assets: {
       title: 'アセット', subtitle: 'アセットは Shot 要件に基づきます。Entity は「誰 / 何」、CharacterState は「現在の物語状態」、MediaAsset は ReferenceBinding で用途を持ちます。',
       tabs: { entities: 'Entity', states: 'CharacterState', media: 'メディア', bindings: '全体バインド' },
+      videoShowcase: '参考ブレークダウン', videoShowcaseDesc: '動画を選択してブレークダウン ワークスペースに入り、演出方法を抽出します。',
+      enterBreakdown: 'ブレークダウンを開く →', noVideosTitle: '動画はまだありません', noVideosDesc: '参考動画をインポートすると、カメラ、アクション、構図の方法を抽出できます。',
     },
     timeline: { title: 'タイムライン', clipsCount: '{n} clips · {s}s', export: '書き出し（ffmpeg）', exporting: '書き出し中…' },
     settings: {

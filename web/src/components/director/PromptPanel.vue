@@ -95,15 +95,15 @@ async function copy(text: string) {
 
     <div class="prompt-list col">
       <div v-for="pv in [...prompts].reverse()" :key="pv.id" class="panel prompt-item">
-        <div class="spread">
+        <div class="spread prompt-head">
           <div class="row wrap">
             <span class="badge accent no-dot">{{ modeLabel(pv.h3Mode) }}</span>
             <span class="badge no-dot">{{ sourceLabel(pv.source) }}</span>
             <span class="muted mono">{{ pv.id }}</span>
             <span class="muted">{{ new Date(pv.createdAt).toLocaleString() }}</span>
           </div>
-          <div class="row">
-            <button class="sm ghost" :disabled="busy !== ''" @click="startEdit(pv)">{{ t('shot.prompt.reviewAndEdit') }}</button>
+          <div class="row prompt-actions">
+            <button class="sm ghost" :disabled="busy !== ''" :title="t('shot.prompt.reviewAndEditTitle')" @click="startEdit(pv)">{{ t('shot.prompt.reviewAndEdit') }}</button>
             <button class="sm ghost" @click="copy(pv.text)">{{ t('shot.common.copy') }}</button>
           </div>
         </div>
@@ -133,6 +133,10 @@ async function copy(text: string) {
 .prompt-review-note { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line-2)); border-radius: 8px; background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); color: var(--text-2); font-size: 12px; line-height: 1.55; }
 .prompt-review-note strong { color: var(--text); }
 .prompt-item { padding: 10px 12px; }
+.prompt-head { align-items: flex-start; gap: 10px; }
+.prompt-head > .row:first-child { min-width: 0; }
+.prompt-actions { flex: 0 0 auto; gap: 4px; }
+.prompt-actions button { min-width: 48px; white-space: nowrap; }
 .prompt-editor { margin-top: 8px; }
 .prompt-editor textarea { width: 100%; min-height: 260px; resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
 .iteration-lineage { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--info); background: var(--info-soft); border-radius: 4px; }

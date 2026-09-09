@@ -418,11 +418,15 @@ function narrativeContextLines(ctx: CompileContext): string[] {
   const spokenLines = scriptDialogue.length
     ? scriptDialogue.map(({ speaker, text }) => `${speaker}：“${text}”`)
     : quotedDialogue.map((text) => `“${text}”`);
+  const focusSequence = scriptDialogue
+    .map(({ speaker }) => speaker)
+    .filter((speaker, index, all) => index === 0 || speaker !== all[index - 1]);
   return [
     story?.synopsis.trim() ? line('Episode premise', `${story.title}：${story.synopsis}`) : '',
     beat?.summary.trim() ? line('Current story beat — authoritative event scope', `${beat.title}：${beat.summary}`) : '',
     beat?.stateChange?.trim() ? line('Narrative change', beat.stateChange) : '',
     spokenLines.length ? line('Spoken lines', `按原始正文中的说话人和先后顺序逐字呈现：${spokenLines.join(' → ')}`) : '',
+    focusSequence.length >= 2 ? line('Narrative focus sequence', `构图焦点按剧情依次落在 ${focusSequence.join(' → ')}；当前动作或说话者必须清晰突出，其他角色退为环境关系，不把所有人长期等权放在远景中。角色横向位置明确时，使用一次连续平移依次到达焦点人物`) : '',
     line('Storytelling priority', '观众必须能从动作、表演、对白和声音理解当前剧情节拍及其因果；摄影设计只负责清楚呈现该事件，不得用氛围或技术描述取代剧情，也不得提前演出后续节拍'),
   ].filter((value): value is string => Boolean(value));
 }

@@ -76,6 +76,11 @@ async function copy(text: string) {
       <button class="sm" @click="showRaw = !showRaw">{{ t('shot.prompt.manualInput') }}</button>
     </div>
 
+    <div class="prompt-review-note">
+      <strong>{{ t('shot.prompt.reviewNoticeTitle') }}</strong>
+      <span>{{ t('shot.prompt.reviewNoticeBody') }}</span>
+    </div>
+
     <div v-if="showRaw" class="panel">
       <div class="panel-body col">
         <textarea v-model="rawText" rows="5" :placeholder="t('shot.prompt.manualPlaceholder')"></textarea>
@@ -97,7 +102,10 @@ async function copy(text: string) {
             <span class="muted mono">{{ pv.id }}</span>
             <span class="muted">{{ new Date(pv.createdAt).toLocaleString() }}</span>
           </div>
-          <button class="sm ghost" @click="copy(pv.text)">{{ t('shot.common.copy') }}</button>
+          <div class="row">
+            <button class="sm ghost" :disabled="busy !== ''" @click="startEdit(pv)">{{ t('shot.prompt.reviewAndEdit') }}</button>
+            <button class="sm ghost" @click="copy(pv.text)">{{ t('shot.common.copy') }}</button>
+          </div>
         </div>
         <div v-if="pv.sourceTakeId" class="iteration-lineage">
           <div class="row wrap">
@@ -106,7 +114,14 @@ async function copy(text: string) {
           </div>
           <p>{{ pv.revisionReason }}</p>
         </div>
-        <pre class="prompt-text">{{ pv.text || t('shot.prompt.emptyPrompt') }}</pre>
+        <div v-if="editingId === pv.id" class="prompt-editor col">
+          <textarea v-model="editText" rows="14"></textarea>
+          <div class="row">
+            <button class="primary sm" :disabled="busy !== '' || !editText.trim()" @click="saveEdit">{{ t('shot.prompt.saveEditedVersion') }}</button>
+            <button class="sm" :disabled="busy !== ''" @click="editingId = ''; editText = ''">{{ t('common.cancel') }}</button>
+          </div>
+        </div>
+        <pre v-else class="prompt-text">{{ pv.text || t('shot.prompt.emptyPrompt') }}</pre>
       </div>
       <div v-if="!prompts.length" class="muted">{{ t('shot.prompt.noPrompts') }}</div>
     </div>
@@ -115,7 +130,11 @@ async function copy(text: string) {
 
 <style scoped>
 .wrap { flex-wrap: wrap; }
+.prompt-review-note { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line-2)); border-radius: 8px; background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); color: var(--text-2); font-size: 12px; line-height: 1.55; }
+.prompt-review-note strong { color: var(--text); }
 .prompt-item { padding: 10px 12px; }
+.prompt-editor { margin-top: 8px; }
+.prompt-editor textarea { width: 100%; min-height: 260px; resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
 .iteration-lineage { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--info); background: var(--info-soft); border-radius: 4px; }
 .iteration-lineage p { margin: 6px 0 0; color: var(--text-2); font-size: 12px; }
 .prompt-text {

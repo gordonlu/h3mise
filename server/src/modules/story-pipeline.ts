@@ -148,7 +148,9 @@ export function createShotForBeat(
   plan.subject.primarySubject = characters.join('、');
   plan.subject.primaryMotionOwner = motionOwnerForBeat(beat, characters);
   plan.subject.action = purpose;
-  plan.camera.dominantBehavior = '稳定机位，完整呈现主体动作和直接反应';
+  plan.camera.dominantBehavior = characters.length >= 3
+    ? '先短暂交代空间，再用一次连续平移或轻微跟随把构图焦点交给当前动作或说话者'
+    : '稳定构图，清楚呈现主体动作和直接反应';
   plan.camera.stopCondition = plan.intent.endState;
   plan.performance.objective = beat.stateChange || purpose;
   plan.performance.primaryAction = purpose;

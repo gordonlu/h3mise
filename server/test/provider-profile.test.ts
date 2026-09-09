@@ -123,10 +123,10 @@ test('RunningHub marks error 421 as provider-capacity backoff before a task id e
   }
 });
 
-test('reference media import accepts images and audio but routes video through Shot Takes', () => {
+test('reference media import accepts images, audio and breakdown source videos', () => {
   assert.equal(importableKindForMime('image/png'), 'image');
   assert.equal(importableKindForMime('audio/mpeg'), 'audio');
-  assert.throws(() => importableKindForMime('video/mp4'), /Shot 的 Takes 区导入/);
+  assert.equal(importableKindForMime('video/mp4'), 'video');
 });
 
 function binding(id: string, roles: ReferenceBinding['roles']): ReferenceBinding {
@@ -156,4 +156,51 @@ test('prompt compiler never substitutes generic RefImages for frame inputs', () 
   assert.match(ref2va, /generic-ref/);
   assert.match(ref2va, /first-frame/);
   assert.match(ref2va, /First frame:.*<Picture 2>[\s\S]*?literal first frame/);
+});
+
+test('Ref2VA compiler keeps each identity distinct and removes plan contradictions', () => {
+  const plan = emptyDirectorPlan();
+  plan.subject.primarySubject = 'Miles、Ethan、Jade';
+  plan.subject.action = 'Miles洗碗并注意到泡沫增加';
+  plan.subject.primaryMotionOwner = 'Miles';
+  plan.camera.shotSizeStart = 'wide shot';
+  plan.camera.shotSizePeak = 'medium shot';
+  plan.camera.shotSizeEnd = 'wide shot';
+  plan.camera.geometry = '固定机位';
+  plan.camera.dominantBehavior = 'fixed camera, locked composition';
+  plan.performance.objective = 'Miles完成洗碗';
+  plan.performance.performanceTurn = 'Miles从洗碗转向关注水槽泡沫';
+  plan.performance.gaze = 'Miles注视水槽泡沫，Ethan注视电视，Jade视线朝向电视';
+  plan.continuity.plannedEndState = 'Miles洗碗到一半，泡沫明显偏多';
+  plan.generation.aspectRatio = '9:16';
+  const refs = [
+    { ...binding('ethan', ['identity']), label: 'Ethan · 主图' },
+    { ...binding('interior', ['environment']), label: '室内 · 主图' },
+    { ...binding('miles', ['identity']), label: 'Miles · 主图' },
+    { ...binding('jade', ['identity']), label: 'Jade · 主图' },
+  ];
+
+  const prompt = compileDeterministic({
+    shot: { screenDirection: 'neutral' } as Shot,
+    plan,
+    references: refs,
+    story: { title: '泡沫', synopsis: 'Miles说洗洁精泡沫，Ethan误以为是经济泡沫。', body: 'Miles：\n泡沫是不是太多了？\n\nEthan：\n大家都觉得还能涨。' },
+    storyBeat: { title: '误会产生', summary: 'Miles问“泡沫是不是太多了？”Ethan回答“大家都觉得还能涨。”', stateChange: '双关误会成立' },
+  }, 'ref2va');
+
+  assert.match(prompt, /<Subject 1> 是 Ethan，其外观以 <Picture 1> 为准/);
+  assert.match(prompt, /<Subject 3> 是 Miles，其外观以 <Picture 3> 为准/);
+  assert.match(prompt, /<Subject 4> 是 Jade，其外观以 <Picture 4> 为准/);
+  assert.ok(prompt.includes('<Picture 2>（室内 · 主图）: fully_preserved'));
+  assert.match(prompt, /Cast lock: 画面中的人物集合严格等于以下 3 位：<Subject 1> Ethan、<Subject 3> Miles、<Subject 4> Jade；每位只出现一次/);
+  assert.match(prompt, /Environment plate: <Picture 2> 只定义建筑、家具、灯光与空间关系/);
+  assert.match(prompt, /Composition priority: 9:16 竖幅多人构图优先保证主要动作人物 <Subject 3> Miles/);
+  assert.match(prompt, /Gaze lock: Miles注视水槽泡沫，Ethan注视电视，Jade视线朝向电视；.*不转向摄影机或观众/);
+  assert.match(prompt, /Episode premise: 泡沫：Miles说洗洁精泡沫，Ethan误以为是经济泡沫/);
+  assert.match(prompt, /Current story beat — authoritative event scope: 误会产生：Miles问“泡沫是不是太多了？”/);
+  assert.match(prompt, /Spoken lines:.*Miles：“泡沫是不是太多了？” → Ethan：“大家都觉得还能涨。”/);
+  assert.doesNotMatch(prompt, /Shot size at peak|Shot size at end/);
+  assert.match(prompt, /Framing lock: wide shot保持不变/);
+  assert.match(prompt, /Objective: Miles从洗碗转向关注水槽泡沫/);
+  assert.doesNotMatch(prompt, /Objective: Miles完成洗碗/);
 });

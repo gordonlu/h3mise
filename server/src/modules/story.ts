@@ -1,7 +1,7 @@
 // Story module — PRD §7. Story phase saves FACTS (characters, locations,
 // beats, state changes), never compiled-to-prompt wholesale.
 
-import type { Sequence, StoryBeat, StoryDoc } from '@h3mise/shared';
+import type { Sequence, StoryBeat, StoryDoc, StoryEpisode, StoryEpisodeList } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
@@ -46,16 +46,19 @@ function beatFromRow(r: BeatRow): StoryBeat {
   };
 }
 
-export function getStory(p: ProjectContext): StoryDoc {
-  const r = p.db.get<{ id: string; title: string; synopsis: string; body: string; planned_duration_seconds: number; created_at: string; updated_at: string }>(
-    'SELECT * FROM story LIMIT 1',
-  );
-  if (!r) throw new Error('story missing');
+const ACTIVE_EPISODE_KEY = 'active_story_id';
+
+export function activeEpisodeId(p: ProjectContext): string {
+  const saved = p.db.get<{ value: string }>('SELECT value FROM kv WHERE key = ?', [ACTIVE_EPISODE_KEY])?.value;
+  if (saved && p.db.get('SELECT id FROM story WHERE id = ?', [saved])) return saved;
+  const first = p.db.get<{ id: string }>('SELECT id FROM story ORDER BY ord, created_at LIMIT 1');
+  if (!first) throw new Error('story missing');
+  return first.id;
+}
+
+function storyFromRow(p: ProjectContext, r: { id: string; title: string; synopsis: string; body: string; planned_duration_seconds: number; created_at: string; updated_at: string }): StoryDoc {
   return {
     id: r.id,
-    // Older projects were initialized with an empty story title. Preserve an
-    // explicitly edited story title, otherwise inherit the project title so
-    // users never have to type the same title twice.
     title: r.title.trim() || p.config.title,
     synopsis: r.synopsis,
     body: r.body,
@@ -63,6 +66,44 @@ export function getStory(p: ProjectContext): StoryDoc {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+export function listEpisodes(p: ProjectContext): StoryEpisodeList {
+  const active = activeEpisodeId(p);
+  const rows = p.db.all<{ id: string; title: string; synopsis: string; body: string; planned_duration_seconds: number; ord: number; created_at: string; updated_at: string; beat_count: number; shot_count: number }>(`
+    SELECT st.*,
+      (SELECT COUNT(*) FROM story_beats b WHERE b.story_id = st.id) AS beat_count,
+      (SELECT COUNT(*) FROM shots s WHERE s.story_id = st.id) AS shot_count
+    FROM story st ORDER BY st.ord, st.created_at
+  `);
+  return {
+    activeEpisodeId: active,
+    episodes: rows.map((row) => ({ ...storyFromRow(p, row), order: row.ord, beatCount: row.beat_count, shotCount: row.shot_count })),
+  };
+}
+
+export function createEpisode(p: ProjectContext, input: { title?: string } = {}): StoryEpisodeList {
+  const order = p.db.get<{ n: number }>('SELECT COALESCE(MAX(ord), 0) + 1 AS n FROM story')!.n;
+  const id = nextId(p.db, 'episode');
+  const now = new Date().toISOString();
+  const title = input.title?.trim() || `第 ${order} 集`;
+  p.db.run('INSERT INTO story (id, title, synopsis, body, planned_duration_seconds, ord, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [id, title, '', '', 0, order, now, now]);
+  activateEpisode(p, id);
+  return listEpisodes(p);
+}
+
+export function activateEpisode(p: ProjectContext, id: string): StoryEpisodeList {
+  if (!p.db.get('SELECT id FROM story WHERE id = ?', [id])) throw new Error('episode not found');
+  p.db.run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [ACTIVE_EPISODE_KEY, id]);
+  return listEpisodes(p);
+}
+
+export function getStory(p: ProjectContext): StoryDoc {
+  const r = p.db.get<{ id: string; title: string; synopsis: string; body: string; planned_duration_seconds: number; created_at: string; updated_at: string }>(
+    'SELECT * FROM story WHERE id = ?', [activeEpisodeId(p)],
+  );
+  if (!r) throw new Error('story missing');
+  return storyFromRow(p, r);
 }
 
 export function updateStory(p: ProjectContext, patch: Partial<Pick<StoryDoc, 'title' | 'synopsis' | 'body' | 'plannedDurationSeconds'>>): StoryDoc {
@@ -87,7 +128,8 @@ export function updateStory(p: ProjectContext, patch: Partial<Pick<StoryDoc, 'ti
   }
   if (cols.length === 0) return getStory(p);
   vals.push(now);
-  p.db.run(`UPDATE story SET ${cols.join(', ')}, updated_at = ? WHERE id = (SELECT id FROM story LIMIT 1)`, vals);
+  vals.push(activeEpisodeId(p));
+  p.db.run(`UPDATE story SET ${cols.join(', ')}, updated_at = ? WHERE id = ?`, vals);
   return getStory(p);
 }
 
@@ -95,7 +137,7 @@ export function updateStory(p: ProjectContext, patch: Partial<Pick<StoryDoc, 'ti
 
 export function listSequences(p: ProjectContext): Sequence[] {
   return p.db.all<Sequence>(
-    'SELECT id, title, ord as "order", summary, created_at as createdAt, updated_at as updatedAt FROM sequences ORDER BY ord',
+    'SELECT id, title, ord as "order", summary, created_at as createdAt, updated_at as updatedAt FROM sequences WHERE story_id = ? ORDER BY ord', [activeEpisodeId(p)],
   );
 }
 
@@ -103,9 +145,11 @@ export function createSequence(p: ProjectContext, input: { title: string; summar
   if (typeof input.title !== 'string' || !input.title.trim()) throw new Error('sequence title is required');
   const id = nextId(p.db, 'seq');
   const now = new Date().toISOString();
-  const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM sequences')!.m;
-  p.db.run('INSERT INTO sequences (id, title, ord, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [
+  const storyId = activeEpisodeId(p);
+  const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM sequences WHERE story_id = ?', [storyId])!.m;
+  p.db.run('INSERT INTO sequences (id, story_id, title, ord, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [
     id,
+    storyId,
     input.title,
     ord,
     input.summary ?? '',
@@ -145,7 +189,7 @@ export function deleteSequence(p: ProjectContext, id: string): void {
 // --- StoryBeats ------------------------------------------------------------
 
 export function listBeats(p: ProjectContext): StoryBeat[] {
-  return p.db.all<BeatRow>('SELECT * FROM story_beats ORDER BY ord').map(beatFromRow);
+  return p.db.all<BeatRow>('SELECT * FROM story_beats WHERE story_id = ? ORDER BY ord', [activeEpisodeId(p)]).map(beatFromRow);
 }
 
 export function getBeat(p: ProjectContext, id: string): StoryBeat {
@@ -158,16 +202,18 @@ export function createBeat(
   p: ProjectContext,
   input: Partial<Pick<StoryBeat, 'title' | 'category' | 'summary' | 'location' | 'timeOfDay' | 'weather' | 'characters' | 'stateChange' | 'notes' | 'durationSeconds' | 'sequenceId'>>,
 ): StoryBeat {
-  if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0)) throw new Error('beat durationSeconds must be positive');
+  if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds < 1 || input.durationSeconds > 15)) throw new Error('beat durationSeconds must be between 1 and 15');
   if (input.category !== undefined && !BEAT_CATEGORIES.has(input.category)) throw new Error('invalid beat category');
   const id = nextId(p.db, 'beat');
   const now = new Date().toISOString();
-  const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM story_beats')!.m;
+  const storyId = activeEpisodeId(p);
+  const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM story_beats WHERE story_id = ?', [storyId])!.m;
   p.db.run(
-    `INSERT INTO story_beats (id, sequence_id, ord, title, category, summary, location, time_of_day, weather, characters_json, state_change, notes, duration_seconds, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO story_beats (id, story_id, sequence_id, ord, title, category, summary, location, time_of_day, weather, characters_json, state_change, notes, duration_seconds, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
+      storyId,
       input.sequenceId ?? null,
       ord,
       input.title ?? 'New Beat',
@@ -179,7 +225,7 @@ export function createBeat(
       j(input.characters ?? []),
       input.stateChange ?? '',
       input.notes ?? '',
-      input.durationSeconds ?? 5,
+      input.durationSeconds ?? 12,
       now,
       now,
     ],
@@ -188,7 +234,7 @@ export function createBeat(
 }
 
 export function updateBeat(p: ProjectContext, id: string, patch: Partial<Omit<StoryBeat, 'id' | 'createdAt' | 'updatedAt'>>): StoryBeat {
-  if (patch.durationSeconds !== undefined && (!Number.isFinite(patch.durationSeconds) || patch.durationSeconds <= 0)) throw new Error('beat durationSeconds must be positive');
+  if (patch.durationSeconds !== undefined && (!Number.isFinite(patch.durationSeconds) || patch.durationSeconds < 1 || patch.durationSeconds > 15)) throw new Error('beat durationSeconds must be between 1 and 15');
   if (patch.category !== undefined && !BEAT_CATEGORIES.has(patch.category)) throw new Error('invalid beat category');
   const now = new Date().toISOString();
   const map: Record<string, string> = {

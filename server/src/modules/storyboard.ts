@@ -12,7 +12,7 @@ import type { Ffmpeg } from '../ffmpeg.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { nextId } from '../db/ids.js';
 import { j, jget } from '../db/sqlite.js';
-import { createBeat, getStory, listBeats } from './story.js';
+import { activeEpisodeId, createBeat, getStory, listBeats } from './story.js';
 import { createBinding, getMedia, listBindings, listEntities } from './assets.js';
 import { listShots, updateShot } from './shots.js';
 import { createShotForBeat } from './story-pipeline.js';
@@ -24,6 +24,7 @@ const ACTIVE_JOB_STATUSES = "'SUBMITTING','QUEUED','RUNNING'";
 
 interface StoryboardRow {
   id: string;
+  story_id: string;
   series_id: string;
   page_number: number;
   source_start_index: number;
@@ -128,14 +129,14 @@ export function storyDurationSeconds(p: ProjectContext): number {
 }
 
 export function getCurrentStoryboard(p: ProjectContext): Storyboard | null {
-  const latest = p.db.get<StoryboardRow>('SELECT * FROM storyboards ORDER BY created_at DESC, id DESC LIMIT 1');
+  const latest = p.db.get<StoryboardRow>('SELECT * FROM storyboards WHERE story_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [activeEpisodeId(p)]);
   if (!latest) return null;
   const row = p.db.get<StoryboardRow>('SELECT * FROM storyboards WHERE series_id = ? ORDER BY page_number LIMIT 1', [latest.series_id || latest.id]) ?? latest;
   return row ? fromRow(p, row) : null;
 }
 
 export function listStoryboardPages(p: ProjectContext): Storyboard[] {
-  const latest = p.db.get<StoryboardRow>('SELECT * FROM storyboards ORDER BY created_at DESC, id DESC LIMIT 1');
+  const latest = p.db.get<StoryboardRow>('SELECT * FROM storyboards WHERE story_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [activeEpisodeId(p)]);
   if (!latest) return [];
   return p.db.all<StoryboardRow>('SELECT * FROM storyboards WHERE series_id = ? ORDER BY page_number', [latest.series_id || latest.id]).map((row) => fromRow(p, row));
 }
@@ -167,6 +168,7 @@ export function prepareStoryboard(p: ProjectContext, requestedCount?: number): S
   const count = requestedCount === undefined ? recommended : requestedCount;
   if (count !== 3 && count !== 6 && count !== 9) throw new Error('panelCount must be 3, 6, or 9');
   const seriesId = nextId(p.db, 'storyboard-series');
+  const storyId = activeEpisodeId(p);
   const now = new Date().toISOString();
   const totalPages = Math.max(1, Math.ceil(sourceCount / count));
   let firstId = '';
@@ -180,8 +182,8 @@ export function prepareStoryboard(p: ProjectContext, requestedCount?: number): S
       const pageCount = pageIndex === totalPages - 1 ? recommendedStoryboardPanelCount(Math.max(1, pageSource.length)) : count;
       const descriptions = panelDescriptions(pageSource, pageCount);
       p.db.run(
-        'INSERT INTO storyboards (id, panel_count, status, source_duration_seconds, sheet_asset_id, prompt, created_at, updated_at, series_id, page_number, source_start_index, source_end_index, source_segment_count) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, pageCount, 'draft', duration, '', now, now, seriesId, pageIndex + 1, start, end, sourceCount],
+        'INSERT INTO storyboards (id, story_id, panel_count, status, source_duration_seconds, sheet_asset_id, prompt, created_at, updated_at, series_id, page_number, source_start_index, source_end_index, source_segment_count) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, storyId, pageCount, 'draft', duration, '', now, now, seriesId, pageIndex + 1, start, end, sourceCount],
       );
       descriptions.forEach((description, index) => {
         p.db.run(

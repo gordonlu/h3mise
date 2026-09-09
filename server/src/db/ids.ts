@@ -4,6 +4,7 @@ import type { Db } from './sqlite.js';
 
 export type IdKind =
   | 'story'
+  | 'episode'
   | 'seq'
   | 'beat'
   | 'shot'

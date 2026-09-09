@@ -11,6 +11,7 @@ import { latestPlan } from './director.js';
 import { getShot } from './shots.js';
 import { ensureShotEntityImageBindings, listBindings } from './assets.js';
 import { directorStyleAiContext, directorStylePromptDirective } from './director-styles.js';
+import { getBeat, getStory } from './story.js';
 
 interface PvRow {
   id: string;
@@ -92,7 +93,13 @@ export function createPrompt(
 export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, durationSeconds?: number): PromptVersion {
   const shot = getShot(p, shotId);
   const plan = latestPlan(p, shotId);
-  const refs = ensureShotEntityImageBindings(p, shot, mode).bindings;
+  const refs = ensureShotEntityImageBindings(p, shot, mode).bindings.map((binding) => {
+    if (binding.type !== 'image' || binding.roles.includes('identity') || binding.roles.includes('environment')) return binding;
+    const owner = p.db.get<{ kind: string }>('SELECT kind FROM entities WHERE image_asset_id = ? LIMIT 1', [binding.assetId]);
+    if (!owner) return binding;
+    const inferredRole = owner.kind === 'scene' ? 'environment' : owner.kind === 'character' || owner.kind === 'creature' ? 'identity' : null;
+    return inferredRole ? { ...binding, roles: [...binding.roles, inferredRole] as typeof binding.roles } : binding;
+  });
   const ctx: CompileContext = {
     shot,
     plan: plan?.plan ?? {
@@ -116,6 +123,11 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
     references: refs,
     directorStyle: directorStylePromptDirective(p),
     cameraPlan: cameraPlanPromptSummary(p, shotId, shot.durationSeconds),
+    story: (() => {
+      const story = getStory(p);
+      return { title: story.title, synopsis: story.synopsis, body: story.body };
+    })(),
+    storyBeat: shot.storyBeatId ? getBeat(p, shot.storyBeatId) : null,
   };
   const text = compileDeterministic(ctx, mode);
   return createPrompt(p, {
@@ -172,7 +184,7 @@ export function buildContextPackage(
     [shotId],
   );
   const project = p.config;
-  const story = p.db.get<{ title: string; synopsis: string }>('SELECT title, synopsis FROM story LIMIT 1');
+  const story = p.db.get<{ title: string; synopsis: string }>('SELECT title, synopsis FROM story WHERE id = ?', [shot.episodeId]);
   return {
     project,
     director_style_context: directorStyleAiContext(p),
@@ -180,8 +192,8 @@ export function buildContextPackage(
     previous_selected_take: (() => {
       // P1: predecessor by shot order, not by created_at across the project.
       const prev = p.db.get<{ id: string }>(
-        'SELECT id FROM shots WHERE ord < (SELECT ord FROM shots WHERE id = ?) ORDER BY ord DESC LIMIT 1',
-        [shotId],
+        'SELECT id FROM shots WHERE story_id = (SELECT story_id FROM shots WHERE id = ?) AND ord < (SELECT ord FROM shots WHERE id = ?) ORDER BY ord DESC LIMIT 1',
+        [shotId, shotId],
       );
       if (!prev) return null;
       return (

@@ -29,7 +29,7 @@ const shots = ref<ShotCard[]>([]);
 const entities = ref<Array<{ id: string; name: string; kind: string }>>([]);
 const showCreate = ref(false);
 const showPaste = ref(false);
-const newShot = ref({ title: '', purpose: '', shotFunction: 'wide', durationSeconds: 5, h3Mode: 't2va' });
+const newShot = ref({ title: '', purpose: '', shotFunction: 'wide', durationSeconds: 12, h3Mode: 't2va' });
 const pasteText = ref('');
 const busy = ref(false);
 const filter = ref('');
@@ -48,7 +48,7 @@ function modeLabel(mode: string): string {
   return ({ t2va: t('workflow.shots.textToVideoT2VA'), i2va: t('workflow.shots.imageToVideoI2VA'), fl2va: t('workflow.shots.firstLastFrameVideoFL2VA'), ref2va: t('workflow.shots.referenceVideoRef2VA') } as Record<string, string>)[mode] ?? H3_MODE_LABEL[mode as keyof typeof H3_MODE_LABEL] ?? mode;
 }
 function statusLabel(status: string): string {
-  return ({ draft: t('workflow.shots.needsDirection'), ready: t('workflow.shots.ready2'), rendering: t('workflow.shots.generating'), review: t('workflow.shots.selectTake2'), selected: t('workflow.shots.complete2') } as Record<string, string>)[status] ?? status;
+  return ({ draft: t('workflow.shots.needsDirection'), ready: t('workflow.shots.ready2'), rendering: t('workflow.shots.generating'), review: t('workflow.shots.selectTake2'), done: t('workflow.shots.complete2') } as Record<string, string>)[status] ?? status;
 }
 
 /** PRD §15: only expose modes the active provider profile supports.
@@ -68,6 +68,21 @@ const filtered = computed(() => {
   if (f) list = list.filter((s) => s.title.toLowerCase().includes(f) || s.id.includes(f) || (s.purpose ?? '').toLowerCase().includes(f));
   return list;
 });
+
+const statusCounts = computed(() => shots.value.reduce((acc, shot) => {
+  const status = SHOT_USER_STATUS[shot.status as ShotStatus];
+  acc[status] = (acc[status] ?? 0) + 1;
+  return acc;
+}, {} as Record<string, number>));
+
+function nextAction(shot: ShotCard): string {
+  const status = SHOT_USER_STATUS[shot.status as ShotStatus];
+  if (status === 'review') return t('workflow.shots.selectTake3');
+  if (status === 'rendering') return t('workflow.shots.generating2');
+  if (status === 'done') return '查看成片';
+  if (shot.missing?.length) return '补充素材';
+  return status === 'ready' ? '开始生成' : '继续设计';
+}
 
 function entityName(id: string | null): string {
   if (!id) return '';
@@ -220,18 +235,36 @@ onMounted(load);
 
 <template>
   <div class="page">
-    <div class="spread page-head">
-      <h1>{{ t('pages.shots.title') }} <span class="muted">{{ t('pages.shots.shotsCount', { n: shots.length }) }}</span></h1>
-      <div class="row">
-        <select v-model="statusFilter" class="status-filter" :title="t('workflow.shots.filterByStatus')">
-          <option value="">{{ t('workflow.shots.allStatuses') }}</option>
-          <option v-for="(_, key) in SHOT_USER_STATUS_LABEL" :key="key" :value="key">{{ statusLabel(String(key)) }}</option>
-        </select>
-        <input v-model="filter" :placeholder="t('workflow.shots.searchShots')" class="search" />
-        <button @click="batchOpen ? batchOpen = false : analyzeBatch()">{{ batchOpen ? t('workflow.shots.hideBatchGeneration') : t('workflow.shots.batchGeneration') }}</button>
-        <button @click="showPaste = !showPaste; showCreate = false">{{ t('workflow.shots.pasteShotList') }}</button>
-        <button class="primary" @click="showCreate = !showCreate; showPaste = false">{{ t('workflow.shots.newShot') }}</button>
+    <div class="page-head">
+      <div>
+        <h1>{{ t('pages.shots.title') }}</h1>
+        <p>以镜头为单位推进设计、生成与选片，下一步始终清晰可见。</p>
       </div>
+      <div class="head-side">
+        <div class="shot-summary" aria-label="镜头状态概览">
+          <span>共 {{ shots.length }} 镜头</span>
+          <span>制作中 {{ statusCounts.rendering ?? 0 }}</span>
+          <span>待选片 {{ statusCounts.review ?? 0 }}</span>
+          <span>已完成 {{ statusCounts.done ?? 0 }}</span>
+        </div>
+        <div class="row">
+          <button @click="showPaste = !showPaste; showCreate = false">{{ t('workflow.shots.pasteShotList') }}</button>
+          <button class="primary" @click="showCreate = !showCreate; showPaste = false">{{ t('workflow.shots.newShot') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar panel">
+      <div class="toolbar-search">
+        <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+        <input v-model="filter" :placeholder="t('workflow.shots.searchShots')" class="search" />
+      </div>
+      <select v-model="statusFilter" class="status-filter" :title="t('workflow.shots.filterByStatus')">
+        <option value="">{{ t('workflow.shots.allStatuses') }}</option>
+        <option v-for="(_, key) in SHOT_USER_STATUS_LABEL" :key="key" :value="key">{{ statusLabel(String(key)) }}</option>
+      </select>
+      <span class="toolbar-result">显示 {{ filtered.length }} 个</span>
+      <button class="batch-trigger" @click="batchOpen ? batchOpen = false : analyzeBatch()">{{ batchOpen ? t('workflow.shots.hideBatchGeneration') : t('workflow.shots.batchGeneration') }}</button>
     </div>
 
     <div v-if="batchOpen" class="panel batch-panel">
@@ -283,7 +316,7 @@ onMounted(load);
           </label>
           <label class="field">
             {{ t('workflow.shots.duration') }}
-            <input v-model.number="newShot.durationSeconds" type="number" min="1" max="15" :title="t('workflow.shots.durationSeconds115')" placeholder="5" />
+            <input v-model.number="newShot.durationSeconds" type="number" min="1" max="15" :title="t('workflow.shots.durationSeconds115')" placeholder="12" />
           </label>
         </div>
         <label class="field">
@@ -321,35 +354,31 @@ onMounted(load);
           <img v-if="s.cover" :src="fileUrl(s.cover)" :alt="s.title" />
           <span v-else class="cover-idx">SHOT<br />{{ String(i + 1).padStart(2, '0') }}</span>
           <span class="cover-duration">{{ s.durationSeconds }}s</span>
-          <span v-if="s.activeJobs > 0" class="badge warn render-badge">{{ t('workflow.shots.generating2') }}</span>
-          <span v-else-if="SHOT_USER_STATUS[s.status] === 'review'" class="badge violet review-badge">{{ t('workflow.shots.selectTake3') }}</span>
         </div>
         <div class="card-body">
-          <div class="spread">
+          <div class="card-heading">
+            <span class="shot-number">{{ String(i + 1).padStart(2, '0') }}</span>
             <span class="card-title">{{ s.title || s.id }}</span>
             <span :class="['st', `st-${SHOT_USER_STATUS[s.status]}`]" :title="`内部状态：${SHOT_STATUS_LABEL[s.status]}`">
               <i />{{ statusLabel(SHOT_USER_STATUS[s.status]) }}
             </span>
-            <button class="sm danger shot-delete" :title="t('workflow.shots.deleteShotIncludingItsPlanPromptsTakes')" @click.stop.prevent="deleteShot(s)">{{ t('common.delete') }}</button>
-          </div>
-          <div class="row wrap">
-            <span class="badge accent no-dot">{{ modeLabel(s.h3Mode ?? 't2va') }}</span>
-            <span class="badge no-dot">{{ s.shotFunction }}</span>
-            <span v-if="entityName(s.primaryCharacterId)" class="badge no-dot">{{ entityName(s.primaryCharacterId) }}</span>
-            <span v-if="entityName(s.sceneId)" class="badge info no-dot">{{ entityName(s.sceneId) }}</span>
-            <span :class="['badge', s.renderReadiness.ready ? 'ok' : 'warn']" :title="s.renderReadiness.reason">
-              {{ s.renderReadiness.ready ? (s.renderReadiness.effectiveMode === 'previous_take' ? t('workflow.shots.tailFrameConnected') : t('workflow.shots.parallelReady')) : s.renderReadiness.reason }}
-            </span>
+            <button class="ghost shot-delete" :title="t('workflow.shots.deleteShotIncludingItsPlanPromptsTakes')" @click.stop.prevent="deleteShot(s)">•••</button>
           </div>
           <div class="muted purpose">{{ s.purpose || '—' }}</div>
+          <div class="shot-meta">
+            <span>{{ modeLabel(s.h3Mode ?? 't2va') }}</span>
+            <span>{{ s.shotFunction }}</span>
+            <span v-if="entityName(s.primaryCharacterId)">{{ entityName(s.primaryCharacterId) }}</span>
+            <span v-if="entityName(s.sceneId)">{{ entityName(s.sceneId) }}</span>
+          </div>
           <div v-if="s.missing?.length" class="missing-row">
-            <span class="badge bad no-dot">⚠ {{ t('workflow.shots.missingAssets2') }}</span>
-            <span class="muted">{{ s.missing.join('、') }}</span>
+            <strong>{{ t('workflow.shots.missingAssets2') }}</strong>
+            <span>{{ s.missing.join('、') }}</span>
           </div>
           <div class="spread card-foot">
-            <span class="muted">{{ s.takeCount }} Takes · {{ s.selectedTakeId ? t('workflow.shots.selected') : t('workflow.shots.notSelected') }}</span>
-            <span v-if="s.risk" :class="['badge', RISK_BADGE[s.risk]]" title="最近一次 Preflight 风险">Risk {{ s.risk }}</span>
-            <span class="edit-link">编辑镜头 →</span>
+            <span class="take-info">{{ s.takeCount }} Takes · {{ s.selectedTakeId ? t('workflow.shots.selected') : t('workflow.shots.notSelected') }}</span>
+            <span v-if="s.risk" :class="['risk-text', `risk-${RISK_BADGE[s.risk]}`]" title="最近一次 Preflight 风险">Risk {{ s.risk }}</span>
+            <span class="edit-link">{{ nextAction(s) }} <b>→</b></span>
           </div>
         </div>
       </router-link>
@@ -358,11 +387,23 @@ onMounted(load);
 </template>
 
 <style scoped>
-.page { padding: 24px 32px; max-width: 1360px; margin: 0 auto; }
-.page-head { margin-bottom: 4px; }
-h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
-.search { width: 180px; }
-.status-filter { width: 110px; }
+.page { padding: 30px 32px 48px; max-width: 1440px; margin: 0 auto; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 22px; }
+h1 { font-size: 30px; line-height: 1.15; margin: 0; font-weight: 720; letter-spacing: -0.035em; }
+.page-head p { margin: 8px 0 0; color: var(--text-2); font-size: 13px; }
+.head-side { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.shot-summary { display: flex; align-items: center; color: var(--text-3); font-size: 11.5px; }
+.shot-summary span { padding: 0 10px; border-right: 1px solid var(--line-2); white-space: nowrap; }
+.shot-summary span:first-child { padding-left: 0; }
+.shot-summary span:last-child { padding-right: 0; border-right: 0; }
+.toolbar { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; box-shadow: none; }
+.toolbar-search { position: relative; flex: 1; min-width: 260px; }
+.toolbar-search svg { position: absolute; left: 12px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); fill: none; stroke: var(--text-3); stroke-width: 1.6; pointer-events: none; }
+.search { width: 100%; padding-left: 38px; background: var(--bg-subtle); border-color: transparent; }
+.search:focus { background: var(--bg-2); }
+.status-filter { width: 132px; }
+.toolbar-result { padding: 0 6px; color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.batch-trigger { margin-left: auto; }
 .create-panel { margin: 16px 0; }
 .batch-panel { margin: 16px 0; }
 .batch-counts { gap: 7px; }
@@ -371,29 +412,37 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .batch-reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .batch-actions { justify-content: flex-end; flex-wrap: wrap; }
 .mode-field select { width: 220px; }
-.board { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-top: 18px; }
-.shot-delete { margin-left: auto; padding: 2px 10px; font-size: 11px; flex: none; }
-.card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
-.card:hover { border-color: var(--accent-line); transform: translateY(-2px); box-shadow: var(--shadow-2); text-decoration: none; }
-.cover { position: relative; height: 180px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.shot-delete { margin-left: 2px; padding: 3px 6px; font-size: 12px; letter-spacing: 1px; flex: none; }
+.card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; box-shadow: none; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
+.card:hover { border-color: var(--line-3); transform: translateY(-2px); box-shadow: var(--shadow-1); text-decoration: none; }
+.cover { position: relative; aspect-ratio: 16 / 9; min-height: 220px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
-.cover-idx { font-family: var(--mono); letter-spacing: 0.25em; color: var(--text-3); text-align: center; line-height: 1.8; font-size: 12px; }
+.cover-idx { font-family: var(--mono); letter-spacing: 0.24em; color: var(--text-3); text-align: center; line-height: 1.8; font-size: 12px; }
 .cover-duration {
   position: absolute; bottom: 8px; right: 8px;
-  background: rgba(0,0,0,0.65); color: #fff; font-size: 12px; font-weight: 600;
+  background: rgba(20,20,20,0.76); color: #fff; font-size: 11px; font-weight: 600;
   padding: 3px 8px; border-radius: 5px; font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
-.render-badge, .review-badge { position: absolute; top: 8px; right: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); }
-.card-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-.card-title { font-weight: 600; font-size: 14.5px; }
-.purpose { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px; }
+.card-body { padding: 15px 16px 14px; display: flex; flex-direction: column; gap: 9px; }
+.card-heading { display: flex; align-items: center; gap: 10px; }
+.shot-number { font-family: var(--mono); color: var(--text); font-size: 16px; font-weight: 700; padding-right: 10px; border-right: 1px solid var(--line-2); }
+.card-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 680; font-size: 15px; }
+.purpose { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; min-height: 20px; color: var(--text-2); }
+.shot-meta { display: flex; flex-wrap: wrap; gap: 0; color: var(--text-2); font-size: 11.5px; }
+.shot-meta span { padding: 0 9px; border-right: 1px solid var(--line-2); }
+.shot-meta span:first-child { padding-left: 0; }
+.shot-meta span:last-child { border-right: 0; }
 .wrap { flex-wrap: wrap; }
-.missing-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
-.card-foot { border-top: 1px dashed var(--line); padding-top: 7px; }
-.edit-link { font-size: 12.5px; color: var(--accent-text); font-weight: 500; white-space: nowrap; }
-@media (max-width: 760px) {
-  .batch-row { grid-template-columns: 24px minmax(100px, 1fr) max-content; }
-  .batch-reason { grid-column: 2 / -1; white-space: normal; }
-}
+.missing-row { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: 6px; color: var(--bad); background: var(--bad-soft); font-size: 11.5px; }
+.missing-row span { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-foot { border-top: 1px solid var(--line); padding-top: 10px; }
+.take-info { color: var(--text-3); font-size: 11.5px; }
+.risk-text { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; }
+.risk-ok { color: var(--ok); }
+.risk-warn { color: var(--warn); }
+.risk-bad { color: var(--bad); }
+.edit-link { margin-left: auto; font-size: 12.5px; color: var(--accent-text); font-weight: 600; white-space: nowrap; }
+.edit-link b { margin-left: 4px; font-size: 14px; }
 </style>

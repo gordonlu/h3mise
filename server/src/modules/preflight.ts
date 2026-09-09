@@ -18,8 +18,8 @@ import type { Shot } from '@h3mise/shared';
 /** Previous shot by editorial order (same sequence when the shot has one). */
 function previousShot(p: ProjectContext, shot: Shot): Shot | null {
   const row = shot.sequenceId === null
-    ? p.db.get<{ id: string; screen_direction: string; title: string }>('SELECT * FROM shots WHERE sequence_id IS NULL AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.order])
-    : p.db.get<{ id: string; screen_direction: string; title: string }>('SELECT * FROM shots WHERE sequence_id = ? AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.sequenceId, shot.order]);
+    ? p.db.get<{ id: string; screen_direction: string; title: string }>('SELECT * FROM shots WHERE story_id = ? AND sequence_id IS NULL AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.episodeId, shot.order])
+    : p.db.get<{ id: string; screen_direction: string; title: string }>('SELECT * FROM shots WHERE story_id = ? AND sequence_id = ? AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.episodeId, shot.sequenceId, shot.order]);
   if (!row) return null;
   return { ...getShot(p, row.id), screenDirection: (row.screen_direction as Shot['screenDirection']) ?? 'neutral' };
 }

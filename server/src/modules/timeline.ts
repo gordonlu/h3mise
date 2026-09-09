@@ -10,6 +10,7 @@ import { nextId } from '../db/ids.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 import { getShot } from './shots.js';
 import { getTake } from './takes.js';
+import { activeEpisodeId } from './story.js';
 
 interface ClipRow {
   id: string;
@@ -51,7 +52,10 @@ function clipFromRow(r: ClipRow): TimelineClip {
 export function getTimeline(p: ProjectContext): TimelineDoc {
   const row = p.db.get<{ id: string; title: string; updated_at: string }>('SELECT * FROM timeline LIMIT 1');
   if (!row) throw new Error('timeline missing');
-  const clips = p.db.all<ClipRow>('SELECT * FROM timeline_clips ORDER BY ord').map(clipFromRow);
+  const clips = p.db.all<ClipRow>(
+    'SELECT tc.* FROM timeline_clips tc JOIN shots s ON s.id = tc.shot_id WHERE s.story_id = ? ORDER BY tc.ord',
+    [activeEpisodeId(p)],
+  ).map(clipFromRow);
   return { id: row.id, title: row.title, clips, updatedAt: row.updated_at };
 }
 
@@ -64,7 +68,7 @@ export function addClip(p: ProjectContext, input: { shotId: string; takeId: stri
   validateTrim(input.trimIn ?? 0, input.trimOut ?? null, take.duration);
   const id = nextId(p.db, 'clip');
   const now = new Date().toISOString();
-  const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM timeline_clips')!.m;
+  const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(tc.ord), 0) + 1 as m FROM timeline_clips tc JOIN shots s ON s.id = tc.shot_id WHERE s.story_id = ?', [activeEpisodeId(p)])!.m;
   const trimOut = input.trimOut ?? null;
   p.db.run(
     'INSERT INTO timeline_clips (id, ord, shot_id, take_id, trim_in, trim_out, transition, transition_duration, audio_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -82,8 +86,9 @@ export function addMissingSelectedTakes(p: ProjectContext): { clips: TimelineCli
     SELECT s.id AS shot_id, t.id AS take_id
     FROM shots s
     JOIN takes t ON t.shot_id = s.id AND t.status = 'selected'
+    WHERE s.story_id = ?
     ORDER BY s.ord
-  `);
+  `, [activeEpisodeId(p)]);
   const existingShotIds = new Set(getTimeline(p).clips.map((clip) => clip.shotId));
   let added = 0;
   for (const item of selected) {

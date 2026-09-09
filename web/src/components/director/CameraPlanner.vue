@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { CameraMotionPlan, FramingRect, MediaAsset, ReferenceBinding, Shot } from '@h3mise/shared';
-import { cameraPlanWarnings, viewAt, normalizeCameraPlan, emptyCameraPlan } from '@h3mise/shared';
+import { cameraPlanWarnings, viewAt, normalizeCameraPlan, emptyCameraPlan, describeCameraPlan } from '@h3mise/shared';
 import { get, post, put, mediaUrl } from '../../api/client';
 import { t as tr } from '../../stores/locale';
 import { useToastStore } from '../../stores/toast';
@@ -16,9 +16,16 @@ const emit = defineEmits<{ assetsAdded: [] }>();
 
 const toasts = useToastStore();
 
-// AI Apps
-const aiApps = ref<Array<{ id: string; name: string; appId: string; description?: string }>>([]);
-const motionProvider = ref<'local' | 'ai'>('local');
+const cameraSummary = computed(() => describeCameraPlan(plan.value, props.shot.durationSeconds));
+function preset(kind: 'static' | 'push' | 'pull' | 'left' | 'right') {
+  plan.value.frameMode = true;
+  plan.value.steps = [];
+  const wide = { x: 0, y: 0, w: 1, h: 1 };
+  const tight = { x: .18, y: .18, w: .64, h: .64 };
+  plan.value.startFraming = kind === 'pull' ? tight : ['left', 'right'].includes(kind) ? { x: kind === 'left' ? .3 : 0, y: .15, w: .7, h: .7 } : wide;
+  plan.value.endFraming = kind === 'push' ? tight : ['left', 'right'].includes(kind) ? { x: kind === 'left' ? 0 : .3, y: .15, w: .7, h: .7 } : wide;
+  pushHistory(); scheduleSave();
+}
 
 // Plan state
 const plan = ref<CameraMotionPlan>({
@@ -116,7 +123,7 @@ function pickDefaultSource(): void {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleSave(): void {
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => void persist(), 900);
+  saveTimer = setTimeout(() => void persist().catch(() => {}), 900);
 }
 async function persist(): Promise<void> {
   try {
@@ -124,6 +131,7 @@ async function persist(): Promise<void> {
     lastSaved.value = new Date().toLocaleTimeString();
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+    throw e;
   }
 }
 
@@ -280,8 +288,9 @@ const warnings = computed(() => cameraPlanWarnings(plan.value));
 async function renderMotion(): Promise<void> {
   if (!sourceAsset.value) { toasts.push({ kind: 'info', text: tr('shot.camera.warnNoSource') }); return; }
   try {
-    const provider = motionProvider.value === 'ai' && aiApps.value.length ? 'runninghub' : 'local';
-    const res = await post<{ jobId: string; status: string }>(`/api/shots/${props.shot.id}/camera-plan/motion`, { provider });
+    if (saveTimer) clearTimeout(saveTimer);
+    await persist();
+    const res = await post<{ jobId: string; status: string }>(`/api/shots/${props.shot.id}/camera-plan/motion`, { provider: 'local' });
     motionJob.value = res.jobId;
     toasts.push({ kind: 'info', text: `${tr('shot.camera.motionLabel')} …` });
     motionAssetId.value = null;
@@ -304,6 +313,8 @@ async function renderFrames(): Promise<void> {
   if (!sourceAsset.value) { toasts.push({ kind: 'info', text: tr('shot.camera.warnNoSource') }); return; }
   framesBusy.value = true;
   try {
+    if (saveTimer) clearTimeout(saveTimer);
+    await persist();
     await post(`/api/shots/${props.shot.id}/camera-plan/frames`, { bind: bindAfter.value });
     toasts.push({ kind: 'ok', text: tr('shot.camera.framesDone', { bound: bindAfter.value ? tr('shot.camera.bound') : '' }) });
     emit('assetsAdded');
@@ -324,10 +335,6 @@ function onKey(e: KeyboardEvent): void {
 onMounted(async () => {
   void loadPlan();
   window.addEventListener('keydown', onKey);
-  try {
-    const profile = await get<{ apps?: Array<{ id: string; name: string; appId: string; description?: string }> } | null>('/api/providers/runninghub/profile');
-    aiApps.value = profile?.apps?.slice(1) ?? [];
-  } catch { /* ignore */ }
 });
 onUnmounted(() => {
   cancelAnimationFrame(raf);
@@ -341,6 +348,8 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
 
 <template>
   <div class="camera-planner">
+    <div class="camera-purpose"><strong>设计取景变化 → 预演 → 用于生成</strong><p>这里预演的是二维裁切，不包含三维环绕、视差或景深。真实运镜意图请在导演计划中描述。</p><ol><li>保存计划后，重新编译 Prompt，将取景方向与节奏写入生成指令。</li><li>导出首尾帧可用于首尾帧生成；原有绑定会保留。</li><li>本地视频用于检查节奏；仅当 Provider 支持视频输入时，才可作为相机参考。</li></ol></div>
+    <div class="cp-render-row"><button class="sm" @click="preset('static')">固定</button><button class="sm" @click="preset('push')">收紧取景</button><button class="sm" @click="preset('pull')">展开取景</button><button class="sm" @click="preset('left')">向左取景</button><button class="sm" @click="preset('right')">向右取景</button></div>
     <!-- Source + mode -->
     <div class="cp-header">
       <label class="field source-field">
@@ -470,15 +479,7 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
       <!-- Render -->
       <div class="cp-render">
         <div class="cp-render-header">{{ tr('shot.camera.renderActions') }}</div>
-        <div v-if="aiApps.length" class="cp-render-row">
-          <label class="field inline">
-            <span class="field-label">{{ tr('shot.camera.motionSource') }}</span>
-            <select v-model="motionProvider">
-              <option value="local">{{ tr('shot.camera.localRender') }}</option>
-              <option value="ai">{{ tr('shot.camera.aiRender') }}</option>
-            </select>
-          </label>
-        </div>
+        <p class="camera-summary">生成指令：{{ cameraSummary }}</p>
         <div class="cp-render-row">
           <button class="primary sm" :disabled="Boolean(motionJob) || !sourceAsset" @click="renderMotion">
             {{ motionJob ? (tr('shot.camera.motionLabel') + ' …') : tr('shot.camera.renderMotion') }}
@@ -493,6 +494,7 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
         </div>
         <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
         <video v-if="motionAssetId" :src="mediaUrl(motionAssetId)" controls playsinline class="cp-motion-video" />
+        <router-link v-if="motionAssetId" :to="{ path: `/assets/${motionAssetId}/breakdown`, query: { shotId: shot.id } }">打开参考准备并绑定到此 Shot →</router-link>
       </div>
     </template>
   </div>
@@ -500,6 +502,7 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
 
 <style scoped>
 .camera-planner { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.camera-purpose{padding:14px 16px;background:var(--accent-soft);border-radius:8px;font-size:12px;line-height:1.65}.camera-purpose p{margin:6px 0;color:var(--text-2)}.camera-purpose ol{margin:8px 0 0;padding-left:18px;color:var(--text-2)}.camera-summary{font-size:12px;margin:0;line-height:1.6}
 
 /* Header */
 .cp-header { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }

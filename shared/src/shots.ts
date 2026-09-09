@@ -111,6 +111,7 @@ import type { H3Mode } from './director.js';
 
 export interface Shot {
   id: string;
+  episodeId: string;
   sequenceId: string | null;
   order: number;
   title: string;

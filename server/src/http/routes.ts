@@ -37,6 +37,7 @@ import * as aiActions from '../modules/ai-actions.js';
 import * as guideMod from '../modules/guide.js';
 import * as productionMod from '../modules/production.js';
 import * as videoAnalysisMod from '../modules/video-analysis.js';
+import * as breakdownMod from '../modules/reference-breakdown.js';
 import * as filmCheckMod from '../modules/film-check.js';
 import type { AutoProduceService } from '../modules/auto-produce.js';
 import { serveMedia } from './media-route.js';
@@ -153,7 +154,7 @@ export function buildRoutes(services: AppServices): App {
     if (body.format !== undefined && !['single_shot', 'sequence', 'story'].includes(String(body.format))) return c.json({ error: 'invalid project format' }, 400);
     if (body.defaultAspectRatio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(String(body.defaultAspectRatio))) return c.json({ error: 'invalid defaultAspectRatio' }, 400);
     const requestedDuration = body.defaultDurationSeconds === undefined ? undefined : Number(body.defaultDurationSeconds);
-    if (requestedDuration !== undefined && (!Number.isFinite(requestedDuration) || requestedDuration <= 0)) return c.json({ error: 'invalid defaultDurationSeconds' }, 400);
+    if (requestedDuration !== undefined && (!Number.isFinite(requestedDuration) || requestedDuration < 1 || requestedDuration > 15)) return c.json({ error: 'invalid defaultDurationSeconds' }, 400);
     return projectSwitchGate('interactive-project', async () => {
       if (services.store.current && body.force !== true) return projectLocked(c);
       const meta = await services.store.create({
@@ -285,7 +286,7 @@ export function buildRoutes(services: AppServices): App {
       return c.json({ error: 'invalid default_provider' }, 400);
     }
     const duration = Number(patch.default_duration_seconds);
-    if (patch.default_duration_seconds !== undefined && (!Number.isFinite(duration) || duration <= 0)) delete patch.default_duration_seconds;
+    if (patch.default_duration_seconds !== undefined && (!Number.isFinite(duration) || duration < 1 || duration > 15)) delete patch.default_duration_seconds;
     // Propagate a changed project default only to shots still ON the old
     // default — per-shot customizations are kept.
     if (typeof patch.default_aspect_ratio === 'string' && patch.default_aspect_ratio !== ctx.config.default_aspect_ratio) {
@@ -303,6 +304,13 @@ export function buildRoutes(services: AppServices): App {
 
   // --- story ---------------------------------------------------------------
 
+  app.get('/api/story/episodes', (c) => c.json(storyMod.listEpisodes(p(c))));
+  app.post('/api/story/episodes', async (c) => c.json(storyMod.createEpisode(p(c), await c.req.json().catch(() => ({}))), 201));
+  app.post('/api/story/episodes/:id/activate', (c) => {
+    const result = storyMod.activateEpisode(p(c), c.req.param('id'));
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result);
+  });
   app.get('/api/story', (c) => c.json(storyMod.getStory(p(c))));
   app.patch('/api/story', async (c) => c.json(storyMod.updateStory(p(c), await c.req.json())));
 
@@ -575,7 +583,8 @@ export function buildRoutes(services: AppServices): App {
     if (!plan) throw new Error('尚未保存相机计划');
     if (!plan.sourceAssetId) throw new Error('请先选择一张源图');
     const source = assetsMod.getMedia(ctx, plan.sourceAssetId);
-    const useAi = body.provider === 'runninghub';
+    if (body.provider && body.provider !== 'local') throw new HttpError(422, 'AI 运镜参考暂不可用：该路径尚未传递运动计划，也不支持可靠任务恢复。请使用本地预演或首尾帧。');
+    const useAi = false;
     const job = services.jobs.start('camera.render', useAi ? 'AI 运动参考视频' : '相机运动参考视频', async (update) => {
       const pctx = await services.store.openDetached(ctx.meta.id);
       try {
@@ -607,6 +616,27 @@ export function buildRoutes(services: AppServices): App {
   });
 
   // --- prompt --------------------------------------------------------------
+
+  // Reference editing reuses the leased project, MediaAsset and DirectorPlan.
+  app.post('/api/assets/media/:id/breakdown', async c => c.json(await breakdownMod.detectBreakdown(p(c), services.ffmpeg, c.req.param('id'))));
+  app.get('/api/assets/media/:id/breakdown/analysis', c => c.json(breakdownMod.getReferenceAnalysis(p(c), c.req.param('id'))));
+  app.put('/api/assets/media/:id/breakdown', async c => {
+    const body = await c.req.json();
+    return c.json(breakdownMod.saveSegments(p(c), c.req.param('id'), body.segments, body.revision));
+  });
+  app.post('/api/assets/media/:id/breakdown/prepare', async c => {
+    return c.json(await breakdownMod.prepareReference(p(c), services.ffmpeg, c.req.param('id'), await c.req.json()), 201);
+  });
+  app.post('/api/assets/media/:id/breakdown/analyze', async c => {
+    const body = await c.req.json();
+    return c.json(await breakdownMod.analyzeReference(p(c), services.ffmpeg, services.ai, c.req.param('id'), body.start, body.end));
+  });
+  app.post('/api/assets/media/:id/breakdown/apply', async c => {
+    const body = await c.req.json();
+    const result = breakdownMod.applyReferenceDirection(p(c), c.req.param('id'), body.shotId, body);
+    services.bus.emit({ type: 'shot.updated', shotId: body.shotId, status: shotsMod.getShot(p(c), body.shotId).status });
+    return c.json(result, 201);
+  });
 
   app.get('/api/shots/:id/prompts', (c) => c.json(promptMod.listPrompts(p(c), c.req.param('id'))));
   app.post('/api/shots/:id/prompts/compile', async (c) => {

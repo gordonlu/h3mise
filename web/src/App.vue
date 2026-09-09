@@ -195,7 +195,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
       </button>
     </header>
 
-    <ProjectGuideBar v-if="project.current && route.path !== '/quick'" :summary="projectGuide" />
+    <ProjectGuideBar v-if="project.current && route.path !== '/quick' && route.name !== 'reference-breakdown'" :summary="projectGuide" />
 
     <main class="main">
       <!-- Project data is server-scoped. Remount the active page whenever the
@@ -216,17 +216,17 @@ watch(() => route.path, () => void scheduleGuideRefresh());
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 0 18px;
-  height: 54px;
+  padding: 0 24px;
+  height: 58px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg-2) 86%, transparent);
-  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--bg-2) 96%, transparent);
+  backdrop-filter: blur(8px);
   position: sticky;
   top: 0;
   z-index: 20;
 }
 .brand { display: flex; align-items: center; text-decoration: none; flex-shrink: 0; }
-.brand-logo { height: 50px; width: auto; display: block; }
+.brand-logo { height: 46px; width: auto; display: block; }
 .brand-name { font-size: 18px; font-weight: 600; color: var(--text); font-family: var(--serif); letter-spacing: 0.02em; }
 .spacer { flex: 1; }
 .project-switch { position: relative; flex-shrink: 1; min-width: 0; }
@@ -289,5 +289,5 @@ watch(() => route.path, () => void scheduleGuideRefresh());
 .system-alert { position: absolute; top: 4px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--bg-2); }
 .theme-toggle { font-size: 15px; padding: 5px 9px; }
 .main { flex: 1; overflow: auto; }
-.main :deep(.page) { max-width: 1080px; margin: 0 auto; padding: 18px 22px; }
+.main :deep(.page) { width: 100%; max-width: 1440px; margin: 0 auto; padding: 24px 32px 48px; }
 </style>

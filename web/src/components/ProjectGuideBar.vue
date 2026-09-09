@@ -45,8 +45,8 @@ const stages = computed(() => {
 </template>
 
 <style scoped>
-.project-guide { position: sticky; top: 54px; z-index: 18; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(10px); }
-.guide-inner { min-height: 58px; max-width: 1160px; margin: 0 auto; padding: 8px 24px; display: grid; grid-template-columns: auto minmax(460px, 1fr) auto; align-items: center; gap: 22px; }
+.project-guide { position: sticky; top: 58px; z-index: 18; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 94%, transparent); backdrop-filter: blur(8px); }
+.guide-inner { min-height: 46px; max-width: 1440px; margin: 0 auto; padding: 5px 32px; display: grid; grid-template-columns: auto minmax(460px, 1fr) auto; align-items: center; gap: 22px; }
 .guide-title { color: var(--text-3); font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; white-space: nowrap; }
 .macro-steps { --guide-count: 5; }
 .guide-summary { color: var(--text-2); font-size: 12px; white-space: nowrap; }

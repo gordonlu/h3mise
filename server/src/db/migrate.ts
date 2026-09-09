@@ -6,6 +6,9 @@ export interface Migration {
   version: number;
   name: string;
   sql: string;
+  /** Optional idempotent repair for schema collisions that SQL alone cannot
+   * express (SQLite has no ADD COLUMN IF NOT EXISTS). */
+  apply?: (db: import('./sqlite.js').Db) => void;
 }
 
 export function migrate(db: import('./sqlite.js').Db, migrations: Migration[]): void {
@@ -21,6 +24,7 @@ export function migrate(db: import('./sqlite.js').Db, migrations: Migration[]): 
     for (const m of sorted) {
       if (m.version <= appliedMax) continue;
       db.exec(m.sql);
+      m.apply?.(db);
       db.run(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         [String(m.version)],

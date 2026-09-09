@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
@@ -26,6 +26,27 @@ const savingRegion = ref(false);
 const aiApps = ref<Array<{ id: string; name: string; appId: string; description?: string }>>([]);
 const savingAiApps = ref(false);
 const directorStyles = ref<DirectorStylePreset[]>([]);
+const projectConfigForm = ref({
+  title: '',
+  default_provider: '',
+  default_aspect_ratio: '16:9',
+  default_duration_seconds: 12,
+  visual_style: '',
+});
+const projectConfigDirty = ref(false);
+const savingProjectConfig = ref(false);
+
+watch(() => project.current?.config, (config) => {
+  if (!config) return;
+  projectConfigForm.value = {
+    title: config.title,
+    default_provider: config.default_provider,
+    default_aspect_ratio: config.default_aspect_ratio,
+    default_duration_seconds: config.default_duration_seconds,
+    visual_style: config.visual_style ?? '',
+  };
+  projectConfigDirty.value = false;
+}, { immediate: true });
 
 // P0-6 semantics: only a successful real submit marks the profile verified;
 // discovery alone only ever reaches "nodes_detected".
@@ -130,9 +151,25 @@ onMounted(() => {
   void load();
 });
 
-async function saveProjectConfig(patchData: Record<string, unknown>) {
-  await project.saveConfig(patchData);
-  notice.value = t('pages.settings.projectSaved');
+async function saveProjectConfig() {
+  if (!project.current || savingProjectConfig.value) return;
+  const title = projectConfigForm.value.title.trim();
+  const duration = Number(projectConfigForm.value.default_duration_seconds);
+  if (!title || !Number.isFinite(duration) || duration < 1 || duration > 15) {
+    notice.value = t('pages.settings.projectSaveInvalid');
+    return;
+  }
+  savingProjectConfig.value = true;
+  try {
+    await project.saveConfig({ ...projectConfigForm.value, title, default_duration_seconds: duration });
+    await project.refreshProjects();
+    projectConfigDirty.value = false;
+    notice.value = t('pages.settings.projectSaved');
+  } catch (e) {
+    notice.value = t('pages.settings.projectSaveFailed', { msg: errorMessage(e) });
+  } finally {
+    savingProjectConfig.value = false;
+  }
 }
 
 async function verify() {
@@ -301,10 +338,10 @@ async function verifyStoryboardProfile() {
         <div class="panel-title">{{ t('pages.settings.currentProject') }}</div>
         <div class="panel-body col" v-if="project.current">
           <p class="muted">{{ t('pages.settings.projectHelp') }}</p>
-          <label class="field">{{ t('pages.settings.projectTitle') }}<input :value="project.current.config.title" :placeholder="t('pages.settings.projectNamePlaceholder')" @change="saveProjectConfig({ title: ($event.target as HTMLInputElement).value })" /></label>
+          <label class="field">{{ t('pages.settings.projectTitle') }}<input v-model="projectConfigForm.title" :placeholder="t('pages.settings.projectNamePlaceholder')" @input="projectConfigDirty = true" /></label>
           <label class="field">
             {{ t('pages.settings.defaultProvider') }}
-            <select :value="project.current.config.default_provider" @change="saveProjectConfig({ default_provider: ($event.target as HTMLSelectElement).value })">
+            <select v-model="projectConfigForm.default_provider" @change="projectConfigDirty = true">
               <option v-for="provider in project.providers" :key="provider.id" :value="provider.id">
                 {{ provider.name }}{{ provider.configured ? '' : ` (${t('common.unconfigured')})` }}
               </option>
@@ -313,22 +350,28 @@ async function verifyStoryboardProfile() {
           </label>
           <label class="field">
             {{ t('pages.settings.aspectRatio') }}
-            <select :value="project.current.config.default_aspect_ratio" @change="saveProjectConfig({ default_aspect_ratio: ($event.target as HTMLSelectElement).value })">
+            <select v-model="projectConfigForm.default_aspect_ratio" @change="projectConfigDirty = true">
               <option>16:9</option><option>9:16</option><option>4:3</option><option>1:1</option>
             </select>
             <span class="muted">{{ t('pages.settings.aspectRatioHelp') }}</span>
           </label>
           <label class="field">
             {{ t('pages.settings.defaultDuration') }}
-            <input type="number" :value="project.current.config.default_duration_seconds" :title="t('pages.settings.defaultDurationTitle')" placeholder="5" @change="saveProjectConfig({ default_duration_seconds: Number(($event.target as HTMLInputElement).value) })" />
+            <input v-model.number="projectConfigForm.default_duration_seconds" type="number" min="1" max="15" :title="t('pages.settings.defaultDurationTitle')" placeholder="12" @input="projectConfigDirty = true" />
           </label>
           <label class="field">
             {{ t('pages.settings.visualStyle') }}
-            <input list="director-style-presets" :value="project.current.config.visual_style ?? ''" :placeholder="t('pages.settings.visualStylePlaceholder')" @change="saveProjectConfig({ visual_style: ($event.target as HTMLInputElement).value })" />
+            <input v-model="projectConfigForm.visual_style" list="director-style-presets" :placeholder="t('pages.settings.visualStylePlaceholder')" @input="projectConfigDirty = true" />
             <datalist id="director-style-presets"><option v-for="style in directorStyles" :key="style.id" :value="style.name" /></datalist>
             <span class="muted">{{ t('pages.settings.visualStyleHelp') }}</span>
           </label>
           <div class="muted mono">{{ project.current.meta.dirPath }}</div>
+          <div class="project-save-row">
+            <span v-if="projectConfigDirty" class="muted">{{ t('pages.settings.unsavedChanges') }}</span>
+            <button class="primary" :disabled="savingProjectConfig || !projectConfigDirty" @click="saveProjectConfig">
+              {{ savingProjectConfig ? t('pages.settings.savingProject') : t('pages.settings.saveProject') }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -505,6 +548,7 @@ h1 { font-size: 21px; margin: 0 0 16px; }
 .ai-apps { display: flex; flex-direction: column; gap: 10px; }
 .ai-app-card { border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--bg-2); }
 .ai-app-header { justify-content: space-between; margin-bottom: 6px; }
+.project-save-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 .danger { color: var(--err); border-color: var(--err-line); }
 .danger:hover { background: var(--err-soft); }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }

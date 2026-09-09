@@ -7,6 +7,7 @@ import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
 import { unlink } from 'node:fs/promises';
 import { createBinding, deleteBinding, listBindings } from './assets.js';
+import { activeEpisodeId } from './story.js';
 
 const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
 const H3_MODES = new Set(['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
@@ -14,8 +15,8 @@ const DEPENDENCY_MODES = new Set(['auto', 'independent', 'planned', 'previous_ta
 const SCREEN_DIRECTIONS = new Set(['left_to_right', 'right_to_left', 'neutral']);
 
 function validateShotPatch(input: CreateShotInput): void {
-  if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0)) {
-    throw new Error('shot durationSeconds must be a positive number');
+  if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds < 1 || input.durationSeconds > 15)) {
+    throw new Error('shot durationSeconds must be between 1 and 15');
   }
   if (input.shotFunction !== undefined && !SHOT_FUNCTIONS.has(input.shotFunction)) throw new Error('invalid shotFunction');
   if (input.h3Mode !== undefined && input.h3Mode !== null && !H3_MODES.has(input.h3Mode)) throw new Error('invalid h3Mode');
@@ -26,6 +27,7 @@ function validateShotPatch(input: CreateShotInput): void {
 
 interface ShotRow {
   id: string;
+  story_id: string;
   sequence_id: string | null;
   ord: number;
   title: string;
@@ -49,6 +51,7 @@ interface ShotRow {
 function shotFromRow(r: ShotRow): Shot {
   return {
     id: r.id,
+    episodeId: r.story_id,
     sequenceId: r.sequence_id,
     order: r.ord,
     title: r.title,
@@ -71,7 +74,7 @@ function shotFromRow(r: ShotRow): Shot {
 }
 
 export function listShots(p: ProjectContext): Shot[] {
-  return p.db.all<ShotRow>('SELECT * FROM shots ORDER BY ord').map(shotFromRow);
+  return p.db.all<ShotRow>('SELECT * FROM shots WHERE story_id = ? ORDER BY ord', [activeEpisodeId(p)]).map(shotFromRow);
 }
 
 export function getShot(p: ProjectContext, id: string): Shot {
@@ -102,12 +105,14 @@ export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot
   validateShotPatch(input);
   const id = nextId(p.db, 'shot');
   const now = new Date().toISOString();
-  const ord = input.order ?? p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM shots')!.m;
+  const storyId = activeEpisodeId(p);
+  const ord = input.order ?? p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM shots WHERE story_id = ?', [storyId])!.m;
   p.db.run(
-    `INSERT INTO shots (id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, render_dependency_mode, depends_on_shot_id, screen_direction, intentional_reversal, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO shots (id, story_id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, render_dependency_mode, depends_on_shot_id, screen_direction, intentional_reversal, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
+      storyId,
       input.sequenceId ?? null,
       ord,
       input.title ?? `Shot ${String(ord).padStart(3, '0')}`,
@@ -302,8 +307,8 @@ export function reorderShots(p: ProjectContext, ids: string[]): Shot[] {
 
 function previousShot(p: ProjectContext, shot: Shot): Shot | null {
   const row = shot.sequenceId === null
-    ? p.db.get<ShotRow>('SELECT * FROM shots WHERE sequence_id IS NULL AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.order])
-    : p.db.get<ShotRow>('SELECT * FROM shots WHERE sequence_id = ? AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.sequenceId, shot.order]);
+    ? p.db.get<ShotRow>('SELECT * FROM shots WHERE story_id = ? AND sequence_id IS NULL AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.episodeId, shot.order])
+    : p.db.get<ShotRow>('SELECT * FROM shots WHERE story_id = ? AND sequence_id = ? AND ord < ? ORDER BY ord DESC LIMIT 1', [shot.episodeId, shot.sequenceId, shot.order]);
   return row ? shotFromRow(row) : null;
 }
 

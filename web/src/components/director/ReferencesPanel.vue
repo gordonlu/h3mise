@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import type { H3Mode, MediaAsset, ReferenceBinding, ReferenceRole } from '@h3mise/shared';
 import { fileUrl, get, mediaUrl } from '../../api/client';
 import { t } from '../../stores/locale';
@@ -15,6 +16,7 @@ const props = defineProps<{
 }>();
 
 const pickerOpen = ref(false);
+const route = useRoute();
 const pickAsset = ref('');
 const pickGroup = ref('');
 const slots = ref<{ firstFrame: boolean; lastFrame: boolean; images: number; audios: number; total: number }>({
@@ -120,6 +122,12 @@ function selectAsset(group: RefGroup, assetId: string) {
       <router-link :to="uploadPath" class="sm upload-link">{{ t('shot.references.uploadNewAsset') }}</router-link>
       <span v-if="!bindings.length" class="muted">{{ modeHint }}</span>
     </div>
+    <details v-if="videosAvailable" class="note">
+      <summary>从视频拉片添加参考</summary>
+      <div v-for="m in media.filter(m => m.kind === 'video')" :key="m.id">
+        <router-link :to="{ path: `/assets/${m.id}/breakdown`, query: { shotId: String(route.params.id ?? '') } }">{{ m.label || m.id }} → 选择片段</router-link>
+      </div>
+    </details>
 
     <div v-if="suggestFrameMode" class="note">
       {{ t('shot.references.frameModeSuggestionBefore') }} <strong>{{ suggestFrameMode.toUpperCase() }}</strong>{{ t('shot.references.frameModeSuggestionAfter') }}

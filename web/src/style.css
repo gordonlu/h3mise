@@ -3,11 +3,11 @@
    never a filler. Themes: [data-theme="light"] (default) / [data-theme="dark"]. */
 
 :root {
-  --radius: 10px;
+  --radius: 8px;
   --radius-sm: 6px;
   --mono: 'SFMono-Regular', ui-monospace, 'Cascadia Code', Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  --serif: 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  --serif: var(--sans);
 }
 
 /* ------------------------------------------------------------------ light */
@@ -36,7 +36,7 @@
   --accent-disabled: #FFD3C3;
 
   /* Background — white is the body, warm neutral supports it */
-  --bg: #FAFAF9;
+  --bg: #F7F7F6;
   --bg-2: #FFFFFF;
   --bg-3: #FFFFFF;
   --bg-4: #FFFFFF;
@@ -45,8 +45,8 @@
   --inset: #F2F1EF;
 
   /* Border */
-  --line: #ECEAE7;
-  --line-2: #DEDCD8;
+  --line: #E8E6E3;
+  --line-2: #D9D6D2;
   --line-3: #CFCBC6;
 
   /* Text — never pure black */
@@ -68,11 +68,11 @@
   --violet-soft: #F1EEFA;
 
   --focus-ring: 0 0 0 3px rgba(255, 108, 55, 0.18);
-  --shadow-1: 0 1px 2px rgba(31, 29, 27, 0.04), 0 2px 8px rgba(31, 29, 27, 0.05);
-  --shadow-2: 0 8px 24px rgba(31, 29, 27, 0.08);
+  --shadow-1: 0 1px 2px rgba(31, 29, 27, 0.05);
+  --shadow-2: 0 10px 30px rgba(31, 29, 27, 0.10);
   --shadow-modal: 0 16px 48px rgba(31, 29, 27, 0.14);
   --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  --glow: radial-gradient(1100px 480px at 72% -12%, rgba(255, 108, 55, 0.05), transparent 62%);
+  --glow: none;
   --sprocket: rgba(31, 29, 27, 0.10);
   --scrollbar: #D8D4D0;
   --scrollbar-hover: #BDB7B2;
@@ -139,7 +139,7 @@ body {
   font-family: var(--sans);
   background: var(--glow), var(--bg);
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.55;
   transition: background 0.25s, color 0.25s;
 }
@@ -157,7 +157,7 @@ button {
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  padding: 9px 16px;
+  padding: 8px 14px;
   cursor: pointer;
   box-shadow: var(--inset-hi);
   transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s, transform 0.1s;
@@ -195,7 +195,7 @@ input, select, textarea {
   font-family: inherit;
   font-size: 13px;
   color: var(--text);
-  background: var(--bg-4);
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: 8px;
   padding: 9px 12px;
@@ -218,31 +218,21 @@ label.field > *:not(:first-child) { width: 100%; font-weight: 400; }
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-1);
+  box-shadow: none;
 }
 .panel-title {
-  position: relative;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-3);
-  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--text);
+  padding: 11px 14px;
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.panel-title::after {
-  content: '';
-  position: absolute;
-  left: 14px;
-  bottom: -1px;
-  width: 42px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--accent);
-}
-.panel-body { padding: 14px; }
+.panel-title::after { display: none; }
+.panel-body { padding: 16px; }
 
 /* ----------------------------------------------------------------- badges */
 .badge {
@@ -252,7 +242,7 @@ label.field > *:not(:first-child) { width: 100%; font-weight: 400; }
   font-size: 11px;
   font-weight: 500;
   padding: 2px 9px;
-  border-radius: 20px;
+  border-radius: 5px;
   border: 1px solid var(--line-2);
   color: var(--text-2);
   background: var(--bg-subtle);
@@ -269,7 +259,7 @@ label.field > *:not(:first-child) { width: 100%; font-weight: 400; }
 
 /* user-visible shot status (PRD §9): draft neutral / ready info /
    rendering orange / review violet / done green */
-.st { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 2.5px 10px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+.st { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 2.5px 8px; border-radius: 5px; border: 1px solid; white-space: nowrap; }
 .st i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .st-draft { color: var(--text-2); border-color: var(--line-2); background: var(--bg-subtle); }
 .st-ready { color: var(--info); border-color: color-mix(in srgb, var(--info) 42%, transparent); background: var(--info-soft); }

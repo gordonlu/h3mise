@@ -20,3 +20,4 @@ export * from './film-check.js';
 export * from './storyboard.js';
 export * from './story-skeleton.js';
 export * from './director-style.js';
+export * from './breakdown.js';

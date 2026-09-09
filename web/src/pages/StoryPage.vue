@@ -4,11 +4,12 @@ import { get, post, patch, del } from '../api/client';
 import { useToastStore } from '../stores/toast';
 import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
-import type { BeatApplyResult, SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StorySkeleton } from '@h3mise/shared';
+import type { BeatApplyResult, SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StoryEpisodeList, StorySkeleton } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
 
 const toasts = useToastStore();
 const story = ref<{ id: string; title: string; synopsis: string; body: string; plannedDurationSeconds: number } | null>(null);
+const episodeList = ref<StoryEpisodeList | null>(null);
 const beats = ref<StoryBeat[]>([]);
 const shots = ref<Array<{ id: string; title: string; storyBeatId: string | null }>>([]);
 const aiEnabled = ref(false);
@@ -46,12 +47,14 @@ const canAiSplit = computed(() => Boolean(story.value?.body?.trim()) && !aiBusy.
 const uncoveredBeatCount = computed(() => beats.value.filter((beat) => !(beatShots.value.get(beat.id)?.length)).length);
 
 async function load() {
-  const [loadedStory, loadedBeats, loadedShots, aiStatus] = await Promise.all([
+  const [loadedEpisodes, loadedStory, loadedBeats, loadedShots, aiStatus] = await Promise.all([
+    get<StoryEpisodeList>('/api/story/episodes'),
     get<typeof story.value>('/api/story'),
     get<StoryBeat[]>('/api/story/beats'),
     get<typeof shots.value>('/api/shots'),
     get<{ configured: boolean }>('/api/ai/status').catch(() => ({ configured: false })),
   ]);
+  episodeList.value = loadedEpisodes;
   story.value = loadedStory;
   beats.value = loadedBeats;
   shots.value = loadedShots;
@@ -61,10 +64,30 @@ async function load() {
 async function saveStory(patchData: Partial<NonNullable<typeof story.value>>) {
   try {
     story.value = await patch('/api/story', patchData);
+    episodeList.value = await get<StoryEpisodeList>('/api/story/episodes');
     toasts.push({ kind: 'ok', text: '已保存' });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : '保存失败' });
   }
+}
+
+async function switchEpisode(id: string) {
+  if (id === episodeList.value?.activeEpisodeId || aiBusy.value) return;
+  if (storyDirty.value) await saveStoryDraft();
+  episodeList.value = await post<StoryEpisodeList>(`/api/story/episodes/${id}/activate`, {});
+  beatDrafts.value = {};
+  skeletonOpen.value = false;
+  await load();
+}
+
+async function addEpisode() {
+  if (aiBusy.value) return;
+  if (storyDirty.value) await saveStoryDraft();
+  episodeList.value = await post<StoryEpisodeList>('/api/story/episodes', {});
+  beatDrafts.value = {};
+  skeletonOpen.value = false;
+  await load();
+  toasts.push({ kind: 'ok', text: `已建立第 ${episodeList.value?.episodes.length ?? 1} 集；项目素材可直接复用` });
 }
 
 async function addBeat() {
@@ -297,6 +320,23 @@ onMounted(load);
       </div>
     </div>
 
+    <section v-if="episodeList" class="episode-strip" aria-label="剧集">
+      <button
+        v-for="episode in episodeList.episodes"
+        :key="episode.id"
+        class="episode-tab"
+        :class="{ active: episode.id === episodeList.activeEpisodeId }"
+        :disabled="aiBusy"
+        @click="switchEpisode(episode.id)"
+      >
+        <span class="episode-number">EP {{ String(episode.order).padStart(2, '0') }}</span>
+        <strong>{{ episode.title }}</strong>
+        <small>{{ episode.beatCount }} Beats · {{ episode.shotCount }} Shots</small>
+      </button>
+      <button class="episode-add" :disabled="aiBusy" @click="addEpisode">＋ 新建剧集</button>
+      <div class="episode-shared-note">角色、场景和素材在整个系列中共用</div>
+    </section>
+
     <section v-if="skeletonOpen" class="panel skeleton-browser">
       <div class="panel-title spread"><span>{{ t('workflow.story.shortFormStoryStructures') }}</span><span class="muted">{{ t('workflow.story.structuresAreBuiltInAndFreeAI') }}</span></div>
       <div class="panel-body col">
@@ -382,7 +422,7 @@ onMounted(load);
               <div class="row beat-head">
                 <span class="mono muted beat-idx">{{ String(i + 1).padStart(2, '0') }}</span>
                 <input :value="beatValue(b).title" :disabled="aiBusy" class="beat-title" :placeholder="t('workflow.story.beatTitle')" @input="setBeatDraft(b.id, { title: ($event.target as HTMLInputElement).value })" />
-                <input :value="beatValue(b).durationSeconds" :disabled="aiBusy" type="number" min="1" max="60" class="beat-dur" :title="t('workflow.story.beatDurationSeconds')" @input="setBeatDraft(b.id, { durationSeconds: Number(($event.target as HTMLInputElement).value) || 5 })" />
+                <input :value="beatValue(b).durationSeconds" :disabled="aiBusy" type="number" min="1" max="15" class="beat-dur" :title="t('workflow.story.beatDurationSeconds')" @input="setBeatDraft(b.id, { durationSeconds: Math.min(15, Number(($event.target as HTMLInputElement).value) || 12) })" />
                 <button v-if="beatDirty(b.id)" class="sm primary" @click="saveBeatDraft(b.id)">{{ t('common.save') }}</button>
                 <select :value="beatValue(b).category" :disabled="aiBusy" @change="setBeatDraft(b.id, { category: ($event.target as HTMLSelectElement).value as never })">
                   <option v-for="c in CATEGORIES" :key="c" :value="c">{{ categoryLabel(c) }}</option>
@@ -416,6 +456,15 @@ onMounted(load);
 <style scoped>
 .page { padding: 24px 32px; max-width: 1280px; margin: 0 auto; }
 .page-head { margin-bottom: 14px; }
+.episode-strip { display: flex; align-items: stretch; gap: 8px; margin: 0 0 14px; padding: 8px; overflow-x: auto; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-2); }
+.episode-tab,.episode-add { min-width: 154px; padding: 10px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; color: var(--text-2); }
+.episode-tab { display: grid; gap: 3px; }
+.episode-tab:hover,.episode-add:hover { background: var(--bg-3); }
+.episode-tab.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2)); background: color-mix(in srgb, var(--accent) 10%, var(--bg-3)); color: var(--text); }
+.episode-number { color: var(--accent); font: 600 10px/1 var(--mono); letter-spacing: .08em; }
+.episode-tab small { color: var(--muted); }
+.episode-add { display: grid; place-items: center; border-color: var(--line-2); color: var(--text); font-weight: 600; text-align: center; }
+.episode-shared-note { margin-left: auto; align-self: center; padding: 0 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .skeleton-browser { margin-bottom: 14px; }.skeleton-search { display: flex; align-items: end; gap: 10px; }.skeleton-search .grow { flex: 1; }.count-field { width: 100px; }.skeleton-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }.skeleton-card { display: flex; flex-direction: column; gap: 9px; padding: 14px; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-2); }.skeleton-card p { margin: 0; line-height: 1.6; }.match-reason { font-size: 11px; }.skeleton-preview { display: grid; gap: 6px; margin: 0; padding-left: 20px; font-size: 12px; }.skeleton-preview li { padding-left: 3px; }.skeleton-preview strong,.skeleton-preview span { display: block; }.skeleton-preview span { color: var(--muted); line-height: 1.45; }
 h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .story-grid { grid-template-columns: 1fr 1.15fr; align-items: start; }

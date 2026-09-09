@@ -11,7 +11,7 @@
 // References are numbered per media type (<Picture 1>, <Video 1>, <Audio 1>)
 // and their labels stay consistent across sections.
 
-import type { DirectorPlan, H3Mode, ReferenceBinding, Shot } from '@h3mise/shared';
+import type { DirectorPlan, H3Mode, ReferenceBinding, Shot, StoryBeat } from '@h3mise/shared';
 
 export interface CompileContext {
   shot: Shot;
@@ -22,6 +22,11 @@ export interface CompileContext {
   directorStyle?: string;
   /** Deterministic camera-plan summary (motion wording + bounds note). */
   cameraPlan?: string;
+  /** Canonical narrative facts. The StoryBeat defines what happens in this
+   * shot; the episode premise explains why it matters without advancing later
+   * events early. */
+  story?: { title: string; synopsis: string; body?: string };
+  storyBeat?: Pick<StoryBeat, 'title' | 'summary' | 'stateChange'> | null;
 }
 
 interface NumberedRef {
@@ -142,6 +147,7 @@ function integratedMultimodalDescription(ctx: CompileContext, num: ReturnType<ty
   const parts = [
     ...(refLines.length ? ['References:\n' + refLines.join('\n')] : []),
     line('Director style', ctx.directorStyle ?? ''),
+    ...narrativeContextLines(ctx),
     // Shot title/purpose are canonical project facts. Keep them in every base
     // prompt even when a beginner project has not created a DirectorPlan yet.
     // Previously the fallback stored the story beat in visualThesis, but this
@@ -161,19 +167,10 @@ function integratedMultimodalDescription(ctx: CompileContext, num: ReturnType<ty
     line('Movement axis', plan.blocking.movementAxis),
     line('Travel path', plan.blocking.travelPath),
     line('Spatial relationships', plan.blocking.spatialRelationships),
-    line('Shot size', plan.camera.shotSizeStart),
-    line('Shot size at peak', plan.camera.shotSizePeak),
-    line('Shot size at end', plan.camera.shotSizeEnd),
-    line('Camera geometry', plan.camera.geometry),
-    line('Lens intent', plan.camera.lensIntent),
-    line('Camera behavior', plan.camera.dominantBehavior),
-    line('Camera trigger', plan.camera.trigger),
-    line('Speed relation', plan.camera.speedRelation),
-    line('Stop condition', plan.camera.stopCondition),
-    line('Camera planning', ctx.cameraPlan ?? ''),
+    ...cameraDescriptionLines(ctx),
     screenDirectionLine(ctx),
     temporalBeatsLine(ctx),
-    line('Objective', plan.performance.objective),
+    performanceObjectiveLine(ctx),
     line('Obstacle', plan.performance.obstacle),
     line('Tactic', plan.performance.tactic),
     line('Performance turn', plan.performance.performanceTurn),
@@ -222,11 +219,16 @@ function subjectDefinitions(ctx: CompileContext, num: ReturnType<typeof numberRe
   const lines: string[] = [];
   const primary = ctx.plan.subject.primarySubject.trim();
   const identities = num.pictures.filter((p) => p.binding.roles.includes('identity'));
-  const s1: string[] = [];
-  if (primary) s1.push(primary);
-  if (identities.length) s1.push(`其外观以 ${identities.map((i) => i.tag).join('、')} 为准`);
-  if (s1.length) lines.push(`<Subject 1> 是 ${s1.join('，')}。`);
   const { pictureSubject } = ctx.mode === 'ref2va' ? subjectMap(num) : { pictureSubject: new Map<string, number>() };
+  if (identities.length) {
+    for (const { binding, tag } of identities) {
+      const n = pictureSubject.get(tag);
+      if (!n) continue;
+      lines.push(`<Subject ${n}> 是 ${referenceSubjectName(binding, identities.length === 1 ? primary : '')}，其外观以 ${tag} 为准。`);
+    }
+  } else if (primary) {
+    lines.push(`<Subject 1> 是 ${primary}。`);
+  }
   for (const { binding, tag } of num.pictures) {
     if (binding.roles.includes('identity')) continue;
     const n = pictureSubject.get(tag);
@@ -259,8 +261,8 @@ function summaryTaskType(num: ReturnType<typeof numberReferences>): string {
 
 function summary(ctx: CompileContext, num: ReturnType<typeof numberReferences>): string {
   const p = ctx.plan;
-  const parts = [p.intent.visualThesis.trim(), p.intent.dramaticGoal.trim()]
-    .filter(Boolean)
+  const parts = [ctx.storyBeat?.title?.trim(), p.intent.visualThesis.trim(), p.intent.dramaticGoal.trim()]
+    .filter((s): s is string => Boolean(s))
     .map((s) => s.replace(/[。.]+$/, ''));
   if (!parts.length) return '';
   return `summary: ${summaryTaskType(num)} ${parts.join('。')}。`;
@@ -275,7 +277,9 @@ function retentionAnalysis(ctx: CompileContext, num: ReturnType<typeof numberRef
     if (binding.roles.includes('first_frame')) return { mark: 'fully_preserved', why: '视频从该图构图开始，作为字面意义上的首帧' };
     if (binding.roles.includes('last_frame')) return { mark: 'fully_preserved', why: '视频在该图构图上结束，作为字面意义上的尾帧' };
     if (binding.roles.includes('identity')) return { mark: 'fully_preserved', why: '主体身份与外观完全沿用该图' };
+    if (binding.roles.includes('environment')) return { mark: 'fully_preserved', why: '场景空间、结构与主要视觉特征沿用该图' };
     if (binding.ignore.length) return { mark: 'partially_preserved', why: `保留参考但忽略：${binding.ignore.join('、')}` };
+    if (binding.preserve.length) return { mark: 'fully_preserved', why: '明确保留用户指定的参考特征' };
     return { mark: 'weak_reference', why: '仅提供风格、场景或氛围参考' };
   };
   const lines = [...num.pictures, ...num.videos, ...num.audios]
@@ -291,14 +295,16 @@ function retentionAnalysis(ctx: CompileContext, num: ReturnType<typeof numberRef
   return lines.length ? `retention_analysis:\n${lines.join('\n')}` : '';
 }
 
-/** Subject numbering shared by subjectDefinitions and detailedDescription so
- * both sections agree on which <Subject N> maps to what. <Subject 1> is the
- * primary subject; every non-identity picture gets its own subject number. */
+/** Subject numbering shared by subjectDefinitions and detailedDescription.
+ * The first identity picture is Subject 1; every remaining picture gets a
+ * stable distinct subject number in provider input order. */
 function subjectMap(num: ReturnType<typeof numberReferences>): { pictureSubject: Map<string, number>; hasPrimary: boolean } {
   const pictureSubject = new Map<string, number>();
+  const firstIdentity = num.pictures.find((picture) => picture.binding.roles.includes('identity'));
+  if (firstIdentity) pictureSubject.set(firstIdentity.tag, 1);
   let next = 2;
   for (const { binding, tag } of num.pictures) {
-    if (binding.roles.includes('identity')) continue;
+    if (tag === firstIdentity?.tag) continue;
     pictureSubject.set(tag, next);
     next += 1;
   }
@@ -333,12 +339,14 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
   const subjectsLine = subjects
     ? (() => {
         const items: string[] = [];
-        if (plan.subject.primarySubject.trim()) items.push(`<Subject 1>（主体）`);
+        const identities = num.pictures.filter((picture) => picture.binding.roles.includes('identity'));
+        if (!identities.length && plan.subject.primarySubject.trim()) items.push(`<Subject 1>（主体）`);
         for (const { binding, tag } of num.pictures) {
-          if (binding.roles.includes('identity')) continue;
           const n = subjects.pictureSubject.get(tag);
           if (!n) continue;
-          const role = binding.roles.includes('first_frame')
+          const role = binding.roles.includes('identity')
+            ? `身份，来源 ${tag}${binding.label ? ` ${binding.label}` : ''}`
+            : binding.roles.includes('first_frame')
             ? `开场画面，来源 ${tag}`
             : binding.roles.includes('last_frame')
               ? `结尾画面，来源 ${tag}`
@@ -349,16 +357,22 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
       })()
     : '';
   const primaryTag = subjects && plan.subject.primarySubject.trim() ? '<Subject 1>' : '';
-  const subjectValue = plan.subject.primarySubject.trim()
-    ? `${primaryTag} ${plan.subject.primarySubject.trim()}`.trim()
-    : '';
+  const identitySubjects = num.pictures
+    .filter((picture) => picture.binding.roles.includes('identity'))
+    .map(({ binding, tag }) => `<Subject ${subjects?.pictureSubject.get(tag)}> ${referenceSubjectName(binding, '')}`);
+  const subjectValue = identitySubjects.length
+    ? identitySubjects.join('；')
+    : plan.subject.primarySubject.trim() ? `${primaryTag} ${plan.subject.primarySubject.trim()}`.trim() : '';
+  const identityControl = subjects ? identityControlLines(ctx, num, subjects) : [];
   const parts = [
     ...(refs.length ? [`References: ${refs.join(', ')}`] : []),
     ...(subjectsLine ? [subjectsLine] : []),
+    ...identityControl,
     ...(startFrameLine ? [startFrameLine] : []),
     ...(endFrameLine ? [endFrameLine] : []),
     ...(continuityLine ? [continuityLine] : []),
     line('Director style', ctx.directorStyle ?? ''),
+    ...narrativeContextLines(ctx),
     line('Subject', subjectValue),
     line('Action', plan.subject.action),
     line('Start position', plan.blocking.startPosition),
@@ -366,19 +380,10 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
     line('Facing', plan.blocking.facing),
     line('Movement axis', plan.blocking.movementAxis),
     line('Travel path', plan.blocking.travelPath),
-    line('Shot size', plan.camera.shotSizeStart),
-    line('Shot size at peak', plan.camera.shotSizePeak),
-    line('Shot size at end', plan.camera.shotSizeEnd),
-    line('Camera geometry', plan.camera.geometry),
-    line('Lens intent', plan.camera.lensIntent),
-    line('Camera behavior', plan.camera.dominantBehavior),
-    line('Camera trigger', plan.camera.trigger),
-    line('Speed relation', plan.camera.speedRelation),
-    line('Stop condition', plan.camera.stopCondition),
-    line('Camera planning', ctx.cameraPlan ?? ''),
+    ...cameraDescriptionLines(ctx),
     screenDirectionLine(ctx),
     temporalBeatsLine(ctx),
-    line('Objective', plan.performance.objective),
+    performanceObjectiveLine(ctx),
     line('Obstacle', plan.performance.obstacle),
     line('Tactic', plan.performance.tactic),
     line('Performance turn', plan.performance.performanceTurn),
@@ -387,7 +392,7 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
     line('Primary action', plan.performance.primaryAction),
     line('Follow-through', plan.performance.followThrough),
     line('Recovery', plan.performance.recovery),
-    line('Gaze', plan.performance.gaze),
+    gazeDescriptionLine(ctx),
     line('End pose', plan.performance.endPose),
     line('Location', plan.environment.location),
     line('Weather', plan.environment.weather),
@@ -404,9 +409,141 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
   return parts.length ? `detailed_description:\n${parts.join('\n')}` : '';
 }
 
+function narrativeContextLines(ctx: CompileContext): string[] {
+  const story = ctx.story;
+  const beat = ctx.storyBeat;
+  if (!story?.synopsis.trim() && !beat?.summary.trim()) return [];
+  const scriptDialogue = beat ? relevantScriptDialogue(story?.body ?? '', beat.summary) : [];
+  const quotedDialogue = (beat?.summary.match(/“[^”]+”/gu) ?? []).map((text) => text.slice(1, -1));
+  const spokenLines = scriptDialogue.length
+    ? scriptDialogue.map(({ speaker, text }) => `${speaker}：“${text}”`)
+    : quotedDialogue.map((text) => `“${text}”`);
+  return [
+    story?.synopsis.trim() ? line('Episode premise', `${story.title}：${story.synopsis}`) : '',
+    beat?.summary.trim() ? line('Current story beat — authoritative event scope', `${beat.title}：${beat.summary}`) : '',
+    beat?.stateChange?.trim() ? line('Narrative change', beat.stateChange) : '',
+    spokenLines.length ? line('Spoken lines', `按原始正文中的说话人和先后顺序逐字呈现：${spokenLines.join(' → ')}`) : '',
+    line('Storytelling priority', '观众必须能从动作、表演、对白和声音理解当前剧情节拍及其因果；摄影设计只负责清楚呈现该事件，不得用氛围或技术描述取代剧情，也不得提前演出后续节拍'),
+  ].filter((value): value is string => Boolean(value));
+}
+
+function relevantScriptDialogue(body: string, beatSummary: string): Array<{ speaker: string; text: string }> {
+  if (!body.trim() || !beatSummary.trim()) return [];
+  const lines = body.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean);
+  const dialogue: Array<{ speaker: string; text: string }> = [];
+  for (let index = 0; index < lines.length - 1; index++) {
+    const speaker = lines[index]!.match(/^([^：:]{1,24})[：:]$/u)?.[1]?.trim();
+    if (!speaker) continue;
+    const text = lines[index + 1]!;
+    if (!text || /^[^：:]{1,24}[：:]$/u.test(text)) continue;
+    dialogue.push({ speaker, text });
+  }
+  const normalizedSummary = normalizeNarrativeText(beatSummary);
+  return dialogue.filter(({ text }) => {
+    const normalized = normalizeNarrativeText(text);
+    if (!normalized) return false;
+    if (normalizedSummary.includes(normalized)) return true;
+    const grams = bigrams(normalized);
+    if (!grams.size) return normalizedSummary.includes(normalized);
+    const summaryGrams = bigrams(normalizedSummary);
+    let overlap = 0;
+    for (const gram of grams) if (summaryGrams.has(gram)) overlap++;
+    return overlap / grams.size >= 0.5;
+  });
+}
+
+function normalizeNarrativeText(value: string): string {
+  return value.toLocaleLowerCase().replace(/[\s，。！？、；：“”‘’…,.!?;:'"-]/gu, '');
+}
+
+function bigrams(value: string): Set<string> {
+  if (value.length < 2) return new Set(value ? [value] : []);
+  return new Set(Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2)));
+}
+
+function identityControlLines(
+  ctx: CompileContext,
+  num: ReturnType<typeof numberReferences>,
+  subjects: ReturnType<typeof subjectMap>,
+): string[] {
+  const identities = num.pictures.filter((picture) => picture.binding.roles.includes('identity'));
+  if (identities.length < 2) return [];
+
+  const cast = identities.map(({ binding, tag }) => {
+    const subjectTag = `<Subject ${subjects.pictureSubject.get(tag)}>`;
+    return `${subjectTag} ${referenceSubjectName(binding, '')}`;
+  });
+  const lines = [
+    `Cast lock: 画面中的人物集合严格等于以下 ${cast.length} 位：${cast.join('、')}；每位只出现一次，保持各自身份，不合并、不复制、不生成替身或相似人物。`,
+  ];
+
+  const environmentRefs = num.pictures.filter((picture) => picture.binding.roles.includes('environment'));
+  if (environmentRefs.length) {
+    lines.push(`Environment plate: ${environmentRefs.map(({ tag }) => tag).join('、')} 只定义建筑、家具、灯光与空间关系；画面人物完全由上述 Cast lock 唯一决定。`);
+  }
+
+  const aspectRatio = ctx.plan.generation.aspectRatio || ctx.shot.aspectRatio;
+  const distantWide = /wide|全景|远景/i.test(ctx.plan.camera.shotSizeStart);
+  if (aspectRatio === '9:16' && identities.length >= 3 && distantWide) {
+    const owner = ctx.plan.subject.primaryMotionOwner.trim();
+    const ownerEntry = identities.find(({ binding }) => referenceSubjectName(binding, '').toLocaleLowerCase() === owner.toLocaleLowerCase());
+    const ownerTag = ownerEntry ? `<Subject ${subjects.pictureSubject.get(ownerEntry.tag)}> ${owner}` : owner;
+    lines.push(`Composition priority: 9:16 竖幅多人构图优先保证${ownerTag ? `主要动作人物 ${ownerTag}` : '主要动作人物'}的上半身、双手与表情清晰可辨，其余人物也须能辨认身份；允许裁掉非关键房间边缘，不使用让三人都显得遥远的极远全景。`);
+  }
+  return lines;
+}
+
+function gazeDescriptionLine(ctx: CompileContext): string {
+  const gaze = ctx.plan.performance.gaze.trim();
+  if (!gaze) return '';
+  if (/看向镜头|直视镜头|look(?:s|ing)? (?:at|into) (?:the )?(?:camera|lens)/i.test(gaze)) return line('Gaze', gaze);
+  return line('Gaze lock', `${gaze}；以上目标是各角色唯一视线目标，视线不转向摄影机或观众`);
+}
+
 function line(section: string, value: string | null | undefined): string {
   const v = value?.trim() ?? '';
   return v ? `${section}: ${v}` : '';
+}
+
+function referenceSubjectName(binding: ReferenceBinding, fallback: string): string {
+  const fromLabel = binding.label
+    .replace(/\s*[·•｜|]\s*(主图|身份图|参考图).*$/u, '')
+    .trim();
+  return fromLabel || fallback || '参考主体';
+}
+
+function cameraDescriptionLines(ctx: CompileContext): string[] {
+  const { camera } = ctx.plan;
+  const combined = [camera.geometry, camera.dominantBehavior, ctx.cameraPlan].filter(Boolean).join(' ');
+  const fixed = /固定|锁定|静止|fixed|locked|static/i.test(combined);
+  return [
+    line('Shot size', camera.shotSizeStart),
+    fixed ? line('Framing lock', `${camera.shotSizeStart || '当前景别'}保持不变；全程禁止推拉、变焦、重新取景或景别变化`) : line('Shot size at peak', camera.shotSizePeak),
+    fixed ? '' : line('Shot size at end', camera.shotSizeEnd),
+    line('Camera geometry', camera.geometry),
+    line('Lens intent', camera.lensIntent),
+    line('Camera behavior', camera.dominantBehavior),
+    fixed ? '' : line('Camera trigger', camera.trigger),
+    fixed ? '' : line('Speed relation', camera.speedRelation),
+    line('Stop condition', camera.stopCondition),
+    line('Camera planning', ctx.cameraPlan ?? ''),
+  ].filter((value): value is string => Boolean(value));
+}
+
+function performanceObjectiveLine(ctx: CompileContext): string {
+  const { plan } = ctx;
+  const objective = plan.performance.objective.trim();
+  const endState = `${plan.intent.endState} ${plan.continuity.plannedEndState}`;
+  const incompleteEnding = /到一半|未完成|尚未完成|仍在|继续|进行中|未结束/u.test(endState);
+  const completionObjective = /完成|结束|做完/u.test(objective);
+  if (objective && completionObjective && incompleteEnding) {
+    const observableGoal = plan.performance.performanceTurn.trim()
+      || plan.subject.action.trim()
+      || plan.performance.primaryAction.trim()
+      || plan.intent.dramaticGoal.trim();
+    return line('Objective', observableGoal || objective.replace(/完成|结束|做完/gu, '推进'));
+  }
+  return line('Objective', objective);
 }
 
 /** Deterministic screen-direction constraint (skipped for neutral). */

@@ -95,3 +95,17 @@ export interface StoryDoc {
   createdAt: string;
   updatedAt: string;
 }
+
+/** One project may be a reusable series workspace containing many episodes.
+ * Assets and entities stay project-wide; narrative and production rows are
+ * scoped to the active episode. */
+export interface StoryEpisode extends StoryDoc {
+  order: number;
+  beatCount: number;
+  shotCount: number;
+}
+
+export interface StoryEpisodeList {
+  activeEpisodeId: string;
+  episodes: StoryEpisode[];
+}

@@ -711,7 +711,7 @@ function localizeRequirement(value: string): string {
         <button v-if="renderReadiness?.canResolveFrame && !renderReadiness.ready" class="sm" @click="resolveRenderDependency">{{ tr('shot.bindPreviousLastFrame') }}</button>
         <label class="ctl">
           <span class="ctl-label">{{ tr('shot.duration') }}</span>
-          <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" :title="tr('shot.durationTitle')" placeholder="5" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 5 })" />
+          <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" :title="tr('shot.durationTitle')" placeholder="12" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 12 })" />
         </label>
         <label v-if="activeProvider?.id === 'runninghub'" class="ctl">
           <span class="ctl-label">{{ tr('shot.outputPixels') }}</span>

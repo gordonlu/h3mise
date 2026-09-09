@@ -231,7 +231,7 @@ export async function importBible(store: ProjectStore, ffmpeg: Ffmpeg, raw: unkn
       if (/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(aspectRatio)) p.config.default_aspect_ratio = aspectRatio;
       else warnings.push(`visualDirection.aspectRatio 无效（${aspectRatio}），已保留默认值`);
     }
-    if (Number.isFinite(durationRaw) && durationRaw >= 1 && durationRaw <= 60) p.config.default_duration_seconds = Math.round(durationRaw);
+    if (Number.isFinite(durationRaw) && durationRaw >= 1 && durationRaw <= 15) p.config.default_duration_seconds = Math.round(durationRaw);
     else if (visual?.defaultDurationSeconds !== undefined) warnings.push('visualDirection.defaultDurationSeconds 必须在 1–60 秒之间，已保留默认值');
 
     // 3) Entities (characters/scenes/props…) + optional worldview locations.

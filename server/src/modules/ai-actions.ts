@@ -56,10 +56,19 @@ const DIRECTOR_SYSTEM_PROMPT = `你是 H3Mise 内置电影导演助手，负责�
 5. 信息不足时采用保守方案或留空，不使用空泛形容词，不解释创作过程。
 6. 动作描述必须确定性完整：身体部位、方向、先后顺序、空间参照缺一不可。把“打开车门并上车”这类压缩动作展开为无歧义的连续动作链（如：走到驾驶座一侧→左手拉开左侧车门→先迈右腿入座→收左腿→左手关门），杜绝左右侧、主体归属、顺序的一切误判。
 7. 只有在请求确实附带且你能读取参考图时，才能从图中提取左右位置、前中后景、人物朝向和物体关系；看不到图像时必须沿用已有文字，缺失则留空，严禁猜测。
+8. StoryBeat 是当前镜头“发生什么”的权威来源。先识别这一节拍的起因、动作/对白推进、反应、转折和结束状态，再设计摄影与表演；不得只复述人物站位和环境。整集梗概只用于理解本镜头为何重要，不能把后续节拍提前演完。
+9. StoryBeat 中引号内的台词及说话顺序属于故事事实，必须进入 performance.primaryAction 或 generation.audioIntent，并保留语义、说话人和喜剧/戏剧停顿。镜头设计不得用概述替代关键对白。
 
 输出要求：只返回符合 DirectorPlan schema 的完整 JSON 对象，不要 Markdown、代码围栏或额外说明。所有字段内容一律使用中文（仅保留必要的英文技术标识如枚举值），简洁、具体、可拍摄。`;
 
 type BeatsResult = Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
+
+const STORY_TO_BEATS_SYSTEM_PROMPT = `你把故事拆成 StoryBeats。每个 beat 会直接生成一个 Shot 和一个对应 Take，因此必须遵守单条视频的时长限制。每个 beat：title、category（setup|inciting_incident|rising_action|climax|falling_action|resolution|transition|other）、summary、location、timeOfDay、weather、characters（实体名）、stateChange、durationSeconds（硬性范围 1-15 秒，绝不能超过 15 秒）。所有 beat 的 durationSeconds 之和尽量等于计划总时长。
+
+时长分配必须从动作分析倒推：把每个 beat 的动作拆成子步骤（如“走近→接触→拾起→抱起→转身”），按真实物理节奏给每一步留秒数（行走约每米1秒、拾取约1.5-2秒、转身约1秒），加总后向上取整。常规 Take 优先安排为 12-15 秒，让动作、停顿和转场衔接有完整余量；只有单一反应、插入镜头或明确的短转场才可低于 12 秒。若动作链在 15 秒内装不下，必须拆成多个 beat，绝不压缩动作或输出超过 15 秒。一个 beat 容纳“一个完整动作+其直接反应”。每段原始对白必须完整归入某一个 beat，summary 中保留说话人、原句和先后顺序，不得改写、概述或遗漏包袱。title、summary 等文字字段一律用中文。
+
+FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element: "title" (string), "summary" (string). Optional: category, location, timeOfDay, weather, characters, stateChange, durationSeconds. No prose. No markdown. No code fences. No tables. Begin with '[' and end with ']'. Example:
+[{"title":"节拍标题","summary":"一句话概括","category":"setup","location":"","timeOfDay":"","weather":"","characters":[],"stateChange":"","durationSeconds":12}]`;
 
 const MAX_VISION_IMAGES = 9;
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -248,7 +257,7 @@ function beatDurationOf(x: Record<string, unknown>): number {
   if (typeof x.duration === 'number' && x.duration >= 1 && x.duration <= 60) return x.duration;
   const ranged = parseRangeSeconds(typeof x.duration === 'string' ? x.duration : x.time);
   if (ranged) return ranged;
-  return 5;
+  return 12;
 }
 
 /** Lightweight time-of-day / weather inference from beat text. */
@@ -389,6 +398,10 @@ Ref2VA 专项规则：
 6. 环境连续性（帧桥接必写）：若参考图是上一镜头的结尾画面，必须明确锁定机位与方位——具体写出画面中各元素在哪一侧（如“长桌从左向右延伸、胶片在画面右侧”），并声明“禁止镜像、禁止换侧”；只说“与 <Picture n> 一致”不够，要把方位细节描述出来。
 7. 帧模式（I2VA/L2VA/FL2VA）首帧/尾帧内容锚定：请求附带且你确实能读取帧图时，先描述图内可见的主体、构图、场景层次（前景/中景/背景）与关键物体，再展开动作；主体外观、服装、颜色、关键物体与空间关系全程与帧图保持一致。若没有收到或无法读取图片，只保留当前提示词已有事实，严禁新增左右方位或空间关系。
 8. 动作因果与对象被动性：明确谁是运动的发出者。涉及主体作用于物体的动作（拿取/推动/碰撞）时：(a) 把主体的运动过程按时间段写满整个时长（如“视频前两秒 <Subject 1> 迈步靠近；随后双手接触并拾起”），不给模型留空白时间片；(b) 被动物体用【正向描述】锁定——“<Subject n> 是桌面上的静物，保持位置不变”，禁止用否定句（“不会滑动不滚动”——否定句遵循度低）；(c) 写明“画面中唯一的位移来自 <Subject 1> 的身体”。
+9. 多人物身份唯一性：当存在两个或以上 identity 主体时，必须写一行 Cast lock，明确画面人物总数、逐一列出 <Subject n> 与姓名，并规定每位只出现一次、身份互不合并、无复制或替身。环境参考只负责建筑、家具、灯光和空间关系，不能额外决定人物。不得把场景参考误写为字面首帧；只有 first_frame 角色的图片可以使用“视频从该图构图开始”。
+10. 视线锁定：当方案已经指定角色注视电视、物体或另一角色时，必须把目标写成全程唯一视线目标，并明确不转向摄影机或观众；若方案明确要求直视镜头，则保留该意图。
+11. 竖幅多人可读性：9:16 画面同时容纳三个或以上 identity 主体时，主要动作人物的上半身、双手动作与表情必须清晰可辨，其余主体至少能辨认身份。若“完整房间全景”会使所有人物过远，裁掉非关键房间边缘，优先人物与动作可读性；不得擅自增加镜头运动或事件。
+12. 剧情信息不可删减：若当前提示词含 Episode premise、Current story beat、Narrative change、Spoken lines 或 Storytelling priority，必须完整保留并放在 detailed_description 前部。Current story beat 是本镜头事件边界；不得把它压缩成单纯的场景、姿势或摄影描述。
 动作确定性规则：每个动作必须写全“身体部位＋方向＋先后顺序＋空间参照”，把压缩动作展开为不可歧义的连续动作链。例如不写“打开车门并上车”，而写“他走到驾驶座一侧，左手拉开左侧车门，先迈右腿坐进座位，收左腿后用左手关上车门”。杜绝左右侧、主体归属、动作顺序的一切误判空间。
 其他：只优化清晰度与紧凑度，保留全部事实、参考标签和镜头意图，不增加事件。正文保持中文（<Subject n>/<Picture n> 等标签和任务类型前缀等结构性标记除外）。只输出提示词正文，不要解释。
 
@@ -466,19 +479,13 @@ Empty output shape: ${JSON.stringify(empty)}`),
     case 'story_to_beats': {
       const story = storyMod.getStory(ctx);
       const existingBeats = storyMod.listBeats(ctx);
-      const firstSystem = `你把故事拆成 StoryBeats。每个 beat：title、category（setup|inciting_incident|rising_action|climax|falling_action|resolution|transition|other）、summary、location、timeOfDay、weather、characters（实体名）、stateChange、durationSeconds（1-15）。所有 beat 的 durationSeconds 之和尽量等于计划总时长。
-
-时长分配必须从动作分析倒推：把每个 beat 的动作拆成子步骤（如“走近→接触→拾起→抱起→转身”），按真实物理节奏给每一步留秒数（行走约每米1秒、拾取约1.5-2秒、转身约1秒），加总后向上取整作为该 beat 的 durationSeconds。优先落在 8-12 秒（理想 10 秒左右）：5 秒以下的 beat 会过碎、剪辑困难；15 秒成本高。若动作链在 15 秒内装不下，必须把该 beat 拆成多个 beat，绝不压缩动作。一个 beat 容纳“一个完整动作+其直接反应”。title、summary 等文字字段一律用中文。
-
-FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element: "title" (string), "summary" (string). Optional: category, location, timeOfDay, weather, characters, stateChange, durationSeconds. No prose. No markdown. No code fences. No tables. Begin with '[' and end with ']'. Example:
-[{"title":"节拍标题","summary":"一句话概括","category":"setup","location":"","timeOfDay":"","weather":"","characters":[],"stateChange":"","durationSeconds":5}]`;
       const userMsg = `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\nCurrent StoryBeats (refine this structure when present; do not append a second copy):\n${JSON.stringify(existingBeats)}\n\n${styleContext}`;
 
       let raw: unknown;
       for (let attempt = 0; attempt < 2; attempt++) {
         const system = attempt === 0
-          ? firstSystem
-          : `${firstSystem}\n\n上一轮你返回的不是 StoryBeat JSON 数组：${JSON.stringify(raw).slice(0, 800)}\n现在请严格按 FORMAT 重新输出：每个元素必须是对象，且 title 和 summary 必须是字符串。只输出 JSON 数组。`;
+          ? STORY_TO_BEATS_SYSTEM_PROMPT
+          : `${STORY_TO_BEATS_SYSTEM_PROMPT}\n\n上一轮你返回的不是 StoryBeat JSON 数组：${JSON.stringify(raw).slice(0, 800)}\n现在请严格按 FORMAT 重新输出：每个元素必须是对象，且 title 和 summary 必须是字符串。只输出 JSON 数组。`;
         raw = await ai.model.structured<unknown>({
           system,
           messages: [{ role: 'user', content: userMsg }],
@@ -501,7 +508,7 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
     case 'beats_to_shots': {
       const beats = body.beats as Array<{ title?: string; summary?: string; id?: string }> | undefined;
       const items = await ai.model.structured<Array<{ title: string; purpose: string; shotFunction: string; durationSeconds: number; h3Mode: string }>>({
-        system: `你把 StoryBeats 转成 H3 镜头序列。默认一个镜头=一个连续事件。每个镜头：title、purpose（中文）、shotFunction（establishing|wide|medium|closeup|insert|reaction|action|transition|montage|pov|aerial|dialogue|other）、durationSeconds（1-15，以 beat 的 durationSeconds 为基准）、h3Mode（t2va|i2va|fl2va|l2va|ref2va）。title 和 purpose 一律用中文。只返回 JSON 数组。\n\n${styleContext}`,
+        system: `你把 StoryBeats 转成 H3 镜头序列。默认一个镜头=一个连续事件。每个镜头：title、purpose（中文）、shotFunction（establishing|wide|medium|closeup|insert|reaction|action|transition|montage|pov|aerial|dialogue|other）、durationSeconds（硬性 1-15 秒，常规 Take 优先 12-15 秒，以 beat 的 durationSeconds 为基准）、h3Mode（t2va|i2va|fl2va|l2va|ref2va）。超过 15 秒的动作必须拆镜。title 和 purpose 一律用中文。只返回 JSON 数组。\n\n${styleContext}`,
         messages: [{ role: 'user', content: `Beats:\n${JSON.stringify(beats ?? [])}\n\nConvert each beat into one shot.` }],
         temperature: 0.4,
       });
@@ -512,7 +519,7 @@ FORMAT (STRICT): Reply with ONLY a JSON array. REQUIRED fields on every element:
       const story = storyMod.getStory(ctx);
       const existingBeats = storyMod.listBeats(ctx);
       const beats = normalizeBeats(await ai.model.structured<unknown>({
-        system: `You break a story into StoryBeats (see story_to_beats rules). Return ONLY a JSON array.\n\n${styleContext}`,
+        system: `${STORY_TO_BEATS_SYSTEM_PROMPT}\n\n${styleContext}`,
         messages: [{ role: 'user', content: `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\nCurrent StoryBeats (refine these; do not append duplicates):\n${JSON.stringify(existingBeats)}` }],
         temperature: 0.5,
       }));

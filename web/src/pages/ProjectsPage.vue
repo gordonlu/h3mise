@@ -12,13 +12,13 @@ const router = useRouter();
 const toasts = useToastStore();
 const creating = ref(false);
 const installingDemo = ref('');
-const form = ref({ title: '', format: 'single_shot', defaultAspectRatio: '16:9', defaultDurationSeconds: 5 });
+const form = ref({ title: '', format: 'single_shot', defaultAspectRatio: '16:9', defaultDurationSeconds: 12 });
 const error = ref('');
 
 const FORMATS = [
   { value: 'single_shot', label: 'Single Shot', desc: () => t('workflow.projects.aSingleShotProjectWithoutAStory') },
   { value: 'sequence', label: 'Short Sequence', desc: () => t('workflow.projects.aShortSequenceWithMultipleShots') },
-  { value: 'story', label: 'Story / Episode', desc: () => t('workflow.projects.aCompleteStoryOrEpisode') },
+  { value: 'story', label: 'Series / Episodes', desc: () => t('workflow.projects.aCompleteStoryOrEpisode') },
 ];
 
 const DEMOS = [
@@ -132,7 +132,7 @@ onMounted(() => project.refreshProjects());
             </label>
             <label class="field grow">
               {{ t('workflow.projects.defaultShotDurationS') }}
-              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" :title="t('workflow.projects.defaultDurationForEachNewShotIncluding')" placeholder="5" />
+              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" :title="t('workflow.projects.defaultDurationForEachNewShotIncluding')" placeholder="12" />
             </label>
           </div>
           <p v-if="error" class="badge bad">{{ error }}</p>

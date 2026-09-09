@@ -145,7 +145,7 @@ test('deduplicates scenes across entities and worldview locations and validates 
   assert.equal(listEntities(ctx).filter((entity) => entity.kind === 'scene' && entity.name === '同一场景').length, 1);
   assert.equal(result.stats.entities, 1);
   assert.equal(ctx.config.default_aspect_ratio, '16:9');
-  assert.equal(ctx.config.default_duration_seconds, 5);
+  assert.equal(ctx.config.default_duration_seconds, 12);
   assert.ok(result.warnings.some((warning) => warning.includes('重复')));
   assert.ok(result.warnings.some((warning) => warning.includes('aspectRatio')));
   assert.ok(result.warnings.some((warning) => warning.includes('1–60')));

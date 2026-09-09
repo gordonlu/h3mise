@@ -170,7 +170,7 @@ export class ProjectStore {
       visual_style: input.visualStyle ?? '',
       default_provider: 'runninghub',
       default_video_model: 'minimax_h3',
-      default_duration_seconds: input.defaultDurationSeconds ?? 5,
+      default_duration_seconds: input.defaultDurationSeconds ?? 12,
     };
     const meta: ProjectMeta = {
       id,
@@ -367,7 +367,7 @@ const DEFAULT_CONFIG: ProjectConfig = {
   visual_style: '',
   default_provider: 'runninghub',
   default_video_model: 'minimax_h3',
-  default_duration_seconds: 5,
+  default_duration_seconds: 12,
 };
 
 export async function openRegistry(config: { home: string }): Promise<{ registry: Db; store: ProjectStore }> {

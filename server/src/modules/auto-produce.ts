@@ -70,7 +70,7 @@ function storySegments(body: string, desired?: number): string[] {
 }
 
 function beatDuration(text: string, index: number, planned: number, count: number): number {
-  const base = planned > 0 ? planned / count : 5;
+  const base = planned > 0 ? planned / count : 12;
   // Persist a small deterministic variation instead of assigning every beat
   // the same duration. Bounds match the story timing contract.
   const rhythm = [0, 1, -1, 2, -0.5][index % 5]!;

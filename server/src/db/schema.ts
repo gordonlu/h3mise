@@ -500,6 +500,56 @@ CREATE INDEX idx_prompt_source_take ON prompt_versions(source_take_id);
   },
 ];
 
+PROJECT_MIGRATIONS.push({
+  version: 19,
+  name: 'reference-breakdown',
+  sql: `CREATE TABLE IF NOT EXISTS reference_breakdowns (
+    asset_id TEXT PRIMARY KEY REFERENCES media_assets(id) ON DELETE CASCADE,
+    document_json TEXT NOT NULL,
+    analysis_json TEXT
+  );`,
+  apply(db) {
+    // Local builds briefly used migration 18 for reference-breakdown before
+    // upstream assigned 18 to Take review lineage. Such projects already
+    // report schema_version=18 but are missing the upstream columns. Repair
+    // them while applying 19; fresh databases simply skip these additions.
+    const columns = (table: string) => new Set(db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((column) => column.name));
+    const takeColumns = columns('takes');
+    if (!takeColumns.has('review_json')) db.exec("ALTER TABLE takes ADD COLUMN review_json TEXT NOT NULL DEFAULT '{}'");
+
+    const promptColumns = columns('prompt_versions');
+    if (!promptColumns.has('source_take_id')) db.exec('ALTER TABLE prompt_versions ADD COLUMN source_take_id TEXT REFERENCES takes(id) ON DELETE SET NULL');
+    if (!promptColumns.has('revision_reason')) db.exec("ALTER TABLE prompt_versions ADD COLUMN revision_reason TEXT NOT NULL DEFAULT ''");
+    if (!promptColumns.has('preserved_aspects_json')) db.exec("ALTER TABLE prompt_versions ADD COLUMN preserved_aspects_json TEXT NOT NULL DEFAULT '[]'");
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prompt_source_take ON prompt_versions(source_take_id)');
+  },
+});
+
+PROJECT_MIGRATIONS.push({
+  version: 20,
+  name: 'multi-episode-stories',
+  sql: `
+-- A story-format project is a series workspace. Existing project assets and
+-- entities remain shared; story production rows belong to one episode.
+ALTER TABLE story ADD COLUMN ord INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE sequences ADD COLUMN story_id TEXT REFERENCES story(id) ON DELETE CASCADE;
+ALTER TABLE story_beats ADD COLUMN story_id TEXT REFERENCES story(id) ON DELETE CASCADE;
+ALTER TABLE shots ADD COLUMN story_id TEXT REFERENCES story(id) ON DELETE CASCADE;
+ALTER TABLE storyboards ADD COLUMN story_id TEXT REFERENCES story(id) ON DELETE CASCADE;
+
+UPDATE sequences SET story_id = (SELECT id FROM story ORDER BY ord, created_at LIMIT 1) WHERE story_id IS NULL;
+UPDATE story_beats SET story_id = (SELECT id FROM story ORDER BY ord, created_at LIMIT 1) WHERE story_id IS NULL;
+UPDATE shots SET story_id = (SELECT id FROM story ORDER BY ord, created_at LIMIT 1) WHERE story_id IS NULL;
+UPDATE storyboards SET story_id = (SELECT id FROM story ORDER BY ord, created_at LIMIT 1) WHERE story_id IS NULL;
+
+CREATE INDEX idx_story_ord ON story(ord);
+CREATE INDEX idx_sequences_story ON sequences(story_id, ord);
+CREATE INDEX idx_story_beats_story ON story_beats(story_id, ord);
+CREATE INDEX idx_shots_story ON shots(story_id, ord);
+CREATE INDEX idx_storyboards_story ON storyboards(story_id, created_at);
+`,
+});
+
 export const REGISTRY_MIGRATIONS: Migration[] = [
   {
     version: 1,

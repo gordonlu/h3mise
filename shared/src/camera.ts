@@ -251,7 +251,14 @@ export function describeCameraPlan(plan: CameraMotionPlan, durationSeconds?: num
   const dur = durationSeconds ?? plan.durationSeconds;
   const fmt = (f: number) => (f * dur).toFixed(1);
   if (plan.frameMode && plan.endFraming && JSON.stringify(plan.startFraming) !== JSON.stringify(plan.endFraming)) {
-    return `Framing interpolation from ${(plan.startFraming.w).toFixed(2)} view to ${plan.endFraming.w.toFixed(2)} view over ${fmt(1)}s`;
+    const a = plan.startFraming;
+    const b = plan.endFraming;
+    const dx = b.x + b.w / 2 - a.x - a.w / 2;
+    const dy = b.y + b.h / 2 - a.y - a.h / 2;
+    const changes = [b.w < a.w - .001 ? 'Tighten framing' : b.w > a.w + .001 ? 'Widen framing' : '',
+      Math.abs(dx) > .001 ? `Shift framing ${dx > 0 ? 'right' : 'left'}` : '',
+      Math.abs(dy) > .001 ? `Shift framing ${dy > 0 ? 'down' : 'up'}` : ''].filter(Boolean);
+    return `${changes.join(', ')} over ${fmt(1)}s, smooth transition; 2D framing guide, not a 3D camera trajectory`;
   }
   if (!plan.steps.length) return 'Static camera';
   return plan.steps

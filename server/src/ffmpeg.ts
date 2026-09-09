@@ -6,6 +6,7 @@ import { access, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface FfprobeInfo {
+  fps?: number | null;
   durationSeconds: number | null;
   width: number | null;
   height: number | null;
@@ -129,6 +130,7 @@ export class Ffmpeg {
       format?: { duration?: string; format_name?: string };
       streams?: Array<{
         codec_type?: string;
+        avg_frame_rate?: string;
         width?: number;
         height?: number;
         duration?: string;
@@ -136,7 +138,10 @@ export class Ffmpeg {
     };
     const video = json.streams?.find((s) => s.codec_type === 'video');
     const audio = json.streams?.find((s) => s.codec_type === 'audio');
+    const [numerator, denominator] = (video?.avg_frame_rate ?? '').split('/').map(Number);
+    const fps = denominator ? (numerator ?? 0) / denominator : 0;
     return {
+      fps: Number.isFinite(fps) && fps > 0 ? fps : null,
       durationSeconds: json.format?.duration ? Number(json.format.duration) : video?.duration ? Number(video.duration) : null,
       width: video?.width ?? null,
       height: video?.height ?? null,

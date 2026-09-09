@@ -9,6 +9,8 @@ import { ProjectStore } from '../src/project-store.js';
 import { Db } from '../src/db/sqlite.js';
 import { REGISTRY_MIGRATIONS } from '../src/db/schema.js';
 import { migrate } from '../src/db/migrate.js';
+import { activateEpisode, createBeat, createEpisode, listBeats, listEpisodes } from '../src/modules/story.js';
+import { createShot, listShots } from '../src/modules/shots.js';
 
 const live: Array<{ root: string; registry: Db }> = [];
 after(() => {
@@ -39,7 +41,7 @@ test('a partial project.json keeps its good fields and defaults the rest', async
   assert.equal(cfg.title, '我的项目');
   assert.equal(cfg.visual_style, '胶片感');
   assert.equal(cfg.default_aspect_ratio, '16:9');
-  assert.equal(cfg.default_duration_seconds, 5);
+  assert.equal(cfg.default_duration_seconds, 12);
 });
 
 test('missing default_duration_seconds no longer discards the whole file', async () => {
@@ -47,14 +49,14 @@ test('missing default_duration_seconds no longer discards the whole file', async
   const cfg = await store.readConfig(root);
   assert.equal(cfg.title, 'Kept');
   assert.equal(cfg.default_aspect_ratio, '9:16');
-  assert.equal(cfg.default_duration_seconds, 5);
+  assert.equal(cfg.default_duration_seconds, 12);
 });
 
 test('invalid duration falls back per-field; garbage file yields pure defaults', async () => {
   const bad = storeWithConfig(JSON.stringify({ title: 'X', default_duration_seconds: 0 }));
   const cfgBad = await bad.store.readConfig(bad.root);
   assert.equal(cfgBad.title, 'X');
-  assert.equal(cfgBad.default_duration_seconds, 5);
+  assert.equal(cfgBad.default_duration_seconds, 12);
 
   const none = storeWithConfig(null);
   const cfgNone = await none.store.readConfig(none.root);
@@ -68,4 +70,29 @@ test('deleting a project removes its directory before unregistering it', async (
   await store.delete(meta.id);
   assert.equal(existsSync(meta.dirPath), false);
   assert.equal(await store.get(meta.id), undefined);
+});
+
+test('story projects isolate production by episode while keeping one project workspace', async () => {
+  const { store } = storeWithConfig(null);
+  const meta = await store.create({ title: 'Series', format: 'story' });
+  const ctx = await store.openDetached(meta.id);
+  try {
+    const first = listEpisodes(ctx);
+    assert.equal(first.episodes.length, 1);
+    const beat1 = createBeat(ctx, { title: '第一集开场' });
+    createShot(ctx, { title: '第一集镜头', storyBeatId: beat1.id });
+    assert.equal(listShots(ctx).length, 1);
+
+    const second = createEpisode(ctx);
+    assert.equal(second.episodes.length, 2);
+    assert.equal(listBeats(ctx).length, 0);
+    assert.equal(listShots(ctx).length, 0);
+    createBeat(ctx, { title: '第二集开场' });
+
+    activateEpisode(ctx, first.activeEpisodeId);
+    assert.deepEqual(listBeats(ctx).map((beat) => beat.title), ['第一集开场']);
+    assert.deepEqual(listShots(ctx).map((shot) => shot.title), ['第一集镜头']);
+  } finally {
+    ctx.close();
+  }
 });

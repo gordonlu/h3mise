@@ -7,12 +7,12 @@ import { createPlanVersion } from './director.js';
 import { listEntities } from './assets.js';
 
 function normalizedDraft(input: StoryBeatDraft, index: number): StoryBeatDraft {
-  const duration = Number(input.durationSeconds ?? 5);
+  const duration = Number(input.durationSeconds ?? 12);
   return {
     ...input,
     title: String(input.title ?? '').trim() || `Beat ${index + 1}`,
     summary: String(input.summary ?? '').trim(),
-    durationSeconds: Math.min(15, Math.max(2, Number.isFinite(duration) ? duration : 5)),
+    durationSeconds: Math.min(15, Math.max(2, Number.isFinite(duration) ? duration : 12)),
     characters: Array.isArray(input.characters) ? input.characters.filter((item): item is string => typeof item === 'string') : [],
   };
 }
@@ -96,6 +96,31 @@ function shotFunctionForBeat(beat: StoryBeat) {
   return 'other' as const;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function narrativeCharacters(beat: StoryBeat, entities: ReturnType<typeof listEntities>): string[] {
+  const byId = new Map(entities.map((entity) => [entity.id, entity.name]));
+  const names = new Set(beat.characters.map((item) => byId.get(item) ?? item).filter(Boolean));
+  for (const entity of entities) {
+    if ((entity.kind === 'character' || entity.kind === 'creature') && beat.summary.includes(entity.name)) names.add(entity.name);
+  }
+  return [...names];
+}
+
+function motionOwnerForBeat(beat: StoryBeat, characters: string[]): string {
+  const actionWords = '起身|走|跑|转身|回头|抬头|低头|拿|放|推|拉|打开|关掉|关闭|看|注视|说|问|回答|吐槽|点头|洗|停下';
+  let winner = characters[0] ?? '';
+  let best = -1;
+  for (const name of characters) {
+    const matches = beat.summary.match(new RegExp(`${escapeRegExp(name)}[^。！？]{0,18}(?:${actionWords})`, 'gu'))?.length ?? 0;
+    const score = matches * 2 + (beat.summary.trim().startsWith(name) ? 1 : 0);
+    if (score > best) { best = score; winner = name; }
+  }
+  return winner;
+}
+
 export function createShotForBeat(
   p: ProjectContext,
   beat: StoryBeat,
@@ -113,21 +138,28 @@ export function createShotForBeat(
     renderDependencyMode: input.renderDependencyMode ?? 'independent',
   });
   const entities = listEntities(p);
-  const entityNames = new Map(entities.flatMap((entity) => [[entity.id, entity.name], [entity.name, entity.name]]));
-  const characters = beat.characters.map((item) => entityNames.get(item) ?? item).filter(Boolean);
+  const characters = narrativeCharacters(beat, entities);
+  const quotes = beat.summary.match(/“[^”]+”/gu) ?? [];
   const plan = emptyDirectorPlan();
   plan.intent.shotFunction = shot.shotFunction;
   plan.intent.visualThesis = purpose;
   plan.intent.dramaticGoal = beat.stateChange || purpose;
   plan.intent.endState = beat.stateChange || `完成「${beat.title}」的可见动作结果`;
   plan.subject.primarySubject = characters.join('、');
-  plan.subject.primaryMotionOwner = characters[0] ?? '';
+  plan.subject.primaryMotionOwner = motionOwnerForBeat(beat, characters);
   plan.subject.action = purpose;
   plan.camera.dominantBehavior = '稳定机位，完整呈现主体动作和直接反应';
   plan.camera.stopCondition = plan.intent.endState;
+  plan.performance.objective = beat.stateChange || purpose;
+  plan.performance.primaryAction = purpose;
+  plan.performance.performanceTurn = beat.stateChange ?? '';
   plan.environment.location = beat.location ?? '';
   plan.environment.weather = beat.weather ?? '';
   plan.continuity.plannedEndState = beat.stateChange ?? '';
+  plan.generation.requestedMode = shot.h3Mode ?? 't2va';
+  plan.generation.durationSeconds = shot.durationSeconds;
+  plan.generation.aspectRatio = shot.aspectRatio;
+  plan.generation.audioIntent = quotes.length ? `对白按剧情中的说话人与顺序逐字呈现：${quotes.join(' → ')}` : '';
   createPlanVersion(p, { shotId: shot.id, plan, source: 'default' });
   return shot;
 }

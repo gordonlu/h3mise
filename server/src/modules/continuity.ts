@@ -77,8 +77,8 @@ export function predecessorContinuity(
   kind: 'planned' | 'actual',
 ): ContinuityEntry | null {
   const prev = p.db.get<{ id: string }>(
-    'SELECT id FROM shots WHERE ord < (SELECT ord FROM shots WHERE id = ?) ORDER BY ord DESC LIMIT 1',
-    [shotId],
+    'SELECT id FROM shots WHERE story_id = (SELECT story_id FROM shots WHERE id = ?) AND ord < (SELECT ord FROM shots WHERE id = ?) ORDER BY ord DESC LIMIT 1',
+    [shotId, shotId],
   );
   if (!prev) return null;
   const r = p.db.get<ContRow>(

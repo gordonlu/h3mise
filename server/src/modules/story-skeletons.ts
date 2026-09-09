@@ -186,7 +186,7 @@ export function applySkeleton(p: ProjectContext, skeletonId: string, segmentCoun
   if (!found) throw new Error('story skeleton not found');
   if (segmentCount !== 3 && segmentCount !== 6 && segmentCount !== 9) throw new Error('segmentCount must be 3, 6, or 9');
   const story = getStory(p);
-  const seconds = Math.max(2, Math.min(15, Math.round((story.plannedDurationSeconds || segmentCount * 5) / segmentCount)));
+  const seconds = Math.max(2, Math.min(15, Math.round((story.plannedDurationSeconds || segmentCount * 12) / segmentCount)));
   return applyBeatProposal(p, found.variants[segmentCount].map((segment) => ({
     title: segment.title,
     category: segment.category,

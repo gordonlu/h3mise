@@ -669,6 +669,7 @@ export class RenderQueue {
         this.saveStatus(job.projectId, job.id, 'SUBMITTING');
         const prompt = getPrompt(p, job.promptVersionId);
         const handle = await provider.submit({
+          aiAppId: job.requestSnapshot.aiAppId,
           mode: job.requestSnapshot.mode,
           prompt: prompt.text,
           durationSeconds: job.requestSnapshot.durationSeconds,

@@ -178,9 +178,17 @@ export class RunningHubAiAppProvider implements VideoProvider {
     if (!request.prompt.trim()) {
       throw new ProviderError('prompt is empty; refusing to submit a paid task', 'submit');
     }
+    const appId = request.aiAppId?.trim() || this.profile.appId;
+    const allowedAppIds = new Set([
+      this.profile.appId,
+      ...(this.profile.apps ?? []).map((app) => app.appId),
+    ]);
+    if (!allowedAppIds.has(appId)) {
+      throw new ProviderError(`AI App ${appId} is not registered in the RunningHub profile`, 'submit');
+    }
     const nodeInfoList = this.buildNodeInfoList(request);
     const body: Record<string, unknown> = { nodeInfoList };
-    return this.v2(`/openapi/v2/run/ai-app/${this.profile.appId}`, body).then((raw) => {
+    return this.v2(`/openapi/v2/run/ai-app/${appId}`, body).then((raw) => {
       const r = raw as { taskId?: string; status?: string; errorCode?: string; errorMessage?: string; results?: unknown };
       if (!r.taskId || (r.errorCode && r.errorCode !== '')) {
         const capacity = String(r.errorCode ?? '') === '421';

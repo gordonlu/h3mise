@@ -103,6 +103,34 @@ test('RunningHub refuses an empty prompt before any network request', () => {
   }), /prompt is empty/);
 });
 
+test('RunningHub submits to a registered secondary AI App and rejects unknown App IDs', async () => {
+  const profile = defaultAiAppProfile();
+  profile.apps = [
+    { id: 'primary', name: '24GB', appId: profile.appId },
+    { id: 'high-vram', name: '48GB', appId: 'secondary-app' },
+  ];
+  const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile });
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    return new Response(JSON.stringify({ taskId: 'secondary-task', status: 'QUEUED' }), { status: 200 });
+  };
+  try {
+    await provider.submit({
+      aiAppId: 'secondary-app', mode: 't2va', prompt: 'test', durationSeconds: 5,
+      aspectRatio: '16:9', references: [], providerParams: {},
+    });
+    assert.match(requestedUrl, /\/openapi\/v2\/run\/ai-app\/secondary-app$/);
+    assert.throws(() => provider.submit({
+      aiAppId: 'unknown-app', mode: 't2va', prompt: 'test', durationSeconds: 5,
+      aspectRatio: '16:9', references: [], providerParams: {},
+    }), /not registered/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('RunningHub marks error 421 as provider-capacity backoff before a task id exists', async () => {
   const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile: defaultAiAppProfile() });
   const originalFetch = globalThis.fetch;

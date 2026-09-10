@@ -33,6 +33,7 @@ export interface ShotGuideState {
 }
 
 export type NextAction =
+  | { kind: 'create_shot'; title: string; description: string; to: string }
   | { kind: 'design_shot'; shotId: string; title: string; description: string; to: string }
   | { kind: 'add_reference'; shotId: string; title: string; description: string; to: string }
   | { kind: 'review_prompt'; shotId: string; title: string; description: string; to: string }
@@ -141,9 +142,11 @@ export function deriveProjectAttention(shots: GuideShotSnapshot[], timelineClipC
     unfinished.find((shot) => shot.missingReferences.length > 0) ??
     unfinished.find((shot) => shot.preflightBlocked === false && shot.hasPrompt) ??
     unfinished[0];
-  const attention = target
-    ? deriveNextAction(target, unfinished.find((shot) => shot.order > target.order)?.id ?? null)
-    : timelineClipCount < ordered.length
+  const attention = ordered.length === 0
+    ? ({ kind: 'create_shot', title: '创建第一个镜头', description: '项目还没有 Shot，先补充故事并创建第一个镜头。', to: '/story' } as const)
+    : target
+      ? deriveNextAction(target, unfinished.find((shot) => shot.order > target.order)?.id ?? null)
+      : timelineClipCount < ordered.length
       ? ({ kind: 'open_timeline', title: '进入成片编排', description: '所有 Shot 都已选片，可以加入 Timeline。', to: '/timeline' } as const)
       : exportCount === 0
         ? ({ kind: 'export', title: '导出成片', description: 'Timeline 已准备，可以检查并导出最终视频。', to: '/timeline' } as const)

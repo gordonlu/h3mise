@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Minimal dependency-free MCP stdio bridge for the local H3Mise REST API.
-// Keep paid submission, deletion, and Take selection out of this bridge: those
-// decisions remain explicit in the H3Mise UI.
+// Paid submission requires an explicit per-call confirmation. Deletion and
+// Take selection remain explicit decisions in the H3Mise UI.
 
 import { createInterface } from 'node:readline';
 
@@ -32,6 +32,19 @@ const tools = [
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
+    name: 'create_project',
+    description: 'Create and open a new local H3Mise project. Refuses to switch away from another open project unless force is true.',
+    inputSchema: objectSchema({
+      title: stringProp('Project title.'),
+      format: { type: 'string', enum: ['single_shot', 'sequence', 'story'], description: 'Project format.' },
+      defaultAspectRatio: stringProp('Default aspect ratio such as 9:16 or 16:9.'),
+      defaultDurationSeconds: { type: 'integer', minimum: 1, maximum: 15, description: 'Default duration for each new Shot.' },
+      visualStyle: { type: 'string', description: 'Optional project-level visual style lock.' },
+      force: { type: 'boolean', description: 'Allow switching away from the currently open project. Defaults to false.' },
+    }, ['title', 'format']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
     name: 'open_project',
     description: 'Open one existing H3Mise project. Refuses to switch away from another open project unless force is true.',
     inputSchema: objectSchema({
@@ -47,10 +60,144 @@ const tools = [
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
+    name: 'get_story',
+    description: 'Read the active episode Story document.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'update_story',
+    description: 'Update the active episode title, synopsis, body, and planned duration.',
+    inputSchema: objectSchema({
+      title: { type: 'string' }, synopsis: { type: 'string' }, body: { type: 'string' },
+      plannedDurationSeconds: { type: 'number', minimum: 0 },
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'create_sequence',
+    description: 'Create a story sequence in the active episode.',
+    inputSchema: objectSchema({ title: stringProp('Sequence title.'), summary: { type: 'string' } }, ['title']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'list_sequences',
+    description: 'List sequences in the active episode.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'create_beat',
+    description: 'Create one fully described Story Beat in the active episode. Duration must be 1 to 15 seconds.',
+    inputSchema: objectSchema({
+      title: stringProp('Beat title.'),
+      category: { type: 'string', enum: ['setup', 'inciting_incident', 'rising_action', 'climax', 'falling_action', 'resolution', 'transition', 'other'] },
+      summary: { type: 'string' }, location: { type: 'string' }, timeOfDay: { type: 'string' }, weather: { type: 'string' },
+      characters: { type: 'array', items: { type: 'string' } }, stateChange: { type: 'string' }, notes: { type: 'string' },
+      durationSeconds: { type: 'number', minimum: 1, maximum: 15 }, sequenceId: { type: 'string' },
+    }, ['title', 'category', 'summary', 'durationSeconds']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'list_beats',
+    description: 'List fully described Story Beats in the active episode.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'materialize_story_shots',
+    description: 'Create only missing Shots from active-episode Beats. Existing linked Shots are preserved.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'list_entities',
+    description: 'List project entities, optionally filtered by kind.',
+    inputSchema: objectSchema({ kind: { type: 'string', enum: ['character', 'scene', 'prop', 'vehicle', 'creature'] } }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'create_entity',
+    description: 'Create an entity with descriptive metadata and an optional imported image.',
+    inputSchema: objectSchema({
+      kind: { type: 'string', enum: ['character', 'scene', 'prop', 'vehicle', 'creature'] },
+      name: stringProp('Entity name.'), description: { type: 'string' }, notes: { type: 'string' },
+      traits: { type: 'object', additionalProperties: { type: 'string' } }, imageAssetId: { type: ['string', 'null'] },
+    }, ['kind', 'name']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'list_character_states',
+    description: 'List character states, optionally filtered by character entity.',
+    inputSchema: objectSchema({ characterId: { type: 'string' } }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'create_character_state',
+    description: 'Create a complete visual and narrative state for one character entity.',
+    inputSchema: objectSchema({
+      characterId: stringProp('Character entity ID.'), name: stringProp('State name.'),
+      costume: { type: 'string' }, hair: { type: 'string' }, injury: { type: 'string' },
+      heldItems: { type: 'array', items: { type: 'string' } },
+      extra: { type: 'object', additionalProperties: { type: 'string' } }, imageAssetId: { type: ['string', 'null'] },
+    }, ['characterId', 'name']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'list_media',
+    description: 'List imported media assets, optionally filtered by kind.',
+    inputSchema: objectSchema({ kind: { type: 'string', enum: ['image', 'video', 'audio'] } }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'import_media_path',
+    description: 'Import one local image, video, or audio path into the open H3Mise project.',
+    inputSchema: objectSchema({ path: stringProp('Absolute local media path.'), label: { type: 'string' } }, ['path']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
     name: 'list_shots',
     description: 'List Shots in the currently open project.',
     inputSchema: objectSchema(),
     annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'update_shot',
+    description: 'Update safe canonical fields on one existing Shot.',
+    inputSchema: objectSchema({
+      shotId: stringProp('Exact Shot ID returned by list_shots.'),
+      sequenceId: { type: ['string', 'null'] },
+      purpose: { type: 'string' },
+      shotFunction: { type: 'string', enum: ['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other'] },
+      durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
+      aspectRatio: { type: 'string' },
+      h3Mode: { type: ['string', 'null'], enum: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', null] },
+      primaryCharacterId: { type: ['string', 'null'] },
+      sceneId: { type: ['string', 'null'] },
+      renderDependencyMode: { type: 'string', enum: ['auto', 'independent', 'planned', 'previous_take', 'manual_frame'] },
+      screenDirection: { type: 'string', enum: ['left_to_right', 'right_to_left', 'neutral'] },
+      intentionalReversal: { type: 'boolean' },
+    }, ['shotId']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'list_reference_bindings',
+    description: 'List reference bindings, optionally filtered to one Shot.',
+    inputSchema: objectSchema({ shotId: { type: 'string' } }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'create_reference_binding',
+    description: 'Bind one imported media asset to a Shot or project reference role.',
+    inputSchema: objectSchema({
+      assetId: stringProp('Imported media asset ID.'),
+      roles: { type: 'array', items: { type: 'string', enum: ['identity', 'costume', 'environment', 'motion', 'body_motion', 'timing', 'camera_motion', 'lighting', 'style', 'audio', 'first_frame', 'last_frame'] } },
+      preserve: { type: 'array', items: { type: 'string' } },
+      ignore: { type: 'array', items: { type: 'string' } },
+      label: { type: 'string' },
+      shotId: { type: ['string', 'null'] },
+    }, ['assetId', 'roles']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: 'inspect_shot',
@@ -93,6 +240,16 @@ const tools = [
       mode: { type: 'string', enum: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'], description: 'Optional H3 generation mode.' },
       durationSeconds: { type: 'number', exclusiveMinimum: 0, description: 'Optional requested duration.' },
     }, ['shotId']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'import_prompt',
+    description: 'Persist a complete externally authored PromptVersion for a Shot. This creates immutable history and does not render.',
+    inputSchema: objectSchema({
+      shotId: stringProp('Exact Shot ID returned by list_shots.'),
+      text: stringProp('Complete provider-ready prompt text.'),
+      mode: { type: 'string', enum: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'] },
+    }, ['shotId', 'text', 'mode']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
@@ -141,6 +298,23 @@ const tools = [
       megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2] },
     }, ['shotId', 'promptVersionId', 'providerId']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'submit_render',
+    description: 'Submit one paid render after explicit user authorization. Requires confirmPaid=true on every call; preflight and duplicate-job gates still run server-side.',
+    inputSchema: objectSchema({
+      shotId: stringProp('Exact Shot ID to render.'),
+      promptVersionId: stringProp('Exact immutable PromptVersion to render.'),
+      providerId: { type: 'string', enum: ['runninghub', 'comfyui'], description: 'Paid or local generation provider.' },
+      aiAppId: { type: 'string', description: 'Optional exact RunningHub AI App ID. Omit to use the verified primary App.' },
+      durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
+      aspectRatio: { type: 'string' },
+      resolution: { type: 'string' },
+      megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2] },
+      providerParams: { type: 'object', additionalProperties: true },
+      confirmPaid: { type: 'boolean', const: true, description: 'Must be true, confirming the user explicitly authorized this paid submission.' },
+    }, ['shotId', 'promptVersionId', 'providerId', 'confirmPaid']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   {
     name: 'inspect_jobs',
@@ -263,9 +437,36 @@ async function callTool(name, args = {}) {
       return { apiBase: API_BASE, health, currentProject };
     }
     case 'list_projects': return api('GET', '/api/projects');
+    case 'create_project': return api('POST', '/api/projects', {
+      title: requireString(args, 'title'),
+      format: requireString(args, 'format'),
+      ...(args.defaultAspectRatio === undefined ? {} : { defaultAspectRatio: requireString(args, 'defaultAspectRatio') }),
+      ...(args.defaultDurationSeconds === undefined ? {} : { defaultDurationSeconds: args.defaultDurationSeconds }),
+      ...(args.visualStyle === undefined ? {} : { visualStyle: args.visualStyle }),
+      force: args.force === true,
+    });
     case 'open_project': return api('POST', `/api/projects/${encodeURIComponent(requireString(args, 'projectId'))}/open`, { force: args.force === true });
     case 'get_production_overview': return api('GET', '/api/production');
+    case 'get_story': return api('GET', '/api/story');
+    case 'update_story': return api('PATCH', '/api/story', args);
+    case 'create_sequence': return api('POST', '/api/story/sequences', args);
+    case 'list_sequences': return api('GET', '/api/story/sequences');
+    case 'create_beat': return api('POST', '/api/story/beats', args);
+    case 'list_beats': return api('GET', '/api/story/beats');
+    case 'materialize_story_shots': return api('POST', '/api/story/beats/materialize-shots', {});
+    case 'list_entities': return api('GET', `/api/assets/entities${args.kind ? `?kind=${encodeURIComponent(args.kind)}` : ''}`);
+    case 'create_entity': return api('POST', '/api/assets/entities', args);
+    case 'list_character_states': return api('GET', `/api/assets/character-states${args.characterId ? `?characterId=${encodeURIComponent(args.characterId)}` : ''}`);
+    case 'create_character_state': return api('POST', '/api/assets/character-states', args);
+    case 'list_media': return api('GET', `/api/assets/media${args.kind ? `?kind=${encodeURIComponent(args.kind)}` : ''}`);
+    case 'import_media_path': return api('POST', '/api/assets/media/import-path', { path: requireString(args, 'path'), ...(args.label ? { label: args.label } : {}) });
     case 'list_shots': return api('GET', '/api/shots');
+    case 'update_shot': {
+      const { shotId, ...patch } = args;
+      return api('PATCH', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}`, patch);
+    }
+    case 'list_reference_bindings': return api('GET', `/api/assets/bindings${args.shotId ? `?shotId=${encodeURIComponent(args.shotId)}` : ''}`);
+    case 'create_reference_binding': return api('POST', '/api/assets/bindings', args);
     case 'inspect_shot': return api('GET', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}`);
     case 'build_context_package': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/context-package`, { task: requireString(args, 'task') });
     case 'parse_director_plan': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/plans/parse`, { text: requireString(args, 'text') });
@@ -276,6 +477,11 @@ async function callTool(name, args = {}) {
     case 'compile_prompt': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/prompts/compile`, {
       ...(args.mode ? { mode: args.mode } : {}),
       ...(args.durationSeconds !== undefined ? { durationSeconds: args.durationSeconds } : {}),
+    });
+    case 'import_prompt': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/prompts/raw`, {
+      text: requireString(args, 'text'),
+      mode: requireString(args, 'mode'),
+      source: 'ai_compiler',
     });
     case 'create_revision_prompt': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/prompts/raw`, {
       text: requireString(args, 'text'),
@@ -301,6 +507,20 @@ async function callTool(name, args = {}) {
       providerId: requireString(args, 'providerId'),
       ...(args.megapixels === undefined ? {} : { megapixels: args.megapixels }),
     });
+    case 'submit_render': {
+      if (args.confirmPaid !== true) throw new Error('confirmPaid=true is required for every paid render submission');
+      return api('POST', '/api/render', {
+        shotId: requireString(args, 'shotId'),
+        promptVersionId: requireString(args, 'promptVersionId'),
+        providerId: requireString(args, 'providerId'),
+        ...(args.aiAppId === undefined ? {} : { aiAppId: args.aiAppId }),
+        ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
+        ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),
+        ...(args.resolution === undefined ? {} : { resolution: args.resolution }),
+        ...(args.megapixels === undefined ? {} : { megapixels: args.megapixels }),
+        ...(args.providerParams === undefined ? {} : { providerParams: args.providerParams }),
+      });
+    }
     case 'inspect_jobs': return api('GET', '/api/jobs');
     case 'get_runninghub_config': {
       const [apiKey, videoProfile, storyboardProfile] = await Promise.all([
@@ -365,7 +585,7 @@ async function handle(message) {
           protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'h3mise', version: '0.1.0' },
-          instructions: 'H3Mise is a local-first director workstation. Inspect the current project and canonical Context Package before writing. Save DirectorPlans and prompts as new immutable versions. Never claim a render happened from Preflight. This MCP server cannot accept or reveal API keys, submit paid renders, select Takes, delete work, or overwrite existing Takes. RunningHub node detection is not a render and only reaches nodes_detected. Record picture and audio judgments separately. Keep the director in control.',
+          instructions: 'H3Mise is a local-first director workstation. Inspect the current project and canonical Context Package before writing. Save DirectorPlans and prompts as new immutable versions. Never claim a render happened from Preflight. Paid render submission requires explicit user authorization and confirmPaid=true on that exact submit_render call. This MCP server cannot accept or reveal API keys, select Takes, delete work, or overwrite existing Takes. RunningHub node detection is not a render and only reaches nodes_detected. Record picture and audio judgments separately. Keep the director in control.',
         });
         return;
       case 'ping':
@@ -408,4 +628,3 @@ input.on('line', (line) => {
   }
   void handle(message);
 });
-

@@ -39,6 +39,12 @@ test('project attention prioritizes selection, then blockers', () => {
   assert.equal(summary.missingReferencesCount, 1);
 });
 
+test('empty project asks for the first shot instead of offering export', () => {
+  const summary = deriveProjectAttention([], 0, 0);
+  assert.equal(summary.attention.kind, 'create_shot');
+  assert.equal(summary.attention.to, '/story');
+});
+
 test('completed project proceeds to timeline before export', () => {
   const summary = deriveProjectAttention([shot({ selectedTakeId: 'take-001', takeCount: 1 })], 0);
   assert.equal(summary.attention.kind, 'open_timeline');

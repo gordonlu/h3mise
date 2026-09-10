@@ -129,6 +129,7 @@ export function createShotForBeat(
   const purpose = input.purpose?.trim() || beat.summary || beat.title;
   const shot = createShot(p, {
     title: beat.title,
+    sequenceId: beat.sequenceId ?? null,
     storyBeatId: beat.id,
     purpose,
     shotFunction: shotFunctionForBeat(beat),

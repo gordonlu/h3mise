@@ -11,6 +11,9 @@ export interface UploadedAsset {
 }
 
 export interface RenderRequestInput {
+  /** Exact configured AI App to invoke. RunningHub validates this against the
+   * primary app and the user-managed secondary app list before paid submit. */
+  aiAppId?: string;
   mode: H3Mode;
   prompt: string;
   durationSeconds: number;

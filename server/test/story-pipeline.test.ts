@@ -1,13 +1,24 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanupTempRoot, makeProject, makeStore } from './helpers.js';
-import { createBeat, listBeats } from '../src/modules/story.js';
+import { createBeat, createSequence, listBeats } from '../src/modules/story.js';
 import { createShot, listShots } from '../src/modules/shots.js';
-import { applyBeatProposal } from '../src/modules/story-pipeline.js';
+import { applyBeatProposal, materializeMissingBeatShots } from '../src/modules/story-pipeline.js';
 import { importRawPrompt } from '../src/modules/prompt.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
+
+test('materialized Shot inherits its Beat sequence', async () => {
+  const { root, store } = await makeStore('beat-sequence-materialize');
+  roots.push(root);
+  const project = await makeProject(store, 'Sequence Link');
+  const sequence = createSequence(project, { title: 'Opening' });
+  const beat = createBeat(project, { title: 'Hook', sequenceId: sequence.id, durationSeconds: 5 });
+  const [shot] = materializeMissingBeatShots(project);
+  assert.equal(shot?.storyBeatId, beat.id);
+  assert.equal(shot?.sequenceId, sequence.id);
+});
 
 test('Beat proposal refines canonical rows in place and preserves linked Shot ids', async () => {
   const { root, store } = await makeStore('beat-proposal-refine');

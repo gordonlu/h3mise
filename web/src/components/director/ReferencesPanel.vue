@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import type { H3Mode, MediaAsset, ReferenceBinding, ReferenceRole } from '@h3mise/shared';
-import { fileUrl, get, mediaUrl } from '../../api/client';
+import { fileUrl, get, post, mediaUrl } from '../../api/client';
 import { t } from '../../stores/locale';
 
 const props = defineProps<{
@@ -16,6 +16,14 @@ const props = defineProps<{
 }>();
 
 const pickerOpen = ref(false);
+const videoProfileNotice = ref('');
+async function detectVideoProfile() {
+  videoProfileNotice.value = '正在检测视频参考工作流…';
+  try {
+    const profile = await post<{ verification: { note: string } }>('/api/providers/runninghub/video-reference-profile/verify', {});
+    videoProfileNotice.value = profile.verification.note;
+  } catch (error) { videoProfileNotice.value = String(error); }
+}
 const route = useRoute();
 const pickAsset = ref('');
 const pickGroup = ref('');
@@ -42,6 +50,10 @@ const groups = computed<RefGroup[]>(() => {
   const audios = props.media.filter((m) => m.kind === 'audio');
   const videos = props.media.filter((m) => m.kind === 'video');
   const out: RefGroup[] = [];
+  if (props.currentMode === 'vref2va') return [
+    { id: 'refvideo', label: '参考视频（必填 1 个）', limit: 1, items: videos, role: 'motion' },
+    { id: 'refimg', label: '参考图片（可选，最多 3 张）', limit: 3, items: images },
+  ];
   if (props.currentMode === 'ref2va') {
     if (slots.value.images > 0) out.push({ id: 'refimg', label: t('shot.references.refImages'), limit: slots.value.images, items: images });
     if (slots.value.audios > 0) out.push({ id: 'refaudio', label: t('shot.references.refAudio'), limit: slots.value.audios, items: audios });
@@ -62,7 +74,7 @@ const groups = computed<RefGroup[]>(() => {
 
 const hasSlots = computed(() => groups.value.length > 0);
 const videosAvailable = computed(() => props.media.some((m) => m.kind === 'video'));
-const modeHint = computed(() => t(`shot.references.modeHint.${props.currentMode}`));
+const modeHint = computed(() => props.currentMode === 'vref2va' ? '使用参考视频驱动生成；图片可选。首次使用请检测专用工作流节点。' : t(`shot.references.modeHint.${props.currentMode}`));
 /** Ref2VA is slower and pricier — if the shot only has frame images and no
  * other references, the dedicated frame modes do the same job for less. */
 const suggestFrameMode = computed(() => {
@@ -77,7 +89,7 @@ const suggestFrameMode = computed(() => {
 });
 
 /** Official RunningHub cap is 12 total refs (slots may offer more). */
-const refTotalCap = computed(() => Math.min(slots.value.total, 12));
+const refTotalCap = computed(() => props.currentMode === 'vref2va' ? 4 : Math.min(slots.value.total, 12));
 const selectedGroup = computed(() => groups.value.find((group) => group.id === pickGroup.value) ?? null);
 const selectedGroupHasSpace = computed(() => selectedGroup.value ? remaining(selectedGroup.value) > 0 : false);
 
@@ -117,6 +129,11 @@ function selectAsset(group: RefGroup, assetId: string) {
 
 <template>
   <div class="col">
+    <div v-if="currentMode === 'vref2va'" class="col">
+      <span class="muted">视频必填 1 个；参考图片可选，最多 3 张。App：2093714693130113026</span>
+      <button class="sm" @click="detectVideoProfile">检测视频参考工作流节点（不生成）</button>
+      <span v-if="videoProfileNotice" class="muted">{{ videoProfileNotice }}</span>
+    </div>
     <div class="row">
       <button class="primary sm" @click="pickerOpen = !pickerOpen">＋ {{ t('shot.references.bindReference') }}</button>
       <router-link :to="uploadPath" class="sm upload-link">{{ t('shot.references.uploadNewAsset') }}</router-link>

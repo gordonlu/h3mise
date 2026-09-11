@@ -453,7 +453,7 @@ export class RenderQueue {
       this.capacityRetries.delete(key);
       const handle = this.handles.get(key);
       if (handle) {
-        const provider = this.registry.get(job.provider);
+        const provider = this.registry.get(job.provider, job.requestSnapshot?.mode);
         if (provider) provider.cancel(handle).catch(() => undefined);
       }
       this.handles.delete(key);
@@ -644,7 +644,7 @@ export class RenderQueue {
     // ctxFor() returns null after the switch and silently dropped the job.
     const p = await this.pipelineCtx(job.projectId);
     if (!p) return;
-    const provider = this.registry.get(job.provider);
+    const provider = this.registry.get(job.provider, job.requestSnapshot?.mode);
     if (!provider) {
       await this.fail(job, 'provider not found: ' + job.provider);
       return;
@@ -670,7 +670,7 @@ export class RenderQueue {
         const prompt = getPrompt(p, job.promptVersionId);
         const handle = await provider.submit({
           aiAppId: job.requestSnapshot.aiAppId,
-          mode: job.requestSnapshot.mode,
+          mode: job.requestSnapshot?.mode,
           prompt: prompt.text,
           durationSeconds: job.requestSnapshot.durationSeconds,
           aspectRatio: job.requestSnapshot.aspectRatio,
@@ -694,7 +694,8 @@ export class RenderQueue {
         // mapping is executable 鈫?profile becomes 'verified'.
         if (job.provider !== 'mock') {
           try {
-            this.registry.confirmProviderVerified(job.provider);
+            if (job.provider === 'runninghub' && job.requestSnapshot?.mode === 'vref2va') this.registry.confirmVideoReferenceVerified();
+            else this.registry.confirmProviderVerified(job.provider);
           } catch {
             /* profile persistence is best-effort here */
           }
@@ -752,7 +753,7 @@ export class RenderQueue {
     // re-read the row the worker itself persisted so polling actually starts.
     const fresh = (await this.getJobEnsured(job.projectId, job.id)) ?? job;
     if (!fresh.providerTaskId) return;
-    const provider = this.registry.get(job.provider);
+    const provider = this.registry.get(job.provider, job.requestSnapshot?.mode);
     if (!provider) {
       await this.fail(job, 'provider not found');
       return;

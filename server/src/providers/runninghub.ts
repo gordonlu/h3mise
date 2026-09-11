@@ -179,6 +179,7 @@ export class RunningHubAiAppProvider implements VideoProvider {
       throw new ProviderError('prompt is empty; refusing to submit a paid task', 'submit');
     }
     const appId = request.aiAppId?.trim() || this.profile.appId;
+    if (request.mode === 'vref2va' && (appId !== this.profile.appId || !['nodes_detected', 'verified'].includes(this.profile.verification.status))) throw new ProviderError('视频参考工作流尚未检测，或 App 与检测配置不一致', 'submit');
     const allowedAppIds = new Set([
       this.profile.appId,
       ...(this.profile.apps ?? []).map((app) => app.appId),
@@ -272,7 +273,16 @@ export class RunningHubAiAppProvider implements VideoProvider {
     const lastFrameRef = request.references.find((r) => r.roles.includes('last_frame'));
     void firstFrameRef;
     void lastFrameRef;
-    if (request.mode === 'ref2va') {
+    if (request.mode === 'vref2va') {
+      const videos = request.references.filter(r => r.asset.kind === 'video');
+      const images = request.references.filter(r => r.asset.kind === 'image');
+      const videoSlots = (inputs.refVideos ?? []).filter(s => s.nodeId && s.fieldName);
+      const imageSlots = inputs.refImages.filter(s => s.nodeId && s.fieldName);
+      if (videos.length !== 1 || videoSlots.length !== 1) throw new ProviderError('视频参考模式必须提供一个参考视频和有效视频节点映射', 'submit');
+      if (images.length > Math.min(3, imageSlots.length) || request.references.some(r => r.asset.kind === 'audio')) throw new ProviderError('视频参考模式仅接受一个视频及最多三张可选参考图片', 'submit');
+      pushArray(videoSlots, videos.map(r => r.providerRef));
+      pushArray(imageSlots, images.map(r => r.providerRef));
+    } else if (request.mode === 'ref2va') {
       const images = request.references.filter((r) => r.asset.kind === 'image').map((r) => r.providerRef);
       const audios = request.references.filter((r) => r.asset.kind === 'audio').map((r) => r.providerRef);
       this.validateRefLimits(images.length, audios.length, request.references);

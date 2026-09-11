@@ -715,7 +715,7 @@ export function buildRoutes(services: AppServices): App {
           preflight,
         }, 422);
       }
-      const runningHubProfile = services.providers.getProfile();
+      const runningHubProfile = intent.mode === 'vref2va' ? services.providers.getVideoReferenceProfile() : services.providers.getProfile();
       const comfyProfile = services.providers.getComfyUiProfile();
       const profileRef = providerId === 'comfyui'
         ? { appId: `comfyui:${comfyProfile.clientId}`, checkedAt: comfyProfile.verification.checkedAt }
@@ -723,7 +723,7 @@ export function buildRoutes(services: AppServices): App {
       const intentHash = preflightMod.renderIntentHash(intent, profileRef);
       const request = {
         provider: providerId,
-        aiAppId: providerId === 'runninghub' ? body.aiAppId ?? runningHubProfile?.appId ?? '2089265538441764866' : 'comfyui-local',
+        aiAppId: providerId === 'runninghub' ? (intent.mode === 'vref2va' ? runningHubProfile!.appId : body.aiAppId ?? runningHubProfile?.appId ?? '2089265538441764866') : 'comfyui-local',
         mode: intent.mode,
         promptVersionId,
         durationSeconds: intent.durationSeconds,
@@ -1042,6 +1042,8 @@ export function buildRoutes(services: AppServices): App {
     const profile = services.providers.getProfile();
     return c.json(profile ? { ...profile, bindingSlots: enabledBindingSlots(profile) } : null);
   });
+  app.get('/api/providers/runninghub/video-reference-profile', (c) => c.json(services.providers.getVideoReferenceProfile()));
+  app.post('/api/providers/runninghub/video-reference-profile/verify', async (c) => c.json(await services.providers.detectVideoReference()));
   app.put('/api/providers/runninghub/profile', async (c) => {
     const profile = services.providers.saveProfile(await c.req.json());
     services.queue.reschedule();

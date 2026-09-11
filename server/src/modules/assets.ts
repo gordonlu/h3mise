@@ -499,7 +499,7 @@ export function ensureShotEntityImageBindings(
 
 export interface AssetRequirement {
   level: 'required' | 'optional' | 'ok';
-  kind: 'character' | 'scene' | 'character_state' | 'first_frame' | 'last_frame' | 'ref_images' | 'audio';
+  kind: 'character' | 'scene' | 'character_state' | 'first_frame' | 'last_frame' | 'ref_images' | 'audio' | 'video';
   label: string;
   detail: string;
 }
@@ -546,6 +546,7 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
   }
 
   const mode = shot.h3Mode;
+  if (mode === 'vref2va') out.push({ level: bindings.filter(b => b.type === 'video').length === 1 ? 'ok' : 'required', kind: 'video', label: '参考视频', detail: '必须绑定一个视频；图片可选，最多三张' });
   if (mode === 'i2va' || mode === 'fl2va') {
     out.push(
       hasFirst

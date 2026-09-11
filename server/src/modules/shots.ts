@@ -10,7 +10,7 @@ import { createBinding, deleteBinding, listBindings } from './assets.js';
 import { activeEpisodeId } from './story.js';
 
 const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
-const H3_MODES = new Set(['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
+const H3_MODES = new Set(['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', 'vref2va']);
 const DEPENDENCY_MODES = new Set(['auto', 'independent', 'planned', 'previous_take', 'manual_frame']);
 const SCREEN_DIRECTIONS = new Set(['left_to_right', 'right_to_left', 'neutral']);
 

@@ -60,6 +60,7 @@ export interface AiAppProfile {
     lastFrame?: { nodeId: string; fieldName: string };
     refImages: Array<{ nodeId: string; fieldName: string }>;
     refAudios: Array<{ nodeId: string; fieldName: string }>;
+    refVideos?: Array<{ nodeId: string; fieldName: string }>;
     duration?: { nodeId: string; fieldName: string };
     resolution?: { nodeId: string; fieldName: string };
     megapixels?: { nodeId: string; fieldName: string };

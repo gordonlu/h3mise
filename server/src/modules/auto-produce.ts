@@ -371,7 +371,7 @@ export class AutoProduceService {
         const reasons = preflight.basic.flatMap((section) => section.checks).filter((check) => check.severity === 'error').map((check) => check.message);
         throw new Error(reasons.join('；') || '生成检查未通过');
       }
-      const rh = this.registry.getProfile(); const comfy = this.registry.getComfyUiProfile();
+      const rh = mode === 'vref2va' ? this.registry.getVideoReferenceProfile() : this.registry.getProfile(); const comfy = this.registry.getComfyUiProfile();
       const profileRef = run.settings.providerId === 'comfyui'
         ? { appId: `comfyui:${comfy.clientId}`, checkedAt: comfy.verification.checkedAt }
         : { appId: rh?.appId ?? run.settings.providerId, checkedAt: rh?.verification.checkedAt ?? null };

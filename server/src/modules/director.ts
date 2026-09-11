@@ -109,7 +109,7 @@ export function planIsGuideReady(plan: DirectorPlan): boolean {
 
 const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
 const REALITY_MODES = new Set(['strict_realism', 'plausible_stylized', 'deliberate_fantasy']);
-const GENERATION_MODES = new Set(['', 't2va', 'i2va', 'fl2va', 'l2va', 'ref2va']);
+const GENERATION_MODES = new Set(['', 't2va', 'i2va', 'fl2va', 'l2va', 'ref2va', 'vref2va']);
 
 /** Norm temporalBeat arrays to sequential, non-overlapping [0..1] segments. */
 export function normalizeTemporalBeats(raw: unknown): TemporalBeat[] {

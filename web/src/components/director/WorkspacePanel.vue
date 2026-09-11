@@ -65,6 +65,7 @@ const planRows = computed(() => {
 const referenceSummary = computed(() => {
   const roles = props.bindings.flatMap((binding) => binding.roles);
   const mode = props.shot.h3Mode ?? 't2va';
+  if (mode === 'vref2va') return [{ label: '参考视频（必填 1 个）', ready: props.bindings.filter(b => b.type === 'video').length === 1 }];
   if (mode === 'ref2va') {
     const images = props.bindings.filter((binding) => binding.type === 'image' && !binding.roles.some((role) => role === 'first_frame' || role === 'last_frame')).length;
     const audios = props.bindings.filter((binding) => binding.type === 'audio').length;

@@ -166,7 +166,7 @@ async function correctToRef2va() {
  * Unknown capability = nothing offered (P1), never a theoretical fallback. */
 const availableModes = computed(() => {
   const caps = activeProvider.value?.capabilities;
-  return caps?.supportedModes ?? [];
+  return activeProvider.value?.id === 'runninghub' ? [...new Set([...(caps?.supportedModes ?? []), 'vref2va' as const])] : caps?.supportedModes ?? [];
 });
 const canCorrectReferenceMode = computed(() =>
   sShot.value?.h3Mode === 'i2va'
@@ -405,6 +405,7 @@ async function doRender(promptId: string) {
     const submittedBindings = (sDetail.value?.bindings ?? []).filter((binding: ReferenceBinding) => {
       const first = binding.roles.includes('first_frame');
       const last = binding.roles.includes('last_frame');
+      if (mode === 'vref2va') return binding.type === 'video' || binding.type === 'image';
       if (mode === 'ref2va') return !first && !last;
       if (mode === 'i2va') return first;
       if (mode === 'l2va') return last;

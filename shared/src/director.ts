@@ -3,9 +3,9 @@
 
 import type { ShotFunction } from './shots.js';
 
-export type H3Mode = 't2va' | 'i2va' | 'fl2va' | 'l2va' | 'ref2va';
+export type H3Mode = 't2va' | 'i2va' | 'fl2va' | 'l2va' | 'ref2va' | 'vref2va';
 
-export const H3_MODES: H3Mode[] = ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'];
+export const H3_MODES: H3Mode[] = ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', 'vref2va'];
 
 export const H3_MODE_LABEL: Record<H3Mode, string> = {
   t2va: '文生视频（T2VA）',
@@ -13,6 +13,7 @@ export const H3_MODE_LABEL: Record<H3Mode, string> = {
   fl2va: '首尾帧生视频（FL2VA）',
   l2va: '尾帧生视频（L2VA）',
   ref2va: '参考图生视频',
+  vref2va: '视频参考生视频',
 };
 
 export type RealityMode = 'strict_realism' | 'plausible_stylized' | 'deliberate_fantasy';

@@ -60,6 +60,7 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
   // frame inside the prompt (H3 assigns tasks per reference in text).
   const references = ctx.references.filter((reference) => {
     const isFrame = reference.roles.includes('first_frame') || reference.roles.includes('last_frame');
+    if (mode === 'vref2va') return reference.type === 'image' || reference.type === 'video';
     if (mode === 'ref2va') return reference.type === 'image' || reference.type === 'audio';
     if (mode === 'i2va') return reference.roles.includes('first_frame');
     if (mode === 'l2va') return reference.roles.includes('last_frame');
@@ -72,6 +73,12 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
   const firstFrame = num.pictures.find((p) => p.binding.roles.includes('first_frame'));
   const lastFrame = num.pictures.find((p) => p.binding.roles.includes('last_frame'));
 
+  if (mode === 'vref2va') {
+    return [
+      'Video reference: <Video 1> defines the action sequence, timing and camera movement. Optional <Picture N> references define the explicitly bound appearance; do not invent additional subjects.',
+      subjectDefinitions(modeCtx, num), summary(modeCtx, num), detailedDescription(modeCtx, num), overallSoundscape(modeCtx),
+    ].filter(Boolean).join('\n\n');
+  }
   if (mode === 'ref2va') {
     const sections = [
       subjectDefinitions(modeCtx, num),

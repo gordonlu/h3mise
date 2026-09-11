@@ -11,6 +11,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
     "shot.mode.i2va": "Image to Video",
     "shot.mode.fl2va": "First+Last to Video",
     "shot.mode.ref2va": "Reference to Video",
+    "shot.mode.vref2va": "视频参考生视频",
     "shot.mode.l2va": "Last to Video",
 
     "shot.status.user.draft": "草稿",
@@ -608,6 +609,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
     "shot.mode.i2va": "Image to Video",
     "shot.mode.fl2va": "First+Last to Video",
     "shot.mode.ref2va": "Reference to Video",
+    "shot.mode.vref2va": "Video Reference to Video",
     "shot.mode.l2va": "Last to Video",
 
     "shot.status.user.draft": "Draft",
@@ -1205,6 +1207,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
     "shot.mode.i2va": "Image to Video",
     "shot.mode.fl2va": "First+Last to Video",
     "shot.mode.ref2va": "Reference to Video",
+    "shot.mode.vref2va": "動画参照で生成",
     "shot.mode.l2va": "Last to Video",
 
     "shot.status.user.draft": "下書き",

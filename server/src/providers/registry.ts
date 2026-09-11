@@ -106,6 +106,7 @@ export function defaultAiAppProfile(region: RunningHubRegion = 'cn'): AiAppProfi
       lastFrame: { nodeId: 'node_1', fieldName: 'last_frame' },
       refImages: [],
       refAudios: [],
+      refVideos: [],
       duration: { nodeId: 'node_1', fieldName: 'duration' },
       resolution: { nodeId: 'node_1', fieldName: 'resolution' },
       megapixels: { nodeId: '', fieldName: 'megapixels' },
@@ -146,6 +147,7 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
     lastFrame: last ? { nodeId: last.nodeId, fieldName: last.fieldName } : { nodeId: '', fieldName: 'last_frame' },
     refImages: collect(isImageRef),
     refAudios: collect(isAudioRef),
+    refVideos: collect(n => /^video$/i.test(n.fieldType) || /video_upload/i.test(n.fieldData ?? '') || /参考视频|ref.?video/i.test(`${n.fieldName} ${n.description}`)),
     duration: pick(has(/duration|时长/i), inputs.duration),
     resolution: pick(has(/resolution|分辨率|比例/i), inputs.resolution),
     megapixels: pick(has(/^megapixels$|megapixel|百万像素/i), inputs.megapixels),
@@ -167,6 +169,7 @@ export function inferSupportedModes(inputs: AiAppProfile['inputs'], _nodes: AiAp
   const modes: H3Mode[] = [];
   const hasSlot = (slot: { nodeId: string; fieldName: string } | undefined) => Boolean(slot && slot.nodeId !== '');
   const hasArray = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.length > 0 && slots.every((s) => s.nodeId !== '');
+  if (hasArray(inputs.refVideos ?? [])) return hasSlot(inputs.prompt) ? ['vref2va'] : [];
   if (hasSlot(inputs.prompt)) modes.push('t2va');
   if (hasSlot(inputs.firstFrame)) modes.push('i2va');
   if (hasSlot(inputs.lastFrame)) modes.push('l2va');
@@ -278,7 +281,8 @@ export class ProviderRegistry {
     this.providers.set('mock', mock);
   }
 
-  get(id: string): VideoProvider | undefined {
+  get(id: string, mode?: H3Mode): VideoProvider | undefined {
+    if (id === 'runninghub' && mode === 'vref2va') return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: this.getVideoReferenceProfile() });
     return this.providers.get(id);
   }
 
@@ -309,7 +313,11 @@ export class ProviderRegistry {
     return n;
   }
 
-  async capabilities(id: string): Promise<ProviderCapabilities | undefined> {
+  async capabilities(id: string, mode?: H3Mode): Promise<ProviderCapabilities | undefined> {
+    if (id === 'runninghub' && mode === 'vref2va') {
+      const profile = this.getVideoReferenceProfile();
+      return ['nodes_detected', 'verified'].includes(profile.verification.status) ? profile.capabilities : { supportedModes: [] };
+    }
     const prov = this.providers.get(id);
     if (!prov) return undefined;
     if (this.capsCache.has(id)) return this.capsCache.get(id);
@@ -385,6 +393,39 @@ export class ProviderRegistry {
   getProfile(): AiAppProfile | null {
     const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub'");
     return this.sanitizeProfile(row ? jget<unknown>(row.profile_json, defaultAiAppProfile()) : defaultAiAppProfile());
+  }
+
+  getVideoReferenceProfile(): AiAppProfile {
+    const region = this.getProfile()?.region ?? 'cn';
+    const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub_video_reference'");
+    const fallback = { ...defaultAiAppProfile(region), appId: '2093714693130113026', inputs: mapDiscoveredNodes([]) };
+    const profile = this.sanitizeProfile(row ? jget(row.profile_json, fallback) : fallback);
+    if (profile.region !== region) return this.sanitizeProfile(fallback);
+    return profile;
+  }
+
+  private persistVideoReferenceProfile(profile: AiAppProfile): AiAppProfile {
+    this.getRegistryDb().run('INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at', ['runninghub_video_reference', j(profile), new Date().toISOString()]);
+    this.refresh();
+    return profile;
+  }
+
+  async detectVideoReference(): Promise<AiAppProfile> {
+    const profile = this.getVideoReferenceProfile();
+    try {
+      const provider = this.get('runninghub', 'vref2va') as RunningHubAiAppProvider;
+      const nodes = await provider.discoverNodes();
+      const inputs = mapDiscoveredNodes(nodes);
+      if (inputs.refVideos?.length !== 1 || !inputs.prompt.nodeId || inputs.refImages.length > 3) throw new Error('需要明确的一个视频输入、提示词输入及至多三个参考图片输入，请检查 apiCallDemo 映射');
+      return this.persistVideoReferenceProfile({ ...profile, nodes, inputs, capabilities: { supportedModes: ['vref2va'], maxVideoRefs: 1, maxImageRefs: inputs.refImages.length, maxAudioRefs: 0, maxTotalRefs: 1 + inputs.refImages.length }, verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: '视频必填，图片可选；节点已探测，尚未真实生成' } });
+    } catch (error) {
+      return this.persistVideoReferenceProfile({ ...profile, capabilities: { supportedModes: [] }, verification: { status: 'failed', checkedAt: new Date().toISOString(), note: error instanceof Error ? error.message : String(error) } });
+    }
+  }
+
+  confirmVideoReferenceVerified() {
+    const profile = this.getVideoReferenceProfile();
+    return this.persistVideoReferenceProfile({ ...profile, verification: { status: 'verified', checkedAt: new Date().toISOString(), note: '真实视频参考任务已提交' } });
   }
 
   /** Merge a user-edited profile over defaults: appId must be non-empty,

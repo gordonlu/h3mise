@@ -97,6 +97,7 @@ export async function intentFromInput(
       // designations ride along as numbered references and are pinned to the
       // timeline via prompt declarations. Filtering them here desyncs the
       // submitted media from the compiled prompt's <Picture N> tags.
+      if (mode === 'vref2va') return row.type === 'image' || row.type === 'video';
       if (mode === 'ref2va') return row.type === 'image' || row.type === 'audio';
       if (mode === 'i2va') return first;
       if (mode === 'l2va') return last;
@@ -179,7 +180,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   }
 
   // Duration (checked on the INTENT, not the shot defaults — P0-2)
-  const caps = await registry.capabilities(intent.providerId);
+  const caps = await registry.capabilities(intent.providerId, intent.mode);
   if (!(intent.durationSeconds > 0)) {
     sections[1]!.checks.push({ key: 'duration.invalid', severity: 'error', message: `时长 ${intent.durationSeconds} 秒必须大于 0` });
   } else if (caps && caps.maxDuration && intent.durationSeconds > caps.maxDuration) {
@@ -191,7 +192,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   }
 
   // Provider + mode + aspect (unknown capability = blocked, P0-6)
-  const provider = registry.get(intent.providerId);
+  const provider = registry.get(intent.providerId, intent.mode);
   if (!provider) {
     sections[2]!.checks.push({ key: 'provider.missing', severity: 'error', message: `找不到生成服务“${intent.providerId}”` });
   } else {
@@ -287,6 +288,10 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     });
   }
   if (caps) {
+    if (intent.mode === 'vref2va') {
+      if (bindings.filter(r => r.kind === 'video').length !== 1) sections[3]!.checks.push({ key: 'ref.video.required', severity: 'error', message: '视频参考模式必须绑定一个参考视频' });
+      if (bindings.filter(r => r.kind === 'image').length > Math.min(3, caps.maxImageRefs ?? 3)) sections[3]!.checks.push({ key: 'ref.image.limit', severity: 'error', message: '参考图片超过视频工作流可用槽位（最多三张，图片可不提供）' });
+    }
     if (intent.mode === 'ref2va') {
       const nImage = bindings.filter((r) => r.kind === 'image').length;
       const nVideo = bindings.filter((r) => r.kind === 'video').length;

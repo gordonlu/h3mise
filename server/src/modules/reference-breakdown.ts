@@ -104,7 +104,8 @@ export async function prepareReference(p: ProjectContext, ffmpeg: Ffmpeg, assetI
   }
   // All records become visible together only after every local output succeeds.
   return p.db.tx(() => {
-    const shot = input.output === 'shot' ? createShot(p, { title: '参考镜头', durationSeconds: input.end - input.start, h3Mode: 't2va' }) : null;
+    const shotDurationSeconds = Math.min(15, Math.max(1, input.end - input.start));
+    const shot = input.output === 'shot' ? createShot(p, { title: '参考镜头', durationSeconds: shotDurationSeconds, h3Mode: 't2va' }) : null;
     const target = shot?.id ?? input.shotId;
     const assets = outputs.map(o => insertMedia(p, o));
     const bindings = target ? assets.filter(a => a.kind === 'video' || input.output !== 'shot').map(a => createBinding(p, {

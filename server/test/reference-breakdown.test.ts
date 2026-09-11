@@ -37,6 +37,7 @@ test('local breakdown persists edits, cuts and outputs; AI applies only directio
   assert.throws(() => saveSegments(p, asset.id, [{ id: 'a', label: 'A', start: 0, end: 1 }, { id: 'b', label: 'B', start: .5, end: 2 }], saved.revision), /重叠/);
   const result = await prepareReference(p, ffmpeg, asset.id, { start: .2, end: .8, output: 'shot', use: 'motion' });
   assert.equal(result.assets.length, 3);
+  assert.equal(result.shot!.durationSeconds, 1);
   assert.equal(listShots(p).length, 1);
   assert.equal(listBindings(p, result.shot!.id)[0]!.type, 'video');
   assert.deepEqual(listBindings(p, result.shot!.id)[0]!.preserve, ['body motion', 'timing']);

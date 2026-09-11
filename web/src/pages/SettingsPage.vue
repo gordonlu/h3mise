@@ -3,7 +3,7 @@ import { onMounted, ref, watch } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
-import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, RunningHubRegion, StoryboardProviderProfile } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, ProjectConfig, RunningHubRegion, StoryboardProviderProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
 const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; comfyUiConfigured: boolean; aiConfigured: boolean } | null>(null);
@@ -26,9 +26,9 @@ const savingRegion = ref(false);
 const aiApps = ref<Array<{ id: string; name: string; appId: string; description?: string }>>([]);
 const savingAiApps = ref(false);
 const directorStyles = ref<DirectorStylePreset[]>([]);
-const projectConfigForm = ref({
+const projectConfigForm = ref<Pick<ProjectConfig, 'title' | 'default_provider' | 'default_aspect_ratio' | 'default_duration_seconds' | 'visual_style'>>({
   title: '',
-  default_provider: '',
+  default_provider: 'runninghub',
   default_aspect_ratio: '16:9',
   default_duration_seconds: 12,
   visual_style: '',

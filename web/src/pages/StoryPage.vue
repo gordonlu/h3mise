@@ -67,7 +67,7 @@ async function saveStory(patchData: Partial<NonNullable<typeof story.value>>) {
     episodeList.value = await get<StoryEpisodeList>('/api/story/episodes');
     toasts.push({ kind: 'ok', text: '已保存' });
   } catch (e) {
-    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : '保存失败' });
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : t('pages.story.saveFailed') });
   }
 }
 
@@ -87,7 +87,7 @@ async function addEpisode() {
   beatDrafts.value = {};
   skeletonOpen.value = false;
   await load();
-  toasts.push({ kind: 'ok', text: `已建立第 ${episodeList.value?.episodes.length ?? 1} 集；项目素材可直接复用` });
+  toasts.push({ kind: 'ok', text: t('pages.story.episodeCreated', { n: episodeList.value?.episodes.length ?? 1 }) });
 }
 
 async function addBeat() {
@@ -102,14 +102,14 @@ async function updateBeat(id: string, patchData: Partial<StoryBeat>) {
     const saved = await patch<StoryBeat & { shotsSynced?: number; shotsSkipped?: number }>(`/api/story/beats/${id}`, patchData);
     beats.value = beats.value.map((b) => (b.id === id ? saved : b));
     if (saved.shotsSynced != null) {
-      const parts = [`已保存`];
-      if (saved.shotsSynced > 0) parts.push(`同步 ${saved.shotsSynced} 个镜头时长`);
-      if ((saved.shotsSkipped ?? 0) > 0) parts.push(`${saved.shotsSkipped} 个镜头为手动时长未动`);
+      const parts = [t('common.save')];
+      if (saved.shotsSynced != null && saved.shotsSynced > 0) parts.push(t('pages.story.shotsSynced', { n: saved.shotsSynced }));
+      if (saved.shotsSkipped != null && saved.shotsSkipped > 0) parts.push(t('pages.story.shotsSkipped', { n: saved.shotsSkipped }));
       toasts.push({ kind: 'ok', text: parts.join('，') });
     }
   } catch (e) {
     beats.value = before;
-    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : '节拍保存失败' });
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : t('pages.story.beatSaveFailed') });
   }
 }
 
@@ -201,7 +201,7 @@ async function materializeMissingShots() {
   try {
     const result = await post<{ count: number }>('/api/story/beats/materialize-shots', {});
     await load();
-    toasts.push({ kind: 'ok', text: result.count ? `已为 ${result.count} 个 Beat 建立 Shot 和最小导演计划` : '所有 Beat 已有对应 Shot' });
+    toasts.push({ kind: 'ok', text: result.count ? t('pages.story.shotsMaterialized', { n: result.count }) : t('pages.story.allBeatsCovered') });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   }
@@ -216,8 +216,8 @@ async function aiStoryToBeats() {
   const ok = await confirmDialog({
     title: t('pages.story.aiSplit'),
     message: beats.value.length
-      ? `AI 会参考并更新当前 ${beats.value.length} 个 Beat，再原子补齐缺失 Shot；不会在末尾追加第二套。已有专业 Shot 不会被删除。`
-      : 'AI 会生成正式 Beats，并原子创建对应的缺失 Shots；不会调用付费视频 API。',
+      ? t('pages.story.aiSplitMessageWithBeats', { n: beats.value.length })
+      : t('pages.story.aiSplitMessageEmpty'),
     confirmLabel: t('pages.story.aiSplit'),
   });
   if (!ok) return;
@@ -225,8 +225,8 @@ async function aiStoryToBeats() {
   toasts.push({
     kind: 'info',
     text: ai.agentAttached
-      ? '已交给外部 Agent 处理（完成后自动应用）…'
-      : 'AI 拆解已提交，后台处理中（通常 10–60 秒，复杂故事可能需要数分钟）…',
+      ? t('pages.story.aiDeferred')
+      : t('pages.story.aiSubmitted'),
   });
   try {
     if (storyDirty.value) await saveStoryDraft();
@@ -238,7 +238,7 @@ async function aiStoryToBeats() {
       beats: result.beats, mode: 'replace', createMissingShots: true,
     });
     await load();
-    toasts.push({ kind: 'ok', text: `拆解完成：当前 ${applied.beats.length} 个 Beat，补齐 ${applied.shotsCreated} 个 Shot${applied.retainedLinked ? `；保留 ${applied.retainedLinked} 个已有 Shot 关联 Beat` : ''}` });
+    toasts.push({ kind: 'ok', text: t('pages.story.aiDoneBeats', { beats: applied.beats.length, shots: applied.shotsCreated }) + (applied.retainedLinked ? t('pages.story.aiDoneRetained', { n: applied.retainedLinked }) : '') });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   } finally {
@@ -251,7 +251,7 @@ async function openSkeletons() {
   if (!skeletonOpen.value || skeletons.value.length) return;
   try {
     skeletons.value = await get<StorySkeleton[]>('/api/story/skeletons');
-    skeletonRecommendations.value = skeletons.value.slice(0, 3).map((skeleton, index) => ({ skeleton, score: 1 - index * 0.01, reason: '内置通用节奏骨架' }));
+    skeletonRecommendations.value = skeletons.value.slice(0, 3).map((skeleton, index) => ({ skeleton, score: 1 - index * 0.01, reason: t('pages.story.skeletonFallbackReason') }));
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   }
@@ -272,18 +272,18 @@ async function recommendSkeletons() {
 
 async function applyStorySkeleton(skeleton: StorySkeleton) {
   const ok = await confirmDialog({
-    title: `套用「${skeleton.name}」`,
+    title: t('pages.story.applySkeletonTitle', { name: skeleton.name }),
     message: beats.value.length
-      ? `将按这个骨架重整当前 ${beats.value.length} 个 Beat 为 ${skeletonCount.value} 段。已有 Shot 关联会尽量原位保留，不会追加第二套，也不会调用付费 API。`
-      : `将建立 ${skeletonCount.value} 个正式 Beat。不会创建 Shot，也不会调用付费 API。`,
-    confirmLabel: beats.value.length ? '重整当前 Beats' : '建立 Beats',
+      ? t('pages.story.applySkeletonRefine', { n: beats.value.length, count: skeletonCount.value })
+      : t('pages.story.applySkeletonCreate', { count: skeletonCount.value }),
+    confirmLabel: beats.value.length ? t('pages.story.refineBeats') : t('pages.story.createBeats'),
   });
   if (!ok) return;
   try {
     const result = await post<BeatApplyResult>(`/api/story/skeletons/${skeleton.id}/apply`, { segmentCount: skeletonCount.value, mode: 'replace' });
     await load();
     skeletonOpen.value = false;
-    toasts.push({ kind: 'ok', text: `已按「${skeleton.name}」重整为 ${result.beats.length} 个正式 Beat${result.retainedLinked ? `，并保留 ${result.retainedLinked} 个已有 Shot 关联 Beat` : ''}` });
+    toasts.push({ kind: 'ok', text: t('pages.story.skeletonApplied', { name: skeleton.name, n: result.beats.length }) + (result.retainedLinked ? t('pages.story.skeletonAppliedRetained', { n: result.retainedLinked }) : '') });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   }
@@ -312,7 +312,7 @@ onMounted(load);
       </div>
     </div>
 
-    <section v-if="episodeList" class="episode-strip" aria-label="剧集">
+    <section v-if="episodeList" class="episode-strip" :aria-label="t('pages.story.episodeAria')">
       <button
         v-for="episode in episodeList.episodes"
         :key="episode.id"
@@ -325,8 +325,8 @@ onMounted(load);
         <strong>{{ episode.title }}</strong>
         <small>{{ episode.beatCount }} Beats · {{ episode.shotCount }} Shots</small>
       </button>
-      <button class="episode-add" :disabled="aiBusy" @click="addEpisode">＋ 新建剧集</button>
-      <div class="episode-shared-note">角色、场景和素材在整个系列中共用</div>
+      <button class="episode-add" :disabled="aiBusy" @click="addEpisode">{{ t('pages.story.newEpisode') }}</button>
+      <div class="episode-shared-note">{{ t('pages.story.episodeSharedNote') }}</div>
     </section>
 
     <section v-if="skeletonOpen" class="panel skeleton-browser">

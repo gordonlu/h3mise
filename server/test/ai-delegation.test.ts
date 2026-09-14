@@ -174,6 +174,30 @@ test('auto_director runs its multi-round pipeline through delegation', async () 
   assert.equal(listBeats(p).length, 2);
 });
 
+test('propose_project normalizes a malformed proposal defensively', async () => {
+  const p = await project('ai-deleg-propose');
+  const ai = offlineAi();
+  const prepared = await prepareRequest(ai, p, 'propose_project', {}, null);
+  assert.equal(prepared.step.json, true);
+  const done = await applyResult(ai, p, prepared.requestId, JSON.stringify({
+    title: '雨夜旧居',
+    format: 'film',
+    aspectRatio: 'wide',
+    plannedDurationSeconds: 999999,
+    synopsis: '一个男人雨夜回到旧居。',
+    body: '第一幕：主角走进雨夜小巷。',
+  }), null);
+  assert.equal(done.status, 'applied');
+  if (done.status === 'applied') {
+    const result = done.result as { kind: string; proposal: { title: string; format: string; aspectRatio: string; plannedDurationSeconds: number } };
+    assert.equal(result.kind, 'project_proposal');
+    assert.equal(result.proposal.title, '雨夜旧居');
+    assert.equal(result.proposal.format, p.config.format);
+    assert.equal(result.proposal.aspectRatio, p.config.default_aspect_ratio);
+    assert.equal(result.proposal.plannedDurationSeconds, 3600);
+  }
+});
+
 test('unknown requests and actions fail with explicit codes', async () => {
   const p = await project('ai-deleg-errors');
   const ai = offlineAi();

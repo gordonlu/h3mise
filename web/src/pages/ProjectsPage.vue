@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { confirmDialog } from '../stores/confirm';
-import { post } from '../api/client';
+import { patch, post } from '../api/client';
 import { t } from '../stores/locale';
 
 const project = useProjectStore();
@@ -12,7 +12,7 @@ const router = useRouter();
 const toasts = useToastStore();
 const creating = ref(false);
 const installingDemo = ref('');
-const form = ref({ title: '', format: 'single_shot', defaultAspectRatio: '16:9', defaultDurationSeconds: 12 });
+const form = ref({ title: '', description: '', format: 'single_shot', defaultAspectRatio: '16:9', defaultDurationSeconds: 12 });
 const error = ref('');
 
 const FORMATS = [
@@ -43,10 +43,21 @@ async function createProject() {
   }
   creating.value = true;
   try {
-    const created = await project.createProject({ ...form.value, format: form.value.format as never });
+    const description = form.value.description.trim();
+    const created = await project.createProject({
+      title: form.value.title,
+      format: form.value.format as never,
+      defaultAspectRatio: form.value.defaultAspectRatio,
+      defaultDurationSeconds: form.value.defaultDurationSeconds,
+    });
     if (!created) return;
+    if (description) {
+      // Seed the story with the description; the Story page then offers an
+      // AI structure proposal (?propose=1).
+      await patch('/api/story', { title: form.value.title, body: description });
+    }
     toasts.push({ kind: 'ok', text: t('workflow.projects.projectValueCreated', { v0: form.value.title }) });
-    router.push(form.value.format === 'story' ? '/story' : '/shots');
+    router.push(description ? '/story?propose=1' : form.value.format === 'story' ? '/story' : '/shots');
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -112,29 +123,36 @@ onMounted(() => project.refreshProjects());
             {{ t('workflow.projects.projectName') }}
             <input v-model="form.title" :placeholder="t('workflow.projects.eGRainyNightAlley')" @keyup.enter="createProject" />
           </label>
-          <label class="field">{{ t('workflow.projects.projectType') }}</label>
-          <div class="col">
-            <label v-for="f in FORMATS" :key="f.value" class="format-opt" :class="{ on: form.format === f.value }">
-              <input v-model="form.format" type="radio" :value="f.value" />
-              <span class="format-label">{{ f.label }}</span>
-              <span class="muted">{{ f.desc() }}</span>
-            </label>
-          </div>
-          <div class="row">
-            <label class="field grow">
-              {{ t('workflow.projects.aspectRatio') }}
-              <select v-model="form.defaultAspectRatio">
-                <option>16:9</option>
-                <option>9:16</option>
-                <option>4:3</option>
-                <option>1:1</option>
-              </select>
-            </label>
-            <label class="field grow">
-              {{ t('workflow.projects.defaultShotDurationS') }}
-              <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" :title="t('workflow.projects.defaultDurationForEachNewShotIncluding')" placeholder="12" />
-            </label>
-          </div>
+          <label class="field">
+            {{ t('workflow.projects.describeOptional') }}
+            <textarea v-model="form.description" rows="3" :placeholder="t('workflow.projects.describePlaceholder')" />
+          </label>
+          <p v-if="form.description.trim()" class="muted propose-hint">{{ t('workflow.projects.aiProposeHint') }}</p>
+          <details class="manual-options">
+            <summary>{{ t('workflow.projects.manualOptions') }}</summary>
+            <div class="col manual-body">
+              <label v-for="f in FORMATS" :key="f.value" class="format-opt" :class="{ on: form.format === f.value }">
+                <input v-model="form.format" type="radio" :value="f.value" />
+                <span class="format-label">{{ f.label }}</span>
+                <span class="muted">{{ f.desc() }}</span>
+              </label>
+              <div class="row">
+                <label class="field grow">
+                  {{ t('workflow.projects.aspectRatio') }}
+                  <select v-model="form.defaultAspectRatio">
+                    <option>16:9</option>
+                    <option>9:16</option>
+                    <option>4:3</option>
+                    <option>1:1</option>
+                  </select>
+                </label>
+                <label class="field grow">
+                  {{ t('workflow.projects.defaultShotDurationS') }}
+                  <input v-model.number="form.defaultDurationSeconds" type="number" min="1" max="15" :title="t('workflow.projects.defaultDurationForEachNewShotIncluding')" placeholder="12" />
+                </label>
+              </div>
+            </div>
+          </details>
           <p v-if="error" class="badge bad">{{ error }}</p>
           <button class="primary" :disabled="creating" @click="createProject">{{ creating ? t('workflow.projects.creating') : t('workflow.projects.createProject') }}</button>
           <div class="demo-entry">
@@ -184,6 +202,10 @@ onMounted(() => project.refreshProjects());
 .page { padding: 28px 32px; max-width: 1100px; margin: 0 auto; }
 h1 { font-size: 24px; margin: 0 0 4px; font-family: var(--serif); }
 .grid.create { grid-template-columns: 1fr 1.3fr; align-items: start; margin-top: 20px; }
+.propose-hint { margin: -4px 0 0; }
+.manual-options { border-top: 1px dashed var(--line); padding-top: 10px; }
+.manual-options summary { cursor: pointer; font-size: 12px; color: var(--text-2); }
+.manual-body { margin-top: 10px; }
 .format-opt {
   display: flex;
   align-items: center;

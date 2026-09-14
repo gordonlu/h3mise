@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { get, post, patch, del } from '../api/client';
 import { useToastStore } from '../stores/toast';
 import { useAiStore } from '../stores/ai';
+import { useProjectStore } from '../stores/project';
 import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
 import type { BeatApplyResult, SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StoryEpisodeList, StorySkeleton } from '@h3mise/shared';
@@ -10,6 +12,9 @@ import EmptyState from '../components/EmptyState.vue';
 
 const toasts = useToastStore();
 const ai = useAiStore();
+const project = useProjectStore();
+const route = useRoute();
+const router = useRouter();
 const story = ref<{ id: string; title: string; synopsis: string; body: string; plannedDurationSeconds: number } | null>(null);
 const episodeList = ref<StoryEpisodeList | null>(null);
 const beats = ref<StoryBeat[]>([]);
@@ -289,7 +294,75 @@ async function applyStorySkeleton(skeleton: StorySkeleton) {
   }
 }
 
-onMounted(load);
+interface ProjectProposal {
+  title: string;
+  format: 'single_shot' | 'sequence' | 'story';
+  aspectRatio: string;
+  plannedDurationSeconds: number;
+  visualStyle: string;
+  synopsis: string;
+  body: string;
+}
+
+const proposal = ref<ProjectProposal | null>(null);
+const proposeBusy = ref(false);
+const proposeDismissed = ref(false);
+
+/** Conversational creation: the description seeded the story body; ask the
+ * current inference source for a minimal project structure to review. */
+async function proposeProject(): Promise<void> {
+  if (proposeBusy.value || proposal.value || proposeDismissed.value) return;
+  proposeBusy.value = true;
+  try {
+    const { result } = await ai.runAction<{ proposal?: ProjectProposal }>('propose_project', {});
+    if (result?.proposal) proposal.value = { ...result.proposal };
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  } finally {
+    proposeBusy.value = false;
+  }
+}
+
+function dismissProposal(): void {
+  proposeDismissed.value = true;
+  proposal.value = null;
+  proposeBusy.value = false;
+  if (route.query.propose) void router.replace({ query: { ...route.query, propose: undefined } });
+}
+
+async function applyProposal(): Promise<void> {
+  const p = proposal.value;
+  if (!p) return;
+  try {
+    await patch('/api/current-project/config', {
+      title: p.title,
+      format: p.format,
+      default_aspect_ratio: p.aspectRatio,
+      visual_style: p.visualStyle,
+    });
+    await patch('/api/story', {
+      title: p.title,
+      synopsis: p.synopsis,
+      body: p.body || story.value?.body || '',
+      plannedDurationSeconds: p.plannedDurationSeconds,
+    });
+    await project.refreshCurrent();
+    await load();
+    toasts.push({ kind: 'ok', text: t('pages.story.proposeApplied') });
+    proposal.value = null;
+    if (route.query.propose) void router.replace({ query: { ...route.query, propose: undefined } });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+onMounted(async () => {
+  await load();
+  if (route.query.propose === '1') {
+    await ai.refresh();
+    if (aiEnabled.value) void proposeProject();
+  }
+});
 </script>
 
 <template>
@@ -311,6 +384,36 @@ onMounted(load);
         </button>
       </div>
     </div>
+
+    <section v-if="proposal || proposeBusy" class="panel propose-card">
+      <div class="propose-head">
+        <strong>✦ {{ t('pages.story.proposeTitle') }}</strong>
+        <span class="muted">{{ proposeBusy ? t('pages.story.proposeRunning') : t('pages.story.proposeIntro') }}</span>
+      </div>
+      <div v-if="proposal" class="propose-grid">
+        <label class="field"><span>{{ t('pages.settings.projectTitle') }}</span><input v-model="proposal.title" /></label>
+        <label class="field"><span>{{ t('pages.story.formatLabel') }}</span>
+          <select v-model="proposal.format">
+            <option value="single_shot">{{ t('pages.story.formatSingle') }}</option>
+            <option value="sequence">{{ t('pages.story.formatSequence') }}</option>
+            <option value="story">{{ t('pages.story.formatStory') }}</option>
+          </select>
+        </label>
+        <label class="field"><span>{{ t('pages.settings.aspectRatio') }}</span>
+          <select v-model="proposal.aspectRatio">
+            <option>16:9</option><option>9:16</option><option>4:3</option><option>1:1</option>
+          </select>
+        </label>
+        <label class="field"><span>{{ t('pages.story.plannedDuration') }}</span><input v-model.number="proposal.plannedDurationSeconds" type="number" min="10" max="3600" /></label>
+        <label class="field propose-wide"><span>{{ t('pages.settings.visualStyle') }}</span><input v-model="proposal.visualStyle" /></label>
+        <label class="field propose-wide"><span>{{ t('pages.story.synopsis') }}</span><textarea v-model="proposal.synopsis" rows="2"></textarea></label>
+        <label class="field propose-wide"><span>{{ t('pages.story.body') }}</span><textarea v-model="proposal.body" rows="4"></textarea></label>
+      </div>
+      <div class="row propose-actions">
+        <button v-if="proposal" class="primary sm" @click="applyProposal">{{ t('pages.story.proposeApply') }}</button>
+        <button class="sm ghost" @click="dismissProposal">{{ t('pages.story.proposeIgnore') }}</button>
+      </div>
+    </section>
 
     <section v-if="episodeList" class="episode-strip" :aria-label="t('pages.story.episodeAria')">
       <button
@@ -520,4 +623,11 @@ h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
 .beat-shots { border-top: 1px dashed var(--line); padding-top: 7px; gap: 5px; }
 .shot-link { text-decoration: none; }
 .shot-link:hover { text-decoration: none; filter: brightness(1.05); }
+.propose-card { padding: 14px 16px; display: grid; gap: 10px; margin-bottom: 14px; border-color: var(--accent-line); }
+.propose-head { display: grid; gap: 2px; }
+.propose-head strong { font-size: 13.5px; color: var(--accent-text); }
+.propose-head .muted { font-size: 11.5px; }
+.propose-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.propose-wide { grid-column: 1 / -1; }
+.propose-actions { justify-content: flex-end; }
 </style>

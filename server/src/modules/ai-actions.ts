@@ -31,6 +31,7 @@ export type ActionName =
   | 'improve_camera'
   | 'improve_performance'
   | 'brief_to_plan'
+  | 'propose_project'
   | 'reality_check'
   | 'continuity_check'
   | 'compile_prompt'
@@ -424,6 +425,32 @@ ${PLAN_SCHEMA_HINT}`,
         temperature: 0.3,
       };
     }
+    case 'propose_project': {
+      const description = String(body.description ?? storyMod.getStory(ctx).body ?? '').trim();
+      if (!description) throw new Error('description is empty');
+      return {
+        system: `你是 H3Mise 项目策划。根据用户的描述提出一个最小项目结构提案。
+
+只返回一个 JSON 对象，字段严格为：
+{
+  "title": string,                              // 简洁的项目名
+  "format": "single_shot"|"sequence"|"story",   // 单镜头实验 / 多镜头短片 / 系列剧集
+  "aspectRatio": string,                        // 如 "16:9" / "9:16" / "4:3" / "1:1"
+  "plannedDurationSeconds": number,             // 全片目标时长（秒）
+  "visualStyle": string,                        // 通用视觉风格（媒介、光线、年代感）；不引用具体作品名
+  "synopsis": string,                           // 一句话梗概
+  "body": string                                // 故事正文初稿：分段、可拍的连续事件，保留用户描述中的事实
+}
+
+规则：不发明用户描述中不存在的角色或情节；描述不足时给出保守的最小结构。所有文字字段一律使用中文。`,
+        messages: [{
+          role: 'user',
+          content: `当前配置：${JSON.stringify({ title: ctx.config.title, format: ctx.config.format, aspectRatio: ctx.config.default_aspect_ratio, durationSeconds: ctx.config.default_duration_seconds })}\n\n用户描述：\n${description}`,
+        }],
+        json: true,
+        temperature: 0.4,
+      };
+    }
     case 'reality_check': {
       if (!shotId) throw new Error('shotId required');
       return {
@@ -604,6 +631,31 @@ export async function advanceAction(
         const reason = second instanceof Error ? second.message : String(second);
         throw new Error(`AI 返回格式自动修复后仍不可用：${reason}`);
       }
+    }
+    case 'propose_project': {
+      // Defensive normalization: a proposal is advisory, so malformed fields
+      // fall back to the current project configuration instead of failing.
+      const raw = latest && typeof latest === 'object' && !Array.isArray(latest) ? latest as Record<string, unknown> : {};
+      const str = (key: string): string => typeof raw[key] === 'string' ? (raw[key] as string).trim() : '';
+      const format = ['single_shot', 'sequence', 'story'].includes(String(raw.format)) ? String(raw.format) : ctx.config.format;
+      const aspectRatio = /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(String(raw.aspectRatio)) ? String(raw.aspectRatio) : ctx.config.default_aspect_ratio;
+      const durationRaw = Number(raw.plannedDurationSeconds);
+      const plannedDurationSeconds = Number.isFinite(durationRaw) ? Math.min(3600, Math.max(10, Math.round(durationRaw))) : 60;
+      return {
+        done: true,
+        result: {
+          kind: 'project_proposal',
+          proposal: {
+            title: str('title') || ctx.config.title,
+            format,
+            aspectRatio,
+            plannedDurationSeconds,
+            visualStyle: str('visualStyle') || ctx.config.visual_style || '',
+            synopsis: str('synopsis'),
+            body: str('body'),
+          },
+        },
+      };
     }
     case 'reality_check':
       return { done: true, result: { kind: 'review', text: latest } };

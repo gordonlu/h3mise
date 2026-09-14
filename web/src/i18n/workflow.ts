@@ -1156,6 +1156,10 @@ export const workflowTranslations: Record<'zh' | 'en' | 'ja', Record<string, str
 
 export const workflowManualTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>> = {
   zh: {
+    'workflow.projects.describeOptional': '描述（可选）',
+    'workflow.projects.describePlaceholder': '用一两句话描述你想做的片子；创建后 AI 会据此提出结构建议。',
+    'workflow.projects.aiProposeHint': '创建后会跳到故事页，AI 将提出标题、格式、时长与正文初稿。',
+    'workflow.projects.manualOptions': '手动选项（格式 / 画幅 / 默认镜头时长）',
     'workflow.production.providerMockNote': '离线免费，适合完整验收',
     'workflow.production.reasonActiveQueue': '已在全局渲染队列中',
     'workflow.production.reasonSelectedFresh': '已有与当前输入一致的 Selected Take',
@@ -1172,6 +1176,10 @@ export const workflowManualTranslations: Record<'zh' | 'en' | 'ja', Record<strin
     'workflow.timeline.finalCheckFailedMessage': '成片检查未通过：{message}',
   },
   en: {
+    'workflow.projects.describeOptional': 'Description (optional)',
+    'workflow.projects.describePlaceholder': 'Describe the film in a sentence or two; after creation AI proposes a structure from it.',
+    'workflow.projects.aiProposeHint': 'Creation opens the Story page where AI proposes a title, format, duration, and first body draft.',
+    'workflow.projects.manualOptions': 'Manual options (format / aspect / default shot duration)',
     'workflow.production.providerMockNote': 'Free and offline; ideal for a full workflow trial',
     'workflow.production.reasonActiveQueue': 'Already in the global render queue',
     'workflow.production.reasonSelectedFresh': 'A Selected Take already matches the current inputs',
@@ -1188,6 +1196,10 @@ export const workflowManualTranslations: Record<'zh' | 'en' | 'ja', Record<strin
     'workflow.timeline.finalCheckFailedMessage': 'Final check failed: {message}',
   },
   ja: {
+    'workflow.projects.describeOptional': '説明（任意）',
+    'workflow.projects.describePlaceholder': '作りたい作品を 1〜2 文で説明してください。作成後、AI がそれを基に構成を提案します。',
+    'workflow.projects.aiProposeHint': '作成するとストーリーページに移動し、AI がタイトル・形式・尺・本文の初稿を提案します。',
+    'workflow.projects.manualOptions': '手動オプション（形式 / アスペクト / 既定の Shot 尺）',
     'workflow.production.providerMockNote': '無料・オフラインで、全フローの確認に最適です',
     'workflow.production.reasonActiveQueue': 'グローバルレンダーキューで処理中',
     'workflow.production.reasonSelectedFresh': '現在の入力に一致する Selected Take があります',

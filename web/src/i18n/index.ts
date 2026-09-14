@@ -121,6 +121,10 @@ export const zh = {
       refineBeats: '重整当前 Beats', createBeats: '建立 Beats',
       skeletonApplied: '已按「{name}」重整为 {n} 个正式 Beat',
       skeletonAppliedRetained: '；保留了 {n} 个已有 Shot 关联',
+      proposeTitle: 'AI 结构提案', proposeIntro: '根据你的描述生成；应用前可以修改。', proposeRunning: '正在生成结构提案…',
+      proposeApply: '应用提案', proposeIgnore: '忽略', proposeApplied: '提案已应用',
+      formatLabel: '项目格式', formatSingle: '单镜头', formatSequence: '短片', formatStory: '系列剧集',
+      plannedDuration: '全片目标时长（秒）',
     },
     shots: {
       title: '镜头板',
@@ -445,6 +449,10 @@ export const en: typeof zh = {
       refineBeats: 'Reshape current beats', createBeats: 'Create beats',
       skeletonApplied: 'Reshaped into {n} canonical beats with "{name}"',
       skeletonAppliedRetained: '; kept {n} existing shot links',
+      proposeTitle: 'AI structure proposal', proposeIntro: 'Generated from your description; edit anything before applying.', proposeRunning: 'Generating a structure proposal…',
+      proposeApply: 'Apply proposal', proposeIgnore: 'Ignore', proposeApplied: 'Proposal applied',
+      formatLabel: 'Project format', formatSingle: 'Single shot', formatSequence: 'Short sequence', formatStory: 'Series / episodes',
+      plannedDuration: 'Target total duration (s)',
     },
     shots: {
       title: 'Shotboard',
@@ -744,6 +752,10 @@ export const ja: typeof zh = {
       refineBeats: '現在の Beat を再構成', createBeats: 'Beat を作成',
       skeletonApplied: '「{name}」で {n} 個の正式な Beat に再構成しました',
       skeletonAppliedRetained: '；既存の Shot 関連を {n} 個保持',
+      proposeTitle: 'AI 構成提案', proposeIntro: '説明から生成しました。適用前に編集できます。', proposeRunning: '構成提案を生成中…',
+      proposeApply: '提案を適用', proposeIgnore: '無視', proposeApplied: '提案を適用しました',
+      formatLabel: 'プロジェクト形式', formatSingle: '単一ショット', formatSequence: '短編', formatStory: 'シリーズ / エピソード',
+      plannedDuration: '全体の目標尺（秒）',
     },
     shots: {
       title: 'Shotboard',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useProjectStore } from './stores/project';
 import { useRenderStore } from './stores/render';
@@ -14,6 +14,7 @@ import type { AppEvent, RenderJob } from '@h3mise/shared';
 import type { ProjectGuideSummary } from '@h3mise/shared';
 import ProjectGuideBar from './components/ProjectGuideBar.vue';
 import WorkspaceNav from './components/WorkspaceNav.vue';
+import CommandPalette from './components/CommandPalette.vue';
 
 const project = useProjectStore();
 const route = useRoute();
@@ -22,9 +23,25 @@ const toasts = useToastStore();
 const theme = useThemeStore();
 const health = ref<{ ffmpeg: { available: boolean }; runningHubConfigured: boolean; aiConfigured: boolean } | null>(null);
 const projectsOpen = ref(false);
+const paletteOpen = ref(false);
 const projectGuide = ref<ProjectGuideSummary | null>(null);
 const projectsRef = ref<HTMLElement | null>(null);
 let off: (() => void) | null = null;
+
+/** Production pages run in a dark "darkroom" cinema theme; planning pages
+ * keep the user's own theme preference. */
+function isCinemaPath(path: string): boolean {
+  return path.startsWith('/shots/') || path === '/timeline';
+}
+
+const effectiveTheme = computed(() => (theme.cinema ? 'dark' : theme.theme));
+
+function onGlobalKeydown(e: KeyboardEvent): void {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    paletteOpen.value = !paletteOpen.value;
+  }
+}
 
 function cycleLocale(): void {
   setLocale(locale.value === 'zh' ? 'en' : locale.value === 'en' ? 'ja' : 'zh');
@@ -101,6 +118,7 @@ function notify(e: AppEvent) {
 }
 
 onMounted(async () => {
+  theme.setCinema(isCinemaPath(route.path));
   theme.apply();
   await project.bootstrap();
   await render.refresh();
@@ -111,6 +129,7 @@ onMounted(async () => {
     /* server down */
   }
   document.addEventListener('mousedown', onProjectsClickOutside);
+  document.addEventListener('keydown', onGlobalKeydown);
   off = subscribeEvents((e: AppEvent) => {
     render.onEvent(e.type, e as unknown as Record<string, unknown>);
     notify(e);
@@ -139,9 +158,13 @@ onUnmounted(() => {
   off?.();
   if (guideTimer) clearTimeout(guideTimer);
   document.removeEventListener('mousedown', onProjectsClickOutside);
+  document.removeEventListener('keydown', onGlobalKeydown);
 });
 
-watch(() => route.path, () => void scheduleGuideRefresh());
+watch(() => route.path, (path) => {
+  theme.setCinema(isCinemaPath(path));
+  void scheduleGuideRefresh();
+});
 </script>
 
 <template>
@@ -173,6 +196,10 @@ watch(() => route.path, () => void scheduleGuideRefresh());
         </div>
         <WorkspaceNav />
         <div class="spacer" />
+        <button class="ghost palette-button" :title="t('palette.open')" @click="paletteOpen = true">
+          <svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+          <span class="kbd">⌘K</span>
+        </button>
         <button class="ghost queue-button" @click="render.drawerOpen = true">
           {{ t('common.renderQueue') }}
           <span v-if="activeJobCount()" class="badge accent no-dot">{{ activeJobCount() }}</span>
@@ -190,8 +217,8 @@ watch(() => route.path, () => void scheduleGuideRefresh());
       <button class="ghost locale-toggle" :title="localeTitle()" @click="cycleLocale">
         {{ localeLabel() }}
       </button>
-      <button class="ghost theme-toggle" :title="theme.theme === 'light' ? t('shell.darkTheme') : t('shell.lightTheme')" @click="theme.toggle()">
-        {{ theme.theme === 'light' ? '☾' : '☀' }}
+      <button class="ghost theme-toggle" :title="effectiveTheme === 'light' ? t('shell.darkTheme') : t('shell.lightTheme')" @click="theme.toggle()">
+        {{ effectiveTheme === 'light' ? '☾' : '☀' }}
       </button>
     </header>
 
@@ -205,6 +232,7 @@ watch(() => route.path, () => void scheduleGuideRefresh());
     </main>
 
     <RenderQueueDrawer v-if="render.drawerOpen" @close="render.drawerOpen = false" />
+    <CommandPalette v-if="paletteOpen" @close="paletteOpen = false" />
     <ToastHost />
     <ConfirmHost />
   </div>
@@ -285,6 +313,10 @@ watch(() => route.path, () => void scheduleGuideRefresh());
 .ghost-link { color: var(--text-2); font-size: 13px; padding: 6px 9px; border-radius: 7px; }
 .ghost-link:hover { color: var(--text); background: var(--bg-subtle); text-decoration: none; }
 .queue-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.palette-button { display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px; }
+.palette-button svg { width: 15px; height: 15px; fill: none; stroke: var(--text-3); stroke-width: 1.6; stroke-linecap: round; }
+.palette-button:hover svg { stroke: var(--text-2); }
+.palette-button .kbd { font-size: 10px; }
 .system-link { position: relative; white-space: nowrap; }
 .system-alert { position: absolute; top: 4px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--bg-2); }
 .theme-toggle { font-size: 15px; padding: 5px 9px; }

@@ -33,6 +33,10 @@ export const zh = {
     empty: '空',
     unconfigured: '未配置',
   },
+  palette: {
+    open: '打开指令面板', placeholder: '搜索页面、镜头，或输入指令…', navigation: '跳转', actions: '操作', shots: '镜头',
+    empty: '没有匹配结果', toggleTheme: '切换主题', renderQueue: '打开渲染队列',
+  },
   guide: {
     progress: '项目进度', storySetup: '故事 / 设定', shotList: 'Shot 列表', production: '镜头制作', assembly: '成片编排', export: '导出',
     selectedTakes: '{selected} / {total} 已选片', complete: '已完成', current: '当前步骤', attention: '需要处理', upcoming: '尚未开始', aria: '制作进度',
@@ -149,6 +153,10 @@ export const en: typeof zh = {
     empty: 'Empty',
     unconfigured: 'Unconfigured',
   },
+  palette: {
+    open: 'Open command palette', placeholder: 'Search pages, shots, or type a command…', navigation: 'Go to', actions: 'Actions', shots: 'Shots',
+    empty: 'No matching results', toggleTheme: 'Toggle theme', renderQueue: 'Open render queue',
+  },
   guide: {
     progress: 'Project progress', storySetup: 'Story / Setup', shotList: 'Shot List', production: 'Shot Production', assembly: 'Assembly', export: 'Export',
     selectedTakes: '{selected} / {total} selected', complete: 'Complete', current: 'Current step', attention: 'Needs attention', upcoming: 'Not started', aria: 'Production progress',
@@ -254,6 +262,10 @@ export const ja: typeof zh = {
   common: {
     renderQueue: 'レンダーキュー', cancel: 'キャンセル', confirm: '確認', delete: '削除', create: '作成', save: '保存',
     close: '閉じる', add: '追加', remove: '取り除く', loading: '読み込み中…', empty: '空', unconfigured: '未設定',
+  },
+  palette: {
+    open: 'コマンドパレットを開く', placeholder: 'ページ、Shot、コマンドを検索…', navigation: '移動', actions: '操作', shots: 'Shot',
+    empty: '一致する結果がありません', toggleTheme: 'テーマを切り替え', renderQueue: 'レンダーキューを開く',
   },
   guide: {
     progress: 'プロジェクト進捗', storySetup: 'ストーリー / 設定', shotList: 'Shot リスト', production: 'Shot 制作', assembly: '本編構成', export: '書き出し',

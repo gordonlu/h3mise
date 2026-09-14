@@ -78,6 +78,19 @@ function elapsedText(job: RenderJob): string {
 
 const CANCELLABLE = ACTIVE;
 
+/** Theater mode — a full-screen cinematic view of one job. Stores the key
+ * (not the object) so SSE-driven refreshes keep the view current. */
+const theaterKey = ref<string | null>(null);
+const theaterJob = computed(() => render.jobs.find((j) => `${j.projectId}/${j.id}` === theaterKey.value) ?? null);
+
+const STAGES = ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING', 'LOCAL_READY'] as const;
+function stageState(job: RenderJob, stage: (typeof STAGES)[number]): 'done' | 'current' | 'todo' {
+  const current = STAGES.indexOf(job.status as (typeof STAGES)[number]);
+  if (current < 0) return job.status === 'SUCCEEDED' ? 'done' : 'todo';
+  const target = STAGES.indexOf(stage);
+  return target < current ? 'done' : target === current ? 'current' : 'todo';
+}
+
 // P1: RunningHub has no remote cancel for AI App tasks — cancelling only
 // stops local polling; the remote task may still run and cost money.
 const cancelWarnsRemote = (job: RenderJob) => job.provider !== 'mock' && ['QUEUED', 'RUNNING'].includes(job.status);
@@ -174,10 +187,54 @@ onMounted(() => render.refresh());
               <button v-else class="sm" @click="retry(job)">重新提交</button>
             </div>
             <div v-if="CANCELLABLE.includes(job.status)" class="job-actions">
+              <button class="sm" @click="theaterKey = `${job.projectId}/${job.id}`">剧院模式</button>
               <button class="sm danger" @click="cancel(job)">取消任务</button>
             </div>
           </article>
         </section>
+      </div>
+    </div>
+
+    <!-- Theater — full-screen view of one job; dark regardless of theme -->
+    <div v-if="theaterJob" class="theater" @click.self="theaterKey = null">
+      <div class="theater-card">
+        <div class="theater-head">
+          <span class="theater-status">{{ STATUS_LABEL[theaterJob.status] }}</span>
+          <button class="ghost theater-close" aria-label="关闭" @click="theaterKey = null">✕</button>
+        </div>
+        <div class="theater-orb-wrap" :class="`is-${theaterJob.status}`">
+          <span class="theater-orb" />
+        </div>
+        <h2 class="theater-title">{{ theaterJob.shotTitle || theaterJob.shotId }}</h2>
+        <p class="theater-project">{{ theaterJob.projectTitle || theaterJob.projectId }}</p>
+        <div class="theater-elapsed">
+          <span class="counter">{{ elapsedText(theaterJob) }}</span>
+          <span class="label">{{ active.includes(theaterJob) ? '已运行' : '总耗时' }}</span>
+        </div>
+        <div class="theater-stages">
+          <span v-for="stage in STAGES" :key="stage" class="stage" :class="stageState(theaterJob, stage)">
+            <i />
+            <em>{{ STATUS_LABEL[stage] }}</em>
+          </span>
+        </div>
+        <div class="theater-stats">
+          <div v-if="costText(theaterJob)" class="stat">
+            <span class="k">累计费用</span>
+            <span class="v">{{ costText(theaterJob) }}</span>
+          </div>
+          <div v-if="theaterJob.providerTaskId" class="stat">
+            <span class="k">服务任务</span>
+            <span class="v mono">{{ theaterJob.providerTaskId }}</span>
+          </div>
+          <div v-if="theaterJob.error" class="stat error-stat">
+            <span class="k">错误</span>
+            <span class="v">{{ theaterJob.error.slice(0, 300) }}</span>
+          </div>
+        </div>
+        <div class="theater-actions">
+          <button class="sm" @click="openShot(theaterJob)">查看镜头</button>
+          <button v-if="CANCELLABLE.includes(theaterJob.status)" class="sm danger" @click="cancel(theaterJob)">取消任务</button>
+        </div>
       </div>
     </div>
   </div>
@@ -214,4 +271,64 @@ onMounted(() => render.refresh());
 .task-ref code { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .error { min-width: 0; max-width: 100%; color: var(--bad); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; background: rgba(217, 99, 92, 0.08); padding: 8px 9px; border-radius: 6px; }
 .job-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* --------------------------------------------------------------- theater */
+.theater {
+  position: fixed; inset: 0; z-index: 65;
+  background: rgba(8, 9, 11, 0.86);
+  backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  animation: theater-in 0.2s;
+}
+.theater-card {
+  width: 640px; max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 64px); overflow: auto;
+  background: #0e1114; border: 1px solid #262d36; border-radius: 18px;
+  padding: 24px 30px 22px; color: #eae7e0;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+.theater-card button { background: #1f242d; border-color: #3d4653; color: #eae7e0; }
+.theater-card button:hover { background: #2a313b; border-color: #4d5868; }
+.theater-card button.danger { color: #e5736b; border-color: rgba(229, 115, 107, 0.5); background: none; }
+.theater-head { display: flex; align-items: center; justify-content: space-between; }
+.theater-status { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #ff9169; text-transform: uppercase; }
+.theater-close { padding: 4px 10px; }
+.theater-orb-wrap { padding: 18px 0 6px; }
+.theater-orb {
+  display: inline-block; width: 72px; height: 72px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, rgba(255, 108, 55, 0.95), rgba(255, 108, 55, 0.10) 60%, transparent 72%);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.theater-orb-wrap.is-LOCAL_READY .theater-orb,
+.theater-orb-wrap.is-SUCCEEDED .theater-orb {
+  animation: none;
+  background: radial-gradient(circle at 50% 42%, rgba(76, 175, 125, 0.9), rgba(76, 175, 125, 0.10) 60%, transparent 72%);
+}
+.theater-orb-wrap.is-FAILED .theater-orb,
+.theater-orb-wrap.is-CANCELLED .theater-orb,
+.theater-orb-wrap.is-EXPIRED .theater-orb {
+  animation: none;
+  background: radial-gradient(circle at 50% 42%, rgba(229, 115, 107, 0.85), rgba(229, 115, 107, 0.10) 60%, transparent 72%);
+}
+.theater-title { margin: 6px 0 2px; font-size: 22px; font-weight: 680; letter-spacing: -0.02em; }
+.theater-project { margin: 0 0 14px; color: #70767f; font-size: 12.5px; }
+.theater-elapsed { display: flex; flex-direction: column; gap: 2px; margin-bottom: 18px; }
+.theater-elapsed .counter { font-family: var(--mono); font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.theater-elapsed .label { color: #70767f; font-size: 11px; }
+.theater-stages { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+.stage { display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 62px; color: #70767f; }
+.stage i { width: 10px; height: 10px; border-radius: 50%; background: #2a313b; }
+.stage.done i { background: #ff6c37; }
+.stage.current i { background: #ff6c37; box-shadow: 0 0 0 5px rgba(255, 108, 55, 0.20); animation: pulse 1.3s ease-in-out infinite; }
+.stage em { font-style: normal; font-size: 10.5px; }
+.stage.done em { color: #a9aeb6; }
+.stage.current em { color: #ff9169; font-weight: 650; }
+.theater-stats { display: grid; gap: 7px; margin: 0 0 16px; }
+.stat { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: baseline; text-align: left; padding: 7px 11px; border-radius: 8px; background: #14171c; }
+.stat .k { color: #70767f; font-size: 11px; }
+.stat .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #eae7e0; }
+.error-stat .v { color: #e5736b; white-space: normal; }
+.theater-actions { display: flex; justify-content: center; gap: 10px; }
+@keyframes theater-in { from { opacity: 0; } }
 </style>

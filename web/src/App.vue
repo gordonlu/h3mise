@@ -40,14 +40,6 @@ function brainLabel(): string {
   return t('brain.offline');
 }
 
-/** Production pages run in a dark "darkroom" cinema theme; planning pages
- * keep the user's own theme preference. */
-function isCinemaPath(path: string): boolean {
-  return path.startsWith('/shots/') || path === '/timeline';
-}
-
-const effectiveTheme = computed(() => (theme.cinema ? 'dark' : theme.theme));
-
 function onGlobalKeydown(e: KeyboardEvent): void {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
@@ -133,7 +125,6 @@ function notify(e: AppEvent) {
 }
 
 onMounted(async () => {
-  theme.setCinema(isCinemaPath(route.path));
   theme.apply();
   await project.bootstrap();
   await render.refresh();
@@ -180,8 +171,7 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalKeydown);
 });
 
-watch(() => route.path, (path) => {
-  theme.setCinema(isCinemaPath(path));
+watch(() => route.path, () => {
   void scheduleGuideRefresh();
 });
 </script>
@@ -268,8 +258,8 @@ watch(() => route.path, (path) => {
       <button class="ghost locale-toggle" :title="localeTitle()" @click="cycleLocale">
         {{ localeLabel() }}
       </button>
-      <button class="ghost theme-toggle" :title="effectiveTheme === 'light' ? t('shell.darkTheme') : t('shell.lightTheme')" @click="theme.toggle()">
-        {{ effectiveTheme === 'light' ? '☾' : '☀' }}
+      <button class="ghost theme-toggle" :title="theme.theme === 'light' ? t('shell.darkTheme') : t('shell.lightTheme')" @click="theme.toggle()">
+        {{ theme.theme === 'light' ? '☾' : '☀' }}
       </button>
     </header>
 

@@ -34,6 +34,7 @@ import * as continuityMod from '../modules/continuity.js';
 import * as timelineMod from '../modules/timeline.js';
 import * as mediaMod from '../modules/media.js';
 import * as aiActions from '../modules/ai-actions.js';
+import * as delegationMod from '../modules/ai-delegation.js';
 import * as guideMod from '../modules/guide.js';
 import * as productionMod from '../modules/production.js';
 import * as videoAnalysisMod from '../modules/video-analysis.js';
@@ -1108,13 +1109,55 @@ export function buildRoutes(services: AppServices): App {
 
   // --- AI (optional) -------------------------------------------------------
 
-  app.get('/api/ai/status', (c) => c.json({ ...services.ai.status, skills: services.ai.skillsDir }));
+  app.get('/api/ai/status', (c) => {
+    const ctx = services.store.current;
+    return c.json({
+      ...services.ai.status,
+      skills: services.ai.skillsDir,
+      agent: delegationMod.agentStatus(ctx),
+      delegation: {
+        supported: true,
+        prepare: '/api/ai/actions/{action}/prepare',
+        apply: '/api/ai/requests/{id}/apply',
+        pending: ctx ? delegationMod.countPending(ctx) : 0,
+      },
+    });
+  });
+  app.get('/api/ai/agent', (c) => c.json(delegationMod.agentStatus(services.store.current)));
+  app.post('/api/ai/agent/session', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const label = typeof body.model === 'string' && body.model.trim()
+      ? body.model.trim()
+      : c.req.header('x-h3mise-agent-model') ?? null;
+    delegationMod.touchAgent(label);
+    return c.json(delegationMod.agentStatus(services.store.current));
+  });
+  app.delete('/api/ai/agent/session', (c) => {
+    delegationMod.detachAgent();
+    return c.json(delegationMod.agentStatus(services.store.current));
+  });
   app.get('/api/ai/skills', async (c) => c.json(await services.ai.loadSkills()));
   app.post('/api/ai/actions/:action', async (c) => {
     const ctx = p(c);
     const body = await c.req.json();
     const action = c.req.param('action');
     const projectId = ctx.meta.id;
+    // An attached external agent is the session's inference authority: defer
+    // UI-initiated actions to it instead of calling the project's own model.
+    // `defer: false` explicitly forces the built-in path.
+    const agent = delegationMod.agentStatus(ctx);
+    const wantDefer = body.defer === true || (body.defer !== false && agent.attached);
+    if (wantDefer) {
+      try {
+        const prepared = await delegationMod.prepareRequest(services.ai, ctx, action, body, agent.modelLabel);
+        services.bus.emit({ type: 'ai.request.created', requestId: prepared.requestId, action });
+        return c.json({ deferred: true, requestId: prepared.requestId, status: 'pending' }, 202);
+      } catch (error) {
+        if (error instanceof delegationMod.AiDelegationError) return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
+        const message = error instanceof Error ? error.message : String(error);
+        return c.json({ error: message, code: 'prepare_failed' }, 400);
+      }
+    }
     // P1: detached context — AI actions can run long; a project switch in the
     // UI must not close the database out from under them.
     const job = services.jobs.start('ai.action', `AI: ${action}`, async (update) => {
@@ -1128,11 +1171,92 @@ export function buildRoutes(services: AppServices): App {
         pctx.close();
       }
     });
-    return c.json({ jobId: job.id, status: job.status }, 202);
+    return c.json({ deferred: false, jobId: job.id, status: job.status }, 202);
   });
   app.post('/api/ai/chat', async (c) => {
     const body = await c.req.json();
     return c.json({ text: await services.ai.complete(body.messages ?? []) });
+  });
+
+  // --- AI inference delegation --------------------------------------------
+  // External agents bring their own model: prepare returns the exact prompt,
+  // the agent runs inference itself, apply validates + atomically applies the
+  // answer with the same code path as the built-in AI.
+
+  app.post('/api/ai/actions/:action/prepare', async (c) => {
+    const ctx = p(c);
+    const action = c.req.param('action');
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const prepared = await delegationMod.prepareRequest(services.ai, ctx, action, body, c.req.header('x-h3mise-agent-model') ?? null);
+      return c.json({
+        requestId: prepared.requestId,
+        action,
+        source: 'agent',
+        inference: delegationMod.wireStep(prepared.step),
+        contextHash: prepared.contextHash,
+      });
+    } catch (error) {
+      if (error instanceof delegationMod.AiDelegationError) return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
+      // Precondition failures (missing shotId/takeId, unknown action, …)
+      const message = error instanceof Error ? error.message : String(error);
+      return c.json({ error: message, code: 'prepare_failed' }, 400);
+    }
+  });
+
+  app.post('/api/ai/requests/:id/apply', async (c) => {
+    const ctx = p(c);
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    if (!('result' in body)) return c.json({ error: 'result is required', code: 'result_required' }, 400);
+    const rawVision = (body as { vision?: unknown }).vision;
+    const vision = rawVision && typeof rawVision === 'object'
+      && ['multimodal', 'text_fallback', 'text_only'].includes(String((rawVision as { mode?: unknown }).mode))
+      && typeof (rawVision as { imageCount?: unknown }).imageCount === 'number'
+      ? rawVision as { mode: 'multimodal' | 'text_fallback' | 'text_only'; imageCount: number }
+      : null;
+    try {
+      const outcome = await delegationMod.applyResult(services.ai, ctx, id, (body as { result: unknown }).result, vision);
+      if (outcome.status === 'applied') {
+        const action = delegationMod.getRequest(ctx, id)?.action ?? 'unknown';
+        services.bus.emit({ type: 'ai.request.applied', requestId: id, action });
+        return c.json({ status: 'applied', requestId: id, result: outcome.result, vision: outcome.vision });
+      }
+      return c.json({ status: 'continue', requestId: id, inference: delegationMod.wireStep(outcome.step) });
+    } catch (error) {
+      if (error instanceof delegationMod.AiDelegationError) {
+        const detail = delegationMod.getRequest(ctx, id);
+        if (detail?.status === 'failed') services.bus.emit({ type: 'ai.request.failed', requestId: id, action: detail.action, error: error.message });
+        return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
+      }
+      throw error;
+    }
+  });
+
+  app.post('/api/ai/requests/:id/cancel', (c) => {
+    const ctx = p(c);
+    const id = c.req.param('id');
+    try {
+      const summary = delegationMod.cancelRequest(ctx, id);
+      services.bus.emit({ type: 'ai.request.cancelled', requestId: id, action: summary.action });
+      return c.json(summary);
+    } catch (error) {
+      if (error instanceof delegationMod.AiDelegationError) return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
+      throw error;
+    }
+  });
+
+  app.get('/api/ai/requests', (c) => {
+    const ctx = p(c);
+    const status = c.req.query('status') || undefined;
+    const limitRaw = Number(c.req.query('limit') ?? 20);
+    return c.json(delegationMod.listRequests(ctx, status, Number.isFinite(limitRaw) ? limitRaw : 20));
+  });
+
+  app.get('/api/ai/requests/:id', (c) => {
+    const ctx = p(c);
+    const request = delegationMod.getRequest(ctx, c.req.param('id'));
+    return request ? c.json(request) : c.json({ error: 'ai request not found' }, 404);
   });
 
   // --- background jobs ----------------------------------------------------

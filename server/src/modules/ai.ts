@@ -38,6 +38,40 @@ export interface DirectorModel {
   structured<T>(input: DirectorInput): Promise<T>;
 }
 
+/** Lenient JSON extraction shared by the built-in model call and the
+ * delegated-inference apply path: tolerates fences and surrounding prose. */
+export function extractJsonValue<T>(text: string): { ok: true; value: T } | { ok: false } {
+  const candidates = [text];
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence?.[1]) candidates.push(fence[1]);
+  for (const cand of candidates) {
+    try {
+      return { ok: true, value: JSON.parse(cand) as T };
+    } catch {
+      /* keep trying */
+    }
+  }
+  for (const cand of candidates) {
+    const obj = cand.match(/\{[\s\S]*\}/);
+    if (obj) {
+      try {
+        return { ok: true, value: JSON.parse(obj[0]) as T };
+      } catch {
+        /* keep trying */
+      }
+    }
+    const arr = cand.match(/\[[\s\S]*\]/);
+    if (arr) {
+      try {
+        return { ok: true, value: JSON.parse(arr[0]) as T };
+      } catch {
+        /* keep trying */
+      }
+    }
+  }
+  return { ok: false };
+}
+
 export class OpenAICompatModel implements DirectorModel {
   constructor(
     private readonly baseUrl: string,
@@ -143,7 +177,7 @@ export class OpenAICompatModel implements DirectorModel {
 
   async structured<T>(input: DirectorInput): Promise<T> {
     const text = await this.chat({ ...input, json: true });
-    const parsed = this.extractJson<T>(text);
+    const parsed = extractJsonValue<T>(text);
     if (parsed.ok) return parsed.value;
     // The model ignored the JSON instruction — retry once with a blunt order.
     const retry = await this.chat({
@@ -159,41 +193,9 @@ export class OpenAICompatModel implements DirectorModel {
         },
       ],
     });
-    const retried = this.extractJson<T>(retry);
+    const retried = extractJsonValue<T>(retry);
     if (retried.ok) return retried.value;
     throw new Error(`AI did not return valid JSON (after retry): ${retry.slice(0, 120)}`);
-  }
-
-  private extractJson<T>(text: string): { ok: true; value: T } | { ok: false } {
-    const candidates = [text];
-    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fence?.[1]) candidates.push(fence[1]);
-    for (const cand of candidates) {
-      try {
-        return { ok: true, value: JSON.parse(cand) as T };
-      } catch {
-        /* keep trying */
-      }
-    }
-    for (const cand of candidates) {
-      const obj = cand.match(/\{[\s\S]*\}/);
-      if (obj) {
-        try {
-          return { ok: true, value: JSON.parse(obj[0]) as T };
-        } catch {
-          /* keep trying */
-        }
-      }
-      const arr = cand.match(/\[[\s\S]*\]/);
-      if (arr) {
-        try {
-          return { ok: true, value: JSON.parse(arr[0]) as T };
-        } catch {
-          /* keep trying */
-        }
-      }
-    }
-    return { ok: false };
   }
 }
 

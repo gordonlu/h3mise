@@ -95,6 +95,33 @@ curl -sS http://127.0.0.1:4789/api/storyboard/pages
 - Director style is subordinate to project facts, bound assets, continuity, explicit shot instructions, and physical plausibility. Inject only the attributes relevant to the current Shot and keep at most one dominant camera behavior.
 - The resolved director style must reach built-in AI actions, external context packages, Storyboard prompts, and deterministic H3 compilation, including Ref2VA. If built-in AI is unavailable, deterministic style directives must still work.
 
+## Provide inference when you are the agent
+
+When you (an agent) drive H3Mise, bring your own model. Do not configure a project AI and do not ask H3Mise to call one: the inference is yours, so the session keeps a single inference authority.
+
+1. `POST /api/ai/actions/{action}/prepare` with the action body. The response contains the exact prompt H3Mise would have sent — `inference.system`, `inference.messages`, `inference.json`, `inference.temperature`, `inference.hasImages` — plus `requestId` and `contextHash`. No model is called.
+   Send `X-H3Mise-Agent-Model: <label>` to record which model produced the answer. The label only; never a key.
+2. Run that prompt with your own model. When `inference.json` is true, return exactly one JSON array or object with no prose or fences. When `inference.hasImages` is true the messages contain reference images; read them only if you have vision, otherwise answer from text alone and leave unseen spatial facts empty.
+3. `POST /api/ai/requests/{requestId}/apply` with `{ "result": ... }` and optional `{ "vision": { "mode", "imageCount" } }` matching the shared contract, then follow the response:
+   - `status: "applied"` — validated and applied atomically. Re-applying the same `requestId` returns the stored result without touching project data again.
+   - `status: "continue"` — the answer failed validation; run the returned `inference` step and apply again (repair / retry round).
+   - `409 code: "stale"` — the project changed after prepare; prepare again instead of retrying.
+   - `422 code: "invalid_json"` / `"invalid_output"` — fix the format; do not resend the same payload.
+
+Presence and UI-deferred work:
+
+- Declare yourself with `POST /api/ai/agent/session` (`{ "model": "<label>" }`); presence lasts 10 minutes and is refreshed by every prepare/apply. `DELETE /api/ai/agent/session` detaches and returns control to the project AI. `GET /api/ai/agent` reports presence and the pending count.
+- While you are attached, AI buttons in the UI no longer call the project model: they create pending `ai_requests`. Treat them exactly like requests you prepared yourself (the step is already stored) and answer with `POST /api/ai/requests/{id}/apply`.
+- Handle them promptly; the user can cancel a pending request from the top-bar inference indicator, which also lets them detach you.
+
+Rules:
+
+- `apply` is the only writer for delegated actions. Never write beats, plans, or prompts directly to bypass validation.
+- The server never trusts your answer: it re-validates, normalizes, and keeps its own atomic application and idempotency guarantees.
+- `GET /api/ai/requests?status=pending` lists unfinished delegations; `GET /api/ai/requests/{id}` shows the stored result or error. `GET /api/ai/status` reports a `delegation` block.
+- Actions: `plan_shot`, `improve_camera`, `improve_performance`, `reality_check`, `continuity_check`, `compile_prompt`, `diagnose_take`, `analyze_take_continuity`, `repair_prompt`, `story_to_beats`, `beats_to_shots`, `auto_director`.
+- Deterministic logic (skeleton matching, style resolution, prompt compilation, basic Preflight, camera geometry) is never delegated: rules stay in H3Mise, inference comes from you.
+
 ## Connect ComfyUI
 
 - Use a workflow exported in ComfyUI **API Format**, never a UI-only workflow JSON.
@@ -135,6 +162,9 @@ curl -sS http://127.0.0.1:4789/api/storyboard/pages
 - `server/src/modules/story-skeletons.ts`: built-in narrative structures, local matching, AI ranking fallback, and Beat creation.
 - `server/src/modules/story-pipeline.ts`: atomic Beat proposal application, uncovered Beat-to-Shot materialization, and minimum DirectorPlan creation.
 - `server/src/modules/director-styles.ts`: style aliases, generic presets, AI context, and deterministic H3 directives.
+- `server/src/modules/ai-actions.ts`: action definitions as inference steps (`prepareAction` / `advanceAction`) shared by the built-in driver and delegation.
+- `server/src/modules/ai-delegation.ts`: `ai_requests` lifecycle — context hash, stale detection, idempotent apply.
+- `server/src/modules/ai.ts`: OpenAI-compatible adapter, lenient JSON extraction, vision fallback.
 - `web/src/pages/SettingsPage.vue`: user-facing provider setup.
 - `web/src/pages/StoryboardPage.vue`: optional multi-page Storyboard planning and paid-generation confirmation UI.
 - `shared/src/provider.ts`: provider profile and capability contract.

@@ -37,6 +37,14 @@ export const zh = {
     open: '打开指令面板', placeholder: '搜索页面、镜头，或输入指令…', navigation: '跳转', actions: '操作', shots: '镜头',
     empty: '没有匹配结果', toggleTheme: '切换主题', renderQueue: '打开渲染队列',
   },
+  brain: {
+    title: '推理来源', projectAi: '项目 AI', externalAgent: '外部 Agent', offline: '离线',
+    pending: '等待推理', detach: '断开 Agent', noModel: '未配置模型',
+  },
+  copilot: {
+    title: '场记', suggestions: '建议', open: '前往', issues: '问题总览',
+    allClear: '暂无需要处理的建议', footnote: '建议由本地规则生成；AI 分析按当前推理来源执行',
+  },
   guide: {
     progress: '项目进度', storySetup: '故事 / 设定', shotList: 'Shot 列表', production: '镜头制作', assembly: '成片编排', export: '导出',
     selectedTakes: '{selected} / {total} 已选片', complete: '已完成', current: '当前步骤', attention: '需要处理', upcoming: '尚未开始', aria: '制作进度',
@@ -157,6 +165,14 @@ export const en: typeof zh = {
     open: 'Open command palette', placeholder: 'Search pages, shots, or type a command…', navigation: 'Go to', actions: 'Actions', shots: 'Shots',
     empty: 'No matching results', toggleTheme: 'Toggle theme', renderQueue: 'Open render queue',
   },
+  brain: {
+    title: 'Inference source', projectAi: 'Project AI', externalAgent: 'External Agent', offline: 'Offline',
+    pending: 'Pending inference', detach: 'Detach agent', noModel: 'No model configured',
+  },
+  copilot: {
+    title: 'Script Supervisor', suggestions: 'Suggestions', open: 'Open', issues: 'Issues',
+    allClear: 'Nothing needs attention', footnote: 'Suggestions come from local rules; AI analysis uses the current inference source',
+  },
   guide: {
     progress: 'Project progress', storySetup: 'Story / Setup', shotList: 'Shot List', production: 'Shot Production', assembly: 'Assembly', export: 'Export',
     selectedTakes: '{selected} / {total} selected', complete: 'Complete', current: 'Current step', attention: 'Needs attention', upcoming: 'Not started', aria: 'Production progress',
@@ -266,6 +282,14 @@ export const ja: typeof zh = {
   palette: {
     open: 'コマンドパレットを開く', placeholder: 'ページ、Shot、コマンドを検索…', navigation: '移動', actions: '操作', shots: 'Shot',
     empty: '一致する結果がありません', toggleTheme: 'テーマを切り替え', renderQueue: 'レンダーキューを開く',
+  },
+  brain: {
+    title: '推論ソース', projectAi: 'プロジェクト AI', externalAgent: '外部エージェント', offline: 'オフライン',
+    pending: '推論待ち', detach: 'エージェントを切断', noModel: 'モデル未設定',
+  },
+  copilot: {
+    title: 'スクリプト', suggestions: '提案', open: '開く', issues: '問題一覧',
+    allClear: '対応が必要な項目はありません', footnote: '提案はローカルルールによるもの。AI 分析は現在の推論ソースで実行されます',
   },
   guide: {
     progress: 'プロジェクト進捗', storySetup: 'ストーリー / 設定', shotList: 'Shot リスト', production: 'Shot 制作', assembly: '本編構成', export: '書き出し',

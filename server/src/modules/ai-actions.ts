@@ -3,9 +3,17 @@
 // updates canonical Beats and creates only missing Shots, but never renders.
 // When AI is not configured these return a clear "not configured" error so
 // the UI can fall back to Copy Context Package (external AI flow).
+//
+// Inference delegation: every action is expressed as a sequence of inference
+// steps. `prepareAction` builds the first step without calling any model;
+// `advanceAction` consumes one raw model answer and either finishes the
+// action or asks for another step (repair / retry / next shot). `runAction`
+// is the built-in driver over these primitives; the HTTP prepare/apply
+// endpoints are the delegated driver where an external agent brings its own
+// model. Both share the same validation and the same atomic apply.
 
 import type { ProjectContext } from '../project-store.js';
-import type { AIService, DirectorContentPart, DirectorModel, VisionStatus } from './ai.js';
+import type { AIService, DirectorContentPart, DirectorMessage, DirectorModel, VisionStatus } from './ai.js';
 import { readFile } from 'node:fs/promises';
 import * as directorMod from './director.js';
 import * as promptMod from './prompt.js';
@@ -18,7 +26,7 @@ import { directorStyleAiContext } from './director-styles.js';
 import { applyBeatProposal, materializeMissingBeatShots } from './story-pipeline.js';
 import { emptyDirectorPlan, type DirectorPlan, type StoryBeat, type VisualContinuityState } from '@h3mise/shared';
 
-type ActionName =
+export type ActionName =
   | 'plan_shot'
   | 'improve_camera'
   | 'improve_performance'
@@ -31,6 +39,45 @@ type ActionName =
   | 'story_to_beats'
   | 'beats_to_shots'
   | 'auto_director';
+
+/** One inference exchange: what the caller (built-in model or external
+ * agent) must run, and how its answer is interpreted. */
+export interface InferenceStep {
+  system: string;
+  messages: DirectorMessage[];
+  /** Ask for a single JSON value; advanceAction receives the parsed value. */
+  json: boolean;
+  temperature: number;
+}
+
+/** Continuation state between rounds. `raws` holds every answer consumed so
+ * far; `extra` is action-specific continuation data (e.g. auto_director's
+ * remaining shot list). */
+export interface AdvanceState {
+  raws: unknown[];
+  extra: Record<string, unknown>;
+}
+
+export type AdvanceOutcome =
+  | { done: true; result: unknown }
+  | { done: false; step: InferenceStep; state: AdvanceState };
+
+/** Actions whose final result carries the vision transport status. */
+const VISION_WRAPPED = new Set<string>([
+  'plan_shot', 'improve_camera', 'improve_performance', 'reality_check',
+  'compile_prompt', 'diagnose_take', 'analyze_take_continuity', 'repair_prompt',
+]);
+
+/** Attach the vision status for actions that historically reported it. */
+export function decorateResult(action: string, result: unknown, vision: VisionStatus | null): unknown {
+  if (!VISION_WRAPPED.has(action)) return result;
+  return { ...(result as Record<string, unknown>), vision };
+}
+
+export function stepHasImages(step: InferenceStep): boolean {
+  return step.messages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part.type === 'image_url'));
+}
 
 const PLAN_SCHEMA_HINT = `DirectorPlan JSON schema:
 {
@@ -194,29 +241,17 @@ function requireAiDirectorPlan(raw: unknown, base: DirectorPlan): DirectorPlan {
   return normalized.plan;
 }
 
-async function normalizeOrRepairAiDirectorPlan(
-  model: DirectorModel,
-  raw: unknown,
-  base: DirectorPlan,
-): Promise<DirectorPlan> {
-  try {
-    return requireAiDirectorPlan(raw, base);
-  } catch {
-    const repaired = await model.structured<unknown>({
-      system: `你是 DirectorPlan 数据格式修复器。只修复字段结构、命名和数据类型，不重新创作，不增加原候选内容和当前草稿中不存在的故事事实。缺失字段优先沿用当前草稿。只返回符合 schema 的完整 JSON 对象。\n${PLAN_SCHEMA_HINT}`,
-      messages: [{
-        role: 'user',
-        content: `当前草稿：\n${JSON.stringify(base)}\n\n待修复的 AI 返回：\n${JSON.stringify(raw)}`,
-      }],
-      temperature: 0,
-    });
-    try {
-      return requireAiDirectorPlan(repaired, base);
-    } catch (second) {
-      const reason = second instanceof Error ? second.message : String(second);
-      throw new Error(`AI 返回格式自动修复后仍不可用：${reason}`);
-    }
-  }
+/** Second-round inference that repairs a malformed DirectorPlan. */
+function buildRepairStep(raw: unknown, base: DirectorPlan): InferenceStep {
+  return {
+    system: `你是 DirectorPlan 数据格式修复器。只修复字段结构、命名和数据类型，不重新创作，不增加原候选内容和当前草稿中不存在的故事事实。缺失字段优先沿用当前草稿。只返回符合 schema 的完整 JSON 对象。\n${PLAN_SCHEMA_HINT}`,
+    messages: [{
+      role: 'user',
+      content: `当前草稿：\n${JSON.stringify(base)}\n\n待修复的 AI 返回：\n${JSON.stringify(raw)}`,
+    }],
+    json: true,
+    temperature: 0,
+  };
 }
 
 /** Models under json_object mode sometimes wrap an array in {"beats": [...]}. */
@@ -307,85 +342,90 @@ ${extra}` : scene;
   });
 }
 
-export async function runAction(
+/** Resolve the working DirectorPlan for the plan-shaped actions. */
+function resolvePlanContext(ctx: ProjectContext, body: Record<string, unknown>): { shotId: string | null; plan: DirectorPlan | null } {
+  const shotId = body.shotId ? String(body.shotId) : null;
+  const suppliedPlan = body.plan ? directorMod.normalizeDirectorPlan(body.plan).plan : null;
+  const plan = shotId ? suppliedPlan ?? directorMod.latestPlan(ctx, shotId)?.plan ?? emptyDirectorPlan() : null;
+  return { shotId, plan };
+}
+
+function storyBeatsUserMessage(ctx: ProjectContext, styleContext: string): string {
+  const story = storyMod.getStory(ctx);
+  const existingBeats = storyMod.listBeats(ctx);
+  return `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\nCurrent StoryBeats (refine this structure when present; do not append a second copy):\n${JSON.stringify(existingBeats)}\n\n${styleContext}`;
+}
+
+const MAX_ACTION_ROUNDS = 32;
+
+/** Build the first inference step of an action. No model is called here, so
+ * this works identically for the built-in driver and external agents. */
+export async function prepareAction(
   ai: AIService,
   ctx: ProjectContext,
   action: string,
   body: Record<string, unknown>,
-): Promise<unknown> {
-  if (!ai.model) throw new Error('AI not configured — use external AI templates instead');
-  const skills = await ai.loadSkills();
+): Promise<InferenceStep> {
   const styleContext = directorStyleAiContext(ctx);
-  const skillText = `${skills.map((s) => `# ${s.title}\n${s.content}`).join('\n\n---\n\n')}\n\n---\n\n${styleContext}`;
+  const skillText = buildSkillText(await ai.loadSkills(), styleContext);
   const shotId = body.shotId ? String(body.shotId) : null;
-  const shot = shotId ? shotsMod.getShot(ctx, shotId) : null;
-  const suppliedPlan = body.plan ? directorMod.normalizeDirectorPlan(body.plan).plan : null;
-  const plan = shotId ? suppliedPlan ?? directorMod.latestPlan(ctx, shotId)?.plan ?? emptyDirectorPlan() : null;
-  let vision: VisionStatus | null = null;
-  const trackVision = (status: VisionStatus) => { vision = status; };
-  const withVision = <T extends Record<string, unknown>>(result: T): T & { vision: VisionStatus | null } => ({ ...result, vision });
+  const { plan } = resolvePlanContext(ctx, body);
 
   switch (action as ActionName) {
     case 'plan_shot': {
       if (!shotId) throw new Error('shotId required');
-      const raw = await ai.model.structured<unknown>({
+      return {
         system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, planShotPrompt(ctx, shotId, body)) }],
+        json: true,
         temperature: 0.6,
-        onVisionStatus: trackVision,
-      });
-      const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
-      return withVision({ kind: 'director_plan', plan: dp });
+      };
     }
     case 'improve_camera': {
       if (!shotId) throw new Error('shotId required');
-      const raw = await ai.model.structured<unknown>({
+      return {
         system: `你是 H3 镜头设计模式库。只改进给定方案的 camera 块，其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}\n\n只有实际看见附图时才能修正空间方位；看不到图时不得猜测。`) }],
+        json: true,
         temperature: 0.5,
-        onVisionStatus: trackVision,
-      });
-      const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
-      return withVision({ kind: 'director_plan', plan: dp });
+      };
     }
     case 'improve_performance': {
       if (!shotId) throw new Error('shotId required');
-      const raw = await ai.model.structured<unknown>({
+      return {
         system: `你是 H3 表演导演。只改进给定方案的 performance 块（objective/obstacle/tactic/turn、movement quality、anticipation、primaryAction、followThrough、recovery、gaze、endPose），其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。动作描述必须确定性完整：身体部位＋方向＋先后顺序＋空间参照，展开压缩动作为连续动作链，杜绝左右侧/主体/顺序歧义。\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}\n\n只有实际看见附图时才能描述身体与物体的空间关系；看不到图时不得猜测。`) }],
+        json: true,
         temperature: 0.5,
-        onVisionStatus: trackVision,
-      });
-      const dp = await normalizeOrRepairAiDirectorPlan(ai.model, raw, plan ?? emptyDirectorPlan());
-      return withVision({ kind: 'director_plan', plan: dp });
+      };
     }
     case 'reality_check': {
       if (!shotId) throw new Error('shotId required');
-      const text = await ai.model.complete({
+      return {
         system: `你是物理与现实审查员。对照检查该镜头：几何结构、重力支撑接触、惯性动量、因果、介质规律、生物解剖、载具机械、光影、时间连续性、已知事实矛盾。只故意违反一条定律而非到处破绽。每个问题输出一行“问题：… | 严重度：轻微/严重 | 修复：…”，最后输出一行结论。只用中文。`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\n\nReality mode: ${plan?.reality.mode ?? 'strict_realism'}\n\n附图可读时可检查可见几何；不可读时只审查文字事实。`) }],
+        json: false,
         temperature: 0.3,
-        onVisionStatus: trackVision,
-      });
-      return withVision({ kind: 'review', text });
+      };
     }
     case 'continuity_check': {
       if (!shotId) throw new Error('shotId required');
       const latest = continuityMod.predecessorContinuity(ctx, shotId, 'visual', 'actual');
-      const text = await ai.model.complete({
+      const shot = shotsMod.getShot(ctx, shotId);
+      return {
         system: `你是专业的影视连续性审查员。将当前镜头的计划起始状态与上一镜头已经确认的实际连续性进行比较，检查角色外观、服装、发型、伤势、持有物、地点、时间与天气、银幕方向和朝向。不得虚构缺失信息。逐项使用“不一致：… | 修复：…”输出，最后输出“结论：通过”或“结论：需要修正”。如果当前镜头没有上一镜头，直接输出“无上一镜头，本项不适用。\n结论：通过”。只使用中文。`,
         messages: [
           { role: 'user', content: `Committed actual continuity:\n${JSON.stringify(latest?.state)}\n\nNew shot plan start state:\n${plan?.continuity.plannedStartState}\n\nShot:\n${JSON.stringify(shot)}` },
         ],
+        json: false,
         temperature: 0.3,
-      });
-      return { kind: 'review', text };
+      };
     }
     case 'compile_prompt': {
       if (!shotId) throw new Error('shotId required');
       const current = promptMod.listPrompts(ctx, shotId).at(-1);
       if (!current) throw new Error('请先从镜头设计生成或手动输入一版提示词');
-      const text = await ai.model.complete({
+      return {
         system: `你是专业的 MiniMax H3 视频提示词编辑，严格遵循 H3 官方提示词规范。
 结构规则（必须保留段落与顺序、参考标签 <Picture n>/<Audio n>/<Subject n> 及其全文一致性）：
 - 基础模式：对齐行（首帧/尾帧引用声明）→ integrated_multimodal_description → overall_soundscape → non_diegetic_music；
@@ -413,17 +453,16 @@ ${skillText}`,
           role: 'user',
           content: await shotMultimodalContent(ctx, shotId, `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}\n\n视觉输入规则：只有实际看见下方附图时才能修正画面位置；若接口降级为纯文字或图片不可见，保留原有空间描述，缺失信息不要补写。`),
         }],
+        json: false,
         temperature: 0.4,
-        onVisionStatus: trackVision,
-      });
-      return withVision({ kind: 'prompt', text });
+      };
     }
     case 'diagnose_take': {
       const takeId = body.takeId ? String(body.takeId) : null;
       if (!takeId) throw new Error('takeId required');
       const take = takesMod.getTake(ctx, takeId);
       const prompt = promptMod.getPrompt(ctx, take.promptVersionId);
-      const text = await ai.model.complete({
+      return {
         system: `你诊断失败的 H3 生成。输入：导演方案、提示词、参考素材标签、失败标签、Take 备注。按可能性排序输出原因和具体可尝试的修复（改方案、换参考角色、改提示词）。绝不建议再花钱重渲染。只用中文。`,
         messages: [
           {
@@ -431,10 +470,9 @@ ${skillText}`,
             content: await shotMultimodalContent(ctx, take.shotId, `DirectorPlan:\n${JSON.stringify(plan)}\n\nPrompt:\n${prompt.text}\n\nFailure tags: ${take.failureTags.join(', ')}\nNotes: ${take.notes}\n\n只有实际看见附图时才能诊断视觉位置关系；不可见时不要猜测。`),
           },
         ],
+        json: false,
         temperature: 0.4,
-        onVisionStatus: trackVision,
-      });
-      return withVision({ kind: 'diagnosis', text });
+      };
     }
     case 'analyze_take_continuity': {
       const takeId = body.takeId ? String(body.takeId) : null;
@@ -445,7 +483,7 @@ ${skillText}`,
       const entities = assetsMod.listEntities(ctx);
       const states = assetsMod.listCharacterStates(ctx);
       const empty = continuityMod.emptyVisualState();
-      const raw = await ai.model.structured<unknown>({
+      return {
         system: `你是影视场记员。读取生成视频的真实最后一帧，提取下一镜头必须延续的 Actual Visual Continuity。
 只返回一个完整 JSON 对象，字段严格为：characterStates、costume、hair、injury、heldItems、location、timeOfDay、weather、wind、screenDirection、facing、vehicleState、notes。
 characterStates/costume/hair/injury/heldItems/vehicleState 的 key 必须使用给定实体 id，不能使用人物名字。characterStates 的 value 只能从给定 CharacterState id 中选择，不能新造 id。
@@ -461,96 +499,261 @@ Entities: ${JSON.stringify(entities)}
 Allowed CharacterStates: ${JSON.stringify(states)}
 Empty output shape: ${JSON.stringify(empty)}`),
         }],
+        json: true,
         temperature: 0.1,
-        onVisionStatus: trackVision,
-      });
-      return withVision({ kind: 'continuity_suggestion', state: visualContinuitySuggestion(raw, entities, states) });
+      };
     }
     case 'repair_prompt': {
       const promptId = body.promptId ? String(body.promptId) : null;
       if (!promptId) throw new Error('promptId required');
       const pv = promptMod.getPrompt(ctx, promptId);
-      const text = await ai.model.complete({
+      return {
         system: `你是 H3 提示词修复器。只修复指出的问题，其余内容保持不变；输出语言与原提示词一致（原文无英文必要时用中文）。只输出修复后的提示词正文。\n\n专业导演方法参考：\n${skillText}`,
         messages: [{ role: 'user', content: await shotMultimodalContent(ctx, pv.shotId, `Prompt:\n${pv.text}\n\nProblems: ${String(body.problems ?? '')}\n\n空间位置只能依据实际可见附图修复；图片不可见时不得猜测。`) }],
+        json: false,
         temperature: 0.3,
-        onVisionStatus: trackVision,
-      });
-      return withVision({ kind: 'prompt', text });
+      };
     }
     case 'story_to_beats': {
-      const story = storyMod.getStory(ctx);
-      const existingBeats = storyMod.listBeats(ctx);
-      const userMsg = `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\nCurrent StoryBeats (refine this structure when present; do not append a second copy):\n${JSON.stringify(existingBeats)}\n\n${styleContext}`;
-
-      let raw: unknown;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const system = attempt === 0
-          ? STORY_TO_BEATS_SYSTEM_PROMPT
-          : `${STORY_TO_BEATS_SYSTEM_PROMPT}\n\n上一轮你返回的不是 StoryBeat JSON 数组：${JSON.stringify(raw).slice(0, 800)}\n现在请严格按 FORMAT 重新输出：每个元素必须是对象，且 title 和 summary 必须是字符串。只输出 JSON 数组。`;
-        raw = await ai.model.structured<unknown>({
-          system,
-          messages: [{ role: 'user', content: userMsg }],
-        });
-        const beats = normalizeBeats(raw);
-        if (beats.length > 0 && beats.every((b) => typeof b.title === 'string' && typeof b.summary === 'string')) {
-          const applied = applyBeatProposal(ctx, beats, { mode: 'replace', createMissingShots: true });
-          return { kind: 'beats', beats: applied.beats, applied };
-        }
-        const converted = convertShotTable(raw);
-        if (converted) {
-          const applied = applyBeatProposal(ctx, converted, { mode: 'replace', createMissingShots: true });
-          return { kind: 'beats', beats: applied.beats, applied, note: '模型返回了分镜表/镜头列表，已自动转换并更新为正式 StoryBeat' };
-        }
-      }
-      throw new Error(
-        `AI 拆解两轮均未返回有效 StoryBeat JSON（返回：${JSON.stringify(raw).slice(0, 150)}），已中止，请重试或改为手动添加节拍。`,
-      );
+      return {
+        system: STORY_TO_BEATS_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: storyBeatsUserMessage(ctx, styleContext) }],
+        json: true,
+        temperature: 0.7,
+      };
     }
     case 'beats_to_shots': {
       const beats = body.beats as Array<{ title?: string; summary?: string; id?: string }> | undefined;
-      const items = await ai.model.structured<Array<{ title: string; purpose: string; shotFunction: string; durationSeconds: number; h3Mode: string }>>({
+      return {
         system: `你把 StoryBeats 转成 H3 镜头序列。默认一个镜头=一个连续事件。每个镜头：title、purpose（中文）、shotFunction（establishing|wide|medium|closeup|insert|reaction|action|transition|montage|pov|aerial|dialogue|other）、durationSeconds（硬性 1-15 秒，常规 Take 优先 12-15 秒，以 beat 的 durationSeconds 为基准）、h3Mode（t2va|i2va|fl2va|l2va|ref2va）。超过 15 秒的动作必须拆镜。title 和 purpose 一律用中文。只返回 JSON 数组。\n\n${styleContext}`,
         messages: [{ role: 'user', content: `Beats:\n${JSON.stringify(beats ?? [])}\n\nConvert each beat into one shot.` }],
+        json: true,
         temperature: 0.4,
-      });
-      return { kind: 'shots', items };
+      };
     }
     case 'auto_director': {
-      // Story → Beats → Shots → Plans, stops before render (PRD §40).
-      const story = storyMod.getStory(ctx);
-      const existingBeats = storyMod.listBeats(ctx);
-      const beats = normalizeBeats(await ai.model.structured<unknown>({
+      return {
         system: `${STORY_TO_BEATS_SYSTEM_PROMPT}\n\n${styleContext}`,
-        messages: [{ role: 'user', content: `Planned total duration: ${story.plannedDurationSeconds || 'unspecified'} seconds.\nStory:\n${story.title}\n${story.synopsis}\n\n${story.body.slice(0, 6000)}\n\nCurrent StoryBeats (refine these; do not append duplicates):\n${JSON.stringify(existingBeats)}` }],
+        messages: [{ role: 'user', content: storyBeatsUserMessage(ctx, styleContext) }],
+        json: true,
         temperature: 0.5,
-      }));
-      if (beats.length === 0 || beats.some((b) => typeof b.title !== 'string')) {
-        throw new Error('AI 拆解返回的节拍结构不符合要求（缺少 title 等字段），已中止，请重试。');
-      }
-      const applied = applyBeatProposal(ctx, beats, { mode: 'replace' });
-      const newShots = materializeMissingBeatShots(ctx);
-      const newShotIds = new Set(newShots.map((shot) => shot.id));
-      const shotsToPlan = shotsMod.listShots(ctx).filter((shot) => {
-        const latest = directorMod.latestPlan(ctx, shot.id);
-        return newShotIds.has(shot.id) || !latest || latest.source === 'default';
-      });
-      const created: { beatId: string; shotId: string }[] = [];
-      for (const shot of shotsToPlan) {
-        const rawPlan = await ai.model.structured<unknown>({
-          system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
-          messages: [{ role: 'user', content: planShotPrompt(ctx, shot.id, {}) }],
-          temperature: 0.6,
-        });
-        const dp = await normalizeOrRepairAiDirectorPlan(ai.model, rawPlan, emptyDirectorPlan());
-        directorMod.createPlanVersion(ctx, { shotId: shot.id, plan: dp, source: 'builtin_ai' });
-        created.push({ beatId: shot.storyBeatId ?? '', shotId: shot.id });
-      }
-      return { kind: 'auto_director_result', created, beats: applied.beats, shotsCreated: newShots.length, note: 'updated canonical beats, created only missing shots, and planned shots without a user-authored plan; stopped before render' };
+      };
     }
     default:
       throw new Error('unknown action: ' + action);
   }
+}
+
+/** Consume the newest raw answer. Returns the final result, or the next
+ * inference step when the action needs another round (repair / retry / the
+ * next shot in auto_director). Validation and atomic apply live here, so the
+ * delegated path gets exactly the same guarantees as the built-in driver. */
+export async function advanceAction(
+  ai: AIService,
+  ctx: ProjectContext,
+  action: string,
+  body: Record<string, unknown>,
+  state: AdvanceState,
+): Promise<AdvanceOutcome> {
+  const raws = state.raws;
+  const latest = raws[raws.length - 1];
+
+  switch (action as ActionName) {
+    case 'plan_shot':
+    case 'improve_camera':
+    case 'improve_performance': {
+      const { shotId, plan } = resolvePlanContext(ctx, body);
+      if (!shotId) throw new Error('shotId required');
+      const base = plan ?? emptyDirectorPlan();
+      if (raws.length === 1) {
+        try {
+          return { done: true, result: { kind: 'director_plan', plan: requireAiDirectorPlan(latest, base) } };
+        } catch {
+          return { done: false, step: buildRepairStep(latest, base), state };
+        }
+      }
+      try {
+        return { done: true, result: { kind: 'director_plan', plan: requireAiDirectorPlan(latest, base) } };
+      } catch (second) {
+        const reason = second instanceof Error ? second.message : String(second);
+        throw new Error(`AI 返回格式自动修复后仍不可用：${reason}`);
+      }
+    }
+    case 'reality_check':
+      return { done: true, result: { kind: 'review', text: latest } };
+    case 'continuity_check':
+      return { done: true, result: { kind: 'review', text: latest } };
+    case 'compile_prompt':
+      return { done: true, result: { kind: 'prompt', text: latest } };
+    case 'diagnose_take':
+      return { done: true, result: { kind: 'diagnosis', text: latest } };
+    case 'repair_prompt':
+      return { done: true, result: { kind: 'prompt', text: latest } };
+    case 'analyze_take_continuity': {
+      const entities = assetsMod.listEntities(ctx);
+      const states = assetsMod.listCharacterStates(ctx);
+      return { done: true, result: { kind: 'continuity_suggestion', state: visualContinuitySuggestion(latest, entities, states) } };
+    }
+    case 'beats_to_shots':
+      return { done: true, result: { kind: 'shots', items: latest } };
+    case 'story_to_beats': {
+      const styleContext = directorStyleAiContext(ctx);
+      const userMsg = storyBeatsUserMessage(ctx, styleContext);
+      const attempt = (raw: unknown): AdvanceOutcome | null => {
+        const beats = normalizeBeats(raw);
+        if (beats.length > 0 && beats.every((b) => typeof b.title === 'string' && typeof b.summary === 'string')) {
+          const applied = applyBeatProposal(ctx, beats, { mode: 'replace', createMissingShots: true });
+          return { done: true, result: { kind: 'beats', beats: applied.beats, applied } };
+        }
+        const converted = convertShotTable(raw);
+        if (converted) {
+          const applied = applyBeatProposal(ctx, converted, { mode: 'replace', createMissingShots: true });
+          return { done: true, result: { kind: 'beats', beats: applied.beats, applied, note: '模型返回了分镜表/镜头列表，已自动转换并更新为正式 StoryBeat' } };
+        }
+        return null;
+      };
+      const first = attempt(latest);
+      if (first) return first;
+      if (raws.length === 1) {
+        return {
+          done: false,
+          state,
+          step: {
+            system: `${STORY_TO_BEATS_SYSTEM_PROMPT}\n\n上一轮你返回的不是 StoryBeat JSON 数组：${JSON.stringify(latest).slice(0, 800)}\n现在请严格按 FORMAT 重新输出：每个元素必须是对象，且 title 和 summary 必须是字符串。只输出 JSON 数组。`,
+            messages: [{ role: 'user', content: userMsg }],
+            json: true,
+            temperature: 0.7,
+          },
+        };
+      }
+      const second = attempt(latest);
+      if (second) return second;
+      throw new Error(
+        `AI 拆解两轮均未返回有效 StoryBeat JSON（返回：${JSON.stringify(latest).slice(0, 150)}），已中止，请重试或改为手动添加节拍。`,
+      );
+    }
+    case 'auto_director': {
+      const extra = state.extra as {
+        phase?: string;
+        shots?: string[];
+        index?: number;
+        repair?: boolean;
+        created?: Array<{ beatId: string; shotId: string }>;
+        shotsCreated?: number;
+        beats?: unknown;
+      };
+      if (!extra.phase) {
+        const beats = normalizeBeats(latest);
+        if (beats.length === 0 || beats.some((b) => typeof b.title !== 'string')) {
+          throw new Error('AI 拆解返回的节拍结构不符合要求（缺少 title 等字段），已中止，请重试。');
+        }
+        const applied = applyBeatProposal(ctx, beats, { mode: 'replace' });
+        const newShots = materializeMissingBeatShots(ctx);
+        const newShotIds = new Set(newShots.map((shot) => shot.id));
+        const shotsToPlan = shotsMod.listShots(ctx).filter((shot) => {
+          const latestPlan = directorMod.latestPlan(ctx, shot.id);
+          return newShotIds.has(shot.id) || !latestPlan || latestPlan.source === 'default';
+        });
+        extra.phase = 'plans';
+        extra.shots = shotsToPlan.map((shot) => shot.id);
+        extra.index = 0;
+        extra.repair = false;
+        extra.created = [];
+        extra.shotsCreated = newShots.length;
+        extra.beats = applied.beats;
+        if (!shotsToPlan.length) {
+          return {
+            done: true,
+            result: { kind: 'auto_director_result', created: [], beats: applied.beats, shotsCreated: newShots.length, note: 'updated canonical beats, created only missing shots, and planned shots without a user-authored plan; stopped before render' },
+          };
+        }
+        const skillText = await plannerSkillText(ai, ctx);
+        return { done: false, state, step: autoDirectorPlanStep(ctx, skillText, shotsToPlan[0]!.id) };
+      }
+      const shots = extra.shots ?? [];
+      const index = extra.index ?? 0;
+      const shotId = shots[index];
+      if (!shotId) throw new Error('auto_director state is missing the next shot id');
+      const base = emptyDirectorPlan();
+      let plan: DirectorPlan;
+      try {
+        plan = requireAiDirectorPlan(latest, base);
+      } catch (error) {
+        if (!extra.repair) {
+          extra.repair = true;
+          return { done: false, state, step: buildRepairStep(latest, base) };
+        }
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`AI 返回格式自动修复后仍不可用：${reason}`);
+      }
+      directorMod.createPlanVersion(ctx, { shotId, plan, source: 'builtin_ai' });
+      extra.repair = false;
+      extra.created!.push({ beatId: shotsMod.getShot(ctx, shotId).storyBeatId ?? '', shotId });
+      extra.index = index + 1;
+      if (extra.index < shots.length) {
+        const skillText = await plannerSkillText(ai, ctx);
+        return { done: false, state, step: autoDirectorPlanStep(ctx, skillText, shots[extra.index]!) };
+      }
+      return {
+        done: true,
+        result: { kind: 'auto_director_result', created: extra.created, beats: extra.beats, shotsCreated: extra.shotsCreated, note: 'updated canonical beats, created only missing shots, and planned shots without a user-authored plan; stopped before render' },
+      };
+    }
+    default:
+      throw new Error('unknown action: ' + action);
+  }
+}
+
+/** Built-in driver: run an action end to end with the project's own model. */
+export async function runAction(
+  ai: AIService,
+  ctx: ProjectContext,
+  action: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  if (!ai.model) throw new Error('AI not configured — use external AI templates instead');
+  const model: DirectorModel = ai.model;
+  let vision: VisionStatus | null = null;
+  const trackVision = (status: VisionStatus) => { vision = status; };
+  let step = await prepareAction(ai, ctx, action, body);
+  const state: AdvanceState = { raws: [], extra: {} };
+  for (let round = 0; round < MAX_ACTION_ROUNDS; round++) {
+    const raw = step.json
+      ? await model.structured<unknown>({
+        system: step.system,
+        messages: step.messages,
+        temperature: step.temperature,
+        ...(stepHasImages(step) ? { onVisionStatus: trackVision } : {}),
+      })
+      : await model.complete({
+        system: step.system,
+        messages: step.messages,
+        temperature: step.temperature,
+        ...(stepHasImages(step) ? { onVisionStatus: trackVision } : {}),
+      });
+    state.raws.push(raw);
+    const outcome = await advanceAction(ai, ctx, action, body, state);
+    if (outcome.done) return decorateResult(action, outcome.result, vision);
+    step = outcome.step;
+  }
+  throw new Error('AI action exceeded the maximum number of inference rounds');
+}
+
+function buildSkillText(skills: Array<{ title: string; content: string }>, styleContext: string): string {
+  return `${skills.map((s) => `# ${s.title}\n${s.content}`).join('\n\n---\n\n')}\n\n---\n\n${styleContext}`;
+}
+
+async function plannerSkillText(ai: AIService, ctx: ProjectContext): Promise<string> {
+  return buildSkillText(await ai.loadSkills(), directorStyleAiContext(ctx));
+}
+
+function autoDirectorPlanStep(ctx: ProjectContext, skillText: string, shotId: string): InferenceStep {
+  return {
+    system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
+    messages: [{ role: 'user', content: planShotPrompt(ctx, shotId, {}) }],
+    json: true,
+    temperature: 0.6,
+  };
 }
 
 function planShotPrompt(ctx: ProjectContext, shotId: string, body: Record<string, unknown>): string {

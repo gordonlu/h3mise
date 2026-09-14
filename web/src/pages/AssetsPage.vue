@@ -621,8 +621,8 @@ onMounted(load);
 .return-bar > div { display: flex; flex-direction: column; gap: 2px; }
 .return-bar strong { font-size: 13px; }
 .return-bar span { color: var(--text-2); font-size: 11.5px; }
-.head-titles h1 { margin: 0 0 2px; }
-.page-sub { margin: 0; font-size: 12.5px; color: var(--text-3); }
+.head-titles h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 4px; }
+.page-sub { margin: 6px 0 0; font-size: 13px; color: var(--text-3); }
 .tabs { display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 9px; padding: 3px; background: var(--bg-2); }
 .tab {
   border: none; background: transparent; color: var(--text-2);

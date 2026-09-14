@@ -305,7 +305,7 @@ onMounted(load);
       </div>
     </div>
 
-    <div class="toolbar panel">
+    <div class="toolbar">
       <div class="toolbar-search">
         <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
         <input v-model="filter" :placeholder="t('workflow.shots.searchShots')" class="search" />
@@ -468,14 +468,14 @@ onMounted(load);
 <style scoped>
 .page { padding: 30px 32px 48px; max-width: 1440px; margin: 0 auto; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 22px; }
-h1 { font-size: 30px; line-height: 1.15; margin: 0; font-weight: 720; letter-spacing: -0.035em; }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; }
 .page-head p { margin: 8px 0 0; color: var(--text-2); font-size: 13px; }
 .head-side { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .shot-summary { display: flex; align-items: center; color: var(--text-3); font-size: 11.5px; }
 .shot-summary span { padding: 0 10px; border-right: 1px solid var(--line-2); white-space: nowrap; }
 .shot-summary span:first-child { padding-left: 0; }
 .shot-summary span:last-child { padding-right: 0; border-right: 0; }
-.toolbar { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; box-shadow: none; }
+.toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; }
 .toolbar-search { position: relative; flex: 1; min-width: 260px; }
 .toolbar-search svg { position: absolute; left: 12px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); fill: none; stroke: var(--text-3); stroke-width: 1.6; pointer-events: none; }
 .search { width: 100%; padding-left: 38px; background: var(--bg-subtle); border-color: transparent; }

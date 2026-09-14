@@ -262,7 +262,7 @@ onMounted(load);
 .quick-page { max-width: 1120px; margin: 0 auto; padding: 30px 32px 60px; display: flex; flex-direction: column; gap: 18px; }
 .quick-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .eyebrow { color: var(--accent-text); font-size: 11px; font-weight: 800; letter-spacing: .14em; }
-h1 { margin: 3px 0 5px; font: 700 30px/1.15 var(--serif); }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; margin-top: 3px; margin-bottom: 5px; }
 .quick-head p, .section-help { margin: 0; color: var(--text-2); }
 .pro-link { padding: 9px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); white-space: nowrap; }
 .same-data-note { padding: 10px 14px; border-radius: var(--radius-sm); background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-text); font-size: 13px; }

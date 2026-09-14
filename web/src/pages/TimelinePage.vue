@@ -387,7 +387,7 @@ onUnmounted(() => off?.());
 
 <style scoped>
 .page { padding: 24px 32px; max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; }
 .strip-panel { overflow-x: auto; }
 .strip-guide { position: sticky; left: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px 0; }
 .strip-guide > div { display: grid; gap: 2px; }

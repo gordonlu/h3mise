@@ -563,7 +563,7 @@ onMounted(async () => {
 .episode-add { display: grid; place-items: center; border-color: var(--line-2); color: var(--text); font-weight: 600; text-align: center; }
 .episode-shared-note { margin-left: auto; align-self: center; padding: 0 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .skeleton-browser { margin-bottom: 14px; }.skeleton-search { display: flex; align-items: end; gap: 10px; }.skeleton-search .grow { flex: 1; }.count-field { width: 100px; }.skeleton-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }.skeleton-card { display: flex; flex-direction: column; gap: 9px; padding: 14px; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-2); }.skeleton-card p { margin: 0; line-height: 1.6; }.match-reason { font-size: 11px; }.skeleton-preview { display: grid; gap: 6px; margin: 0; padding-left: 20px; font-size: 12px; }.skeleton-preview li { padding-left: 3px; }.skeleton-preview strong,.skeleton-preview span { display: block; }.skeleton-preview span { color: var(--muted); line-height: 1.45; }
-h1 { font-size: 22px; margin: 0; font-family: var(--serif); }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; }
 .story-grid { grid-template-columns: 1fr 1.15fr; align-items: start; }
 @media (max-width: 1000px) { .story-grid,.skeleton-grid { grid-template-columns: 1fr; }.skeleton-search { align-items: stretch; flex-direction: column; }.count-field { width: 100%; } }
 .facts-panel { align-self: start; }

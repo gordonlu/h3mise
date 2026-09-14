@@ -200,7 +200,7 @@ onMounted(() => project.refreshProjects());
 
 <style scoped>
 .page { padding: 28px 32px; max-width: 1100px; margin: 0 auto; }
-h1 { font-size: 24px; margin: 0 0 4px; font-family: var(--serif); }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 4px; }
 .grid.create { grid-template-columns: 1fr 1.3fr; align-items: start; margin-top: 20px; }
 .propose-hint { margin: -4px 0 0; }
 .manual-options { border-top: 1px dashed var(--line); padding-top: 10px; }

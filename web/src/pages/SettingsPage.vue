@@ -530,7 +530,7 @@ async function verifyStoryboardProfile() {
 
 <style scoped>
 .page { padding: 24px 32px; max-width: 1000px; margin: 0 auto; }
-h1 { font-size: 21px; margin: 0 0 16px; }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 22px; }
 .grid { grid-template-columns: 1fr 1fr; }
 .file-button, .button-link {
   display: inline-flex;

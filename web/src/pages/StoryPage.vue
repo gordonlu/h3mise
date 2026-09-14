@@ -2,17 +2,19 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { get, post, patch, del } from '../api/client';
 import { useToastStore } from '../stores/toast';
+import { useAiStore } from '../stores/ai';
 import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
 import type { BeatApplyResult, SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StoryEpisodeList, StorySkeleton } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
 
 const toasts = useToastStore();
+const ai = useAiStore();
 const story = ref<{ id: string; title: string; synopsis: string; body: string; plannedDurationSeconds: number } | null>(null);
 const episodeList = ref<StoryEpisodeList | null>(null);
 const beats = ref<StoryBeat[]>([]);
 const shots = ref<Array<{ id: string; title: string; storyBeatId: string | null }>>([]);
-const aiEnabled = ref(false);
+const aiEnabled = computed(() => ai.configured || ai.agentAttached);
 const aiBusy = ref(false);
 const skeletonOpen = ref(false);
 const skeletonBusy = ref(false);
@@ -47,18 +49,16 @@ const canAiSplit = computed(() => Boolean(story.value?.body?.trim()) && !aiBusy.
 const uncoveredBeatCount = computed(() => beats.value.filter((beat) => !(beatShots.value.get(beat.id)?.length)).length);
 
 async function load() {
-  const [loadedEpisodes, loadedStory, loadedBeats, loadedShots, aiStatus] = await Promise.all([
+  const [loadedEpisodes, loadedStory, loadedBeats, loadedShots] = await Promise.all([
     get<StoryEpisodeList>('/api/story/episodes'),
     get<typeof story.value>('/api/story'),
     get<StoryBeat[]>('/api/story/beats'),
     get<typeof shots.value>('/api/shots'),
-    get<{ configured: boolean }>('/api/ai/status').catch(() => ({ configured: false })),
   ]);
   episodeList.value = loadedEpisodes;
   story.value = loadedStory;
   beats.value = loadedBeats;
   shots.value = loadedShots;
-  aiEnabled.value = aiStatus.configured;
 }
 
 async function saveStory(patchData: Partial<NonNullable<typeof story.value>>) {
@@ -222,31 +222,23 @@ async function aiStoryToBeats() {
   });
   if (!ok) return;
   aiBusy.value = true;
-  toasts.push({ kind: 'info', text: 'AI 拆解已提交，后台处理中（通常 10–60 秒，复杂故事可能需要数分钟）…' });
+  toasts.push({
+    kind: 'info',
+    text: ai.agentAttached
+      ? '已交给外部 Agent 处理（完成后自动应用）…'
+      : 'AI 拆解已提交，后台处理中（通常 10–60 秒，复杂故事可能需要数分钟）…',
+  });
   try {
     if (storyDirty.value) await saveStoryDraft();
-    const res = await post<{ jobId: string }>('/api/ai/actions/story_to_beats', {});
-    for (let i = 0; i < 180; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const job = await get<{ status: string; result: unknown; error: string | null }>(`/api/jobs/${res.jobId}`);
-      if (job.status === 'done') {
-        const result = job.result as {
-          beats: Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
-          applied?: BeatApplyResult;
-        };
-        const applied = result.applied ?? await post<BeatApplyResult>('/api/story/beats/apply-proposal', {
-          beats: result.beats, mode: 'replace', createMissingShots: true,
-        });
-        await load();
-        toasts.push({ kind: 'ok', text: `拆解完成：当前 ${applied.beats.length} 个 Beat，补齐 ${applied.shotsCreated} 个 Shot${applied.retainedLinked ? `；保留 ${applied.retainedLinked} 个已有 Shot 关联 Beat` : ''}` });
-        return;
-      }
-      if (job.status === 'failed') {
-        toasts.push({ kind: 'err', text: t('pages.story.aiFailed', { msg: job.error ?? 'unknown' }) });
-        return;
-      }
-    }
-    toasts.push({ kind: 'err', text: '等待界面超时，后台任务可能仍在完成；请先刷新查看 Beats，确认任务失败后再重试。' });
+    const { result } = await ai.runAction<{
+      beats: Array<Omit<StoryBeat, 'id' | 'sequenceId' | 'order' | 'createdAt' | 'updatedAt'>>;
+      applied?: BeatApplyResult;
+    }>('story_to_beats', {});
+    const applied = result.applied ?? await post<BeatApplyResult>('/api/story/beats/apply-proposal', {
+      beats: result.beats, mode: 'replace', createMissingShots: true,
+    });
+    await load();
+    toasts.push({ kind: 'ok', text: `拆解完成：当前 ${applied.beats.length} 个 Beat，补齐 ${applied.shotsCreated} 个 Shot${applied.retainedLinked ? `；保留 ${applied.retainedLinked} 个已有 Shot 关联 Beat` : ''}` });
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   } finally {

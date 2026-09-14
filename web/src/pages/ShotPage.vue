@@ -5,6 +5,7 @@ import { useShot } from '../composables/useShot';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { useRenderStore } from '../stores/render';
+import { useAiStore } from '../stores/ai';
 import { confirmDialog } from '../stores/confirm';
 import { get, post, del, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
@@ -79,7 +80,8 @@ const currentActualContinuity = computed(() => [...(sDetail.value?.continuity ??
 
 const tab = ref<'workspace' | 'plan' | 'camera' | 'references' | 'prompt' | 'preflight' | 'external'>('workspace');
 const media = ref<MediaAsset[]>([]);
-const aiJobs = ref<Record<string, string>>({}); // actionKey -> jobId
+const aiJobs = ref<Record<string, boolean>>({}); // actionKey -> in flight
+const ai = useAiStore();
 const aiResults = ref<Record<string, unknown>>({});
 const externalTask = ref('Plan Shot');
 const pasteText = ref('');
@@ -89,15 +91,11 @@ const takesSection = ref<HTMLElement | null>(null);
 const megapixels = ref(1);
 
 // P1: AI availability comes from /api/ai/status, NOT from whether a render
-// provider is configured — the two are independent features.
-const aiEnabled = ref(false);
+// provider is configured — the two are independent features. An attached
+// external agent is also a valid inference source, even with no project AI.
+const aiEnabled = computed(() => ai.configured || ai.agentAttached);
 async function refreshAiStatus() {
-  try {
-    const status = await get<{ configured?: boolean }>('/api/ai/status');
-    aiEnabled.value = Boolean(status.configured);
-  } catch {
-    aiEnabled.value = false;
-  }
+  await ai.refresh();
 }
 
 /** Respect the project's explicit provider choice. Never silently fall back
@@ -269,32 +267,19 @@ async function loadMedia() {
   media.value = await get<MediaAsset[]>('/api/assets/media');
 }
 
-/** Run an AI action as a background job; poll until done; return result. */
+/** Run an AI action; when an external agent is attached the request is
+ * deferred to it, otherwise it runs as a built-in background job. */
 async function runAi(action: string, body: Record<string, unknown>): Promise<unknown> {
   const key = `${action}:${JSON.stringify(body).slice(0, 40)}`;
-  const res = await post<{ jobId: string; status: string }>(`/api/ai/actions/${action}`, body);
-  aiJobs.value[key] = res.jobId;
-  toasts.push({ kind: 'info', text: tr('shot.toast.aiSubmitted') });
-  let waited = 0;
-  let longRunningReminderShown = false;
+  aiJobs.value[key] = true;
+  toasts.push({ kind: 'info', text: ai.agentAttached ? tr('shot.toast.aiDeferred') : tr('shot.toast.aiSubmitted') });
   try {
-    for (let i = 0; i < 180; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
-      waited += 1.5;
-      const job = await get<{ status: string; result: unknown; error: string | null }>(`/api/jobs/${res.jobId}`);
-      if (job.status === 'done') {
-        showVisionStatus(job.result);
-        return job.result;
-      }
-      if (job.status === 'failed') throw new Error(job.error ?? 'AI job failed');
-      // The old 30 <= waited < 32 window matched both the 30s and 31.5s
-      // polls, producing two consecutive "still processing" toasts.
-      if (!longRunningReminderShown && waited >= 30) {
-        longRunningReminderShown = true;
-        toasts.push({ kind: 'info', text: tr('shot.toast.aiStillProcessing') });
-      }
-    }
-    throw new Error('AI job timeout');
+    const { result, deferred } = await ai.runAction(action, body, {
+      onLongWait: () => toasts.push({ kind: 'info', text: tr('shot.toast.aiStillProcessing') }),
+    });
+    if (deferred) toasts.push({ kind: 'info', text: tr('shot.toast.aiDeferredDone') });
+    showVisionStatus(result);
+    return result;
   } finally {
     delete aiJobs.value[key];
   }

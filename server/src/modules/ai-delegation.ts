@@ -8,7 +8,7 @@
 // auto_director) resume across HTTP calls.
 
 import { createHash } from 'node:crypto';
-import type { AiInferenceMessage, AiInferenceStep, AiRequestDetail, AiRequestSource, AiRequestStatus, AiRequestSummary } from '@h3mise/shared';
+import type { AiAgentStatus, AiInferenceMessage, AiInferenceStep, AiRequestDetail, AiRequestSource, AiRequestStatus, AiRequestSummary } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import type { AIService, VisionStatus } from './ai.js';
 import { extractJsonValue } from './ai.js';
@@ -17,7 +17,35 @@ import { createKeyedMutex } from './mutex.js';
 import { nextId } from '../db/ids.js';
 
 const MAX_STATE_BYTES = 2_000_000;
+const AGENT_TTL_MS = 10 * 60_000;
 const mutex = createKeyedMutex();
+
+// --- agent presence (in-memory; the server is a single local process) ------
+
+let agentModel: string | null = null;
+let agentLastSeenAt = 0;
+
+/** Record agent activity. Called on every delegated prepare/apply and by the
+ * explicit attach endpoint; keeps the presence alive while an agent works. */
+export function touchAgent(modelLabel: string | null): void {
+  if (modelLabel) agentModel = modelLabel;
+  agentLastSeenAt = Date.now();
+}
+
+export function detachAgent(): void {
+  agentModel = null;
+  agentLastSeenAt = 0;
+}
+
+export function agentStatus(ctx: ProjectContext | null): AiAgentStatus {
+  const attached = agentLastSeenAt > 0 && Date.now() - agentLastSeenAt < AGENT_TTL_MS;
+  return {
+    attached,
+    modelLabel: attached ? agentModel : null,
+    lastSeenAt: agentLastSeenAt > 0 ? new Date(agentLastSeenAt).toISOString() : null,
+    pending: ctx ? countPending(ctx) : 0,
+  };
+}
 
 export class AiDelegationError extends Error {
   constructor(
@@ -128,6 +156,21 @@ export function getRequest(ctx: ProjectContext, id: string): AiRequestDetail | n
   return { ...toSummary(row), result: parseJson(row.result_json, null), error: row.error };
 }
 
+/** Cancel a request that is still waiting for an agent. Applied/stale/failed
+ * requests cannot be cancelled. */
+export function cancelRequest(ctx: ProjectContext, id: string): AiRequestSummary {
+  const row = getRow(ctx, id);
+  if (!row) throw new AiDelegationError(`ai request ${id} not found`, 404, 'not_found');
+  if (row.status !== 'pending') {
+    throw new AiDelegationError(`只有等待中的请求可以取消（当前状态：${row.status}）`, 409, 'not_pending');
+  }
+  const ts = now();
+  ctx.db.run('UPDATE ai_requests SET status = ?, error = ?, updated_at = ?, completed_at = ? WHERE id = ?', [
+    'cancelled', '由用户取消', ts, ts, id,
+  ]);
+  return toSummary(getRow(ctx, id)!);
+}
+
 export interface PreparedRequest {
   requestId: string;
   step: InferenceStep;
@@ -144,6 +187,7 @@ export async function prepareRequest(
   modelLabel: string | null,
 ): Promise<PreparedRequest> {
   const step = await prepareAction(ai, ctx, action, body);
+  touchAgent(modelLabel);
   const hash = contextHash(action, body, step);
   const id = nextId(ctx.db, 'aireq');
   const ts = now();
@@ -171,6 +215,7 @@ export async function applyResult(
   vision: VisionStatus | null,
 ): Promise<ApplyOutcome> {
   return mutex(`ai-request:${id}`, async () => {
+    touchAgent(null);
     const row = getRow(ctx, id);
     if (!row) throw new AiDelegationError(`ai request ${id} not found`, 404, 'not_found');
     if (row.status === 'applied') {
@@ -178,6 +223,7 @@ export async function applyResult(
     }
     if (row.status === 'failed') throw new AiDelegationError(row.error ?? 'ai request failed', 409, 'failed');
     if (row.status === 'stale') throw new AiDelegationError('项目在 prepare 之后已变化，请重新 prepare', 409, 'stale');
+    if (row.status === 'cancelled') throw new AiDelegationError('该请求已被取消，等待新的请求', 409, 'cancelled');
 
     const body = parseJson<Record<string, unknown>>(row.body_json, {});
     // Rebuild the first step: any project change since prepare flips the hash.

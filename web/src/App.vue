@@ -5,6 +5,7 @@ import { useProjectStore } from './stores/project';
 import { useRenderStore } from './stores/render';
 import { useToastStore } from './stores/toast';
 import { useThemeStore } from './stores/theme';
+import { useAiStore } from './stores/ai';
 import { locale, setLocale, t } from './stores/locale';
 import { subscribeEvents, get } from './api/client';
 import RenderQueueDrawer from './components/RenderQueueDrawer.vue';
@@ -20,11 +21,22 @@ const route = useRoute();
 const render = useRenderStore();
 const toasts = useToastStore();
 const theme = useThemeStore();
+const ai = useAiStore();
 const health = ref<{ ffmpeg: { available: boolean }; runningHubConfigured: boolean; aiConfigured: boolean } | null>(null);
 const projectsOpen = ref(false);
+const brainOpen = ref(false);
 const projectGuide = ref<ProjectGuideSummary | null>(null);
 const projectsRef = ref<HTMLElement | null>(null);
+const brainRef = ref<HTMLElement | null>(null);
 let off: (() => void) | null = null;
+let aiTimer: number | undefined;
+
+/** Brain indicator — who provides inference in this session. */
+function brainLabel(): string {
+  if (ai.agentAttached) return t('brain.externalAgent');
+  if (ai.configured) return t('brain.projectAi');
+  return t('brain.offline');
+}
 
 function cycleLocale(): void {
   setLocale(locale.value === 'zh' ? 'en' : locale.value === 'en' ? 'ja' : 'zh');
@@ -72,6 +84,9 @@ function onProjectsClickOutside(e: MouseEvent) {
   if (projectsOpen.value && projectsRef.value && !projectsRef.value.contains(e.target as Node)) {
     projectsOpen.value = false;
   }
+  if (brainOpen.value && brainRef.value && !brainRef.value.contains(e.target as Node)) {
+    brainOpen.value = false;
+  }
 }
 
 /** Global SSE → toast notifications (render lifecycle, takes, continuity). */
@@ -105,6 +120,8 @@ onMounted(async () => {
   await project.bootstrap();
   await render.refresh();
   await refreshProjectGuide();
+  void ai.refresh();
+  aiTimer = window.setInterval(() => void ai.refresh(), 15_000);
   try {
     health.value = await get('/api/health');
   } catch {
@@ -114,6 +131,7 @@ onMounted(async () => {
   off = subscribeEvents((e: AppEvent) => {
     render.onEvent(e.type, e as unknown as Record<string, unknown>);
     notify(e);
+    if (e.type.startsWith('ai.request.')) void ai.refresh();
     if (e.type === 'take.created' || e.type === 'shot.updated' || e.type === 'continuity.committed' || e.type === 'project.updated') {
       void project.refreshCurrent();
       void scheduleGuideRefresh();
@@ -138,6 +156,7 @@ function scheduleGuideRefresh() {
 onUnmounted(() => {
   off?.();
   if (guideTimer) clearTimeout(guideTimer);
+  if (aiTimer) window.clearInterval(aiTimer);
   document.removeEventListener('mousedown', onProjectsClickOutside);
 });
 
@@ -173,6 +192,38 @@ watch(() => route.path, () => void scheduleGuideRefresh());
         </div>
         <WorkspaceNav />
         <div class="spacer" />
+        <div ref="brainRef" class="brain">
+          <button
+            class="ghost brain-button"
+            :class="{ attached: ai.agentAttached }"
+            :title="`${t('brain.title')}：${brainLabel()}${ai.agentLabel ? ` (${ai.agentLabel})` : ''}`"
+            @click="brainOpen = !brainOpen"
+          >
+            <span class="brain-dot" :class="{ attached: ai.agentAttached, offline: !ai.agentAttached && !ai.configured }" />
+            <span class="brain-label">{{ brainLabel() }}</span>
+            <span v-if="ai.pendingCount" class="badge accent no-dot">{{ ai.pendingCount }}</span>
+          </button>
+          <div v-if="brainOpen" class="brain-menu">
+            <div class="brain-row">
+              <span class="brain-dot" :class="{ attached: ai.agentAttached, offline: !ai.agentAttached && !ai.configured }" />
+              <div class="brain-copy">
+                <strong>{{ brainLabel() }}</strong>
+                <small v-if="ai.agentAttached">{{ ai.agentLabel ?? t('brain.noModel') }}</small>
+                <small v-else-if="ai.configured">{{ ai.status?.model ?? t('brain.noModel') }}</small>
+                <small v-else>{{ t('brain.noModel') }}</small>
+              </div>
+            </div>
+            <div v-if="ai.pendingRequests.length" class="brain-pending">
+              <div class="brain-pending-title">{{ t('brain.pending') }}</div>
+              <div v-for="request in ai.pendingRequests" :key="request.id" class="brain-pending-row">
+                <span class="mono">{{ request.id }}</span>
+                <span class="brain-action">{{ request.action }}</span>
+                <button class="ghost brain-cancel" :title="t('common.cancel')" @click="ai.cancelRequest(request.id)">✕</button>
+              </div>
+            </div>
+            <button v-if="ai.agentAttached" class="ghost brain-detach" @click="ai.detachAgent()">{{ t('brain.detach') }}</button>
+          </div>
+        </div>
         <button class="ghost queue-button" @click="render.drawerOpen = true">
           {{ t('common.renderQueue') }}
           <span v-if="activeJobCount()" class="badge accent no-dot">{{ activeJobCount() }}</span>
@@ -285,6 +336,33 @@ watch(() => route.path, () => void scheduleGuideRefresh());
 .ghost-link { color: var(--text-2); font-size: 13px; padding: 6px 9px; border-radius: 7px; }
 .ghost-link:hover { color: var(--text); background: var(--bg-subtle); text-decoration: none; }
 .queue-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* brain indicator — who provides inference */
+.brain { position: relative; }
+.brain-button { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; padding: 5px 10px; }
+.brain-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; }
+.brain-dot.attached { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.brain-dot.offline { background: var(--line-3); }
+.brain-label { font-size: 12.5px; color: var(--text-2); }
+.brain-button.attached .brain-label { color: var(--accent-text); font-weight: 600; }
+.brain-menu {
+  position: absolute; right: 0; top: calc(100% + 8px);
+  width: 280px; padding: 10px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-2); z-index: 45;
+}
+.brain-row { display: flex; align-items: center; gap: 10px; padding: 4px 6px 10px; }
+.brain-copy { display: grid; gap: 1px; min-width: 0; }
+.brain-copy strong { font-size: 13px; }
+.brain-copy small { color: var(--text-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brain-pending { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 4px; }
+.brain-pending-title { color: var(--text-3); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 0 6px; }
+.brain-pending-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 7px; background: var(--bg-subtle); font-size: 11.5px; }
+.brain-pending-row .mono { color: var(--text-3); }
+.brain-action { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brain-cancel { padding: 1px 7px; font-size: 11px; color: var(--text-3); }
+.brain-cancel:hover { color: var(--bad); }
+.brain-detach { width: 100%; margin-top: 8px; font-size: 12px; }
 .system-link { position: relative; white-space: nowrap; }
 .system-alert { position: absolute; top: 4px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--bg-2); }
 .theme-toggle { font-size: 15px; padding: 5px 9px; }

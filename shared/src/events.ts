@@ -19,4 +19,8 @@ export type AppEvent =
   | { type: 'shot.updated'; shotId: string; status: ShotStatus }
   | { type: 'project.updated' }
   | { type: 'auto.updated'; runId: string; status: import('./auto-produce.js').AutoProduceStatus }
-  | { type: 'job.updated'; jobId: string; status: 'running' | 'done' | 'failed' | 'cancelled'; kind: string };
+  | { type: 'job.updated'; jobId: string; status: 'running' | 'done' | 'failed' | 'cancelled'; kind: string }
+  | { type: 'ai.request.created'; requestId: string; action: string }
+  | { type: 'ai.request.applied'; requestId: string; action: string }
+  | { type: 'ai.request.failed'; requestId: string; action: string; error: string }
+  | { type: 'ai.request.cancelled'; requestId: string; action: string };

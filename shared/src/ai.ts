@@ -4,7 +4,7 @@
 // with its own model, and the server validates + applies the answer (apply).
 // This keeps one inference authority per session.
 
-export type AiRequestStatus = 'pending' | 'applied' | 'failed' | 'stale';
+export type AiRequestStatus = 'pending' | 'applied' | 'failed' | 'stale' | 'cancelled';
 
 export type AiRequestSource = 'agent' | 'builtin';
 
@@ -74,3 +74,29 @@ export interface AiDelegationStatus {
   apply: string;
   pending: number;
 }
+
+/** Presence of an external agent that brings its own inference. In-memory on
+ * the local server; expires when the agent has been idle for a while. */
+export interface AiAgentStatus {
+  attached: boolean;
+  modelLabel: string | null;
+  lastSeenAt: string | null;
+  pending: number;
+}
+
+/** Response of POST /api/ai/actions/:action for the built-in driver. */
+export interface AiActionJobResponse {
+  deferred: false;
+  jobId: string;
+  status: string;
+}
+
+/** Response of POST /api/ai/actions/:action when inference was delegated to
+ * an attached external agent instead of the project's own model. */
+export interface AiActionDeferredResponse {
+  deferred: true;
+  requestId: string;
+  status: 'pending';
+}
+
+export type AiActionResponse = AiActionJobResponse | AiActionDeferredResponse;

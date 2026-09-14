@@ -33,6 +33,10 @@ export const zh = {
     empty: '空',
     unconfigured: '未配置',
   },
+  brain: {
+    title: '推理来源', projectAi: '项目 AI', externalAgent: '外部 Agent', offline: '离线',
+    pending: '等待推理', detach: '断开 Agent', noModel: '未配置模型',
+  },
   guide: {
     progress: '项目进度', storySetup: '故事 / 设定', shotList: 'Shot 列表', production: '镜头制作', assembly: '成片编排', export: '导出',
     selectedTakes: '{selected} / {total} 已选片', complete: '已完成', current: '当前步骤', attention: '需要处理', upcoming: '尚未开始', aria: '制作进度',
@@ -149,6 +153,10 @@ export const en: typeof zh = {
     empty: 'Empty',
     unconfigured: 'Unconfigured',
   },
+  brain: {
+    title: 'Inference source', projectAi: 'Project AI', externalAgent: 'External Agent', offline: 'Offline',
+    pending: 'Pending inference', detach: 'Detach agent', noModel: 'No model configured',
+  },
   guide: {
     progress: 'Project progress', storySetup: 'Story / Setup', shotList: 'Shot List', production: 'Shot Production', assembly: 'Assembly', export: 'Export',
     selectedTakes: '{selected} / {total} selected', complete: 'Complete', current: 'Current step', attention: 'Needs attention', upcoming: 'Not started', aria: 'Production progress',
@@ -254,6 +262,10 @@ export const ja: typeof zh = {
   common: {
     renderQueue: 'レンダーキュー', cancel: 'キャンセル', confirm: '確認', delete: '削除', create: '作成', save: '保存',
     close: '閉じる', add: '追加', remove: '取り除く', loading: '読み込み中…', empty: '空', unconfigured: '未設定',
+  },
+  brain: {
+    title: '推論ソース', projectAi: 'プロジェクト AI', externalAgent: '外部エージェント', offline: 'オフライン',
+    pending: '推論待ち', detach: 'エージェントを切断', noModel: 'モデル未設定',
   },
   guide: {
     progress: 'プロジェクト進捗', storySetup: 'ストーリー / 設定', shotList: 'Shot リスト', production: 'Shot 制作', assembly: '本編構成', export: '書き出し',

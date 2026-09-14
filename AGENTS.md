@@ -108,6 +108,12 @@ When you (an agent) drive H3Mise, bring your own model. Do not configure a proje
    - `409 code: "stale"` — the project changed after prepare; prepare again instead of retrying.
    - `422 code: "invalid_json"` / `"invalid_output"` — fix the format; do not resend the same payload.
 
+Presence and UI-deferred work:
+
+- Declare yourself with `POST /api/ai/agent/session` (`{ "model": "<label>" }`); presence lasts 10 minutes and is refreshed by every prepare/apply. `DELETE /api/ai/agent/session` detaches and returns control to the project AI. `GET /api/ai/agent` reports presence and the pending count.
+- While you are attached, AI buttons in the UI no longer call the project model: they create pending `ai_requests`. Treat them exactly like requests you prepared yourself (the step is already stored) and answer with `POST /api/ai/requests/{id}/apply`.
+- Handle them promptly; the user can cancel a pending request from the top-bar inference indicator, which also lets them detach you.
+
 Rules:
 
 - `apply` is the only writer for delegated actions. Never write beats, plans, or prompts directly to bypass validation.

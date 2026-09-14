@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import { AIService } from '../src/modules/ai.js';
-import { applyResult, countPending, getRequest, listRequests, prepareRequest } from '../src/modules/ai-delegation.js';
+import { applyResult, agentStatus, cancelRequest, countPending, detachAgent, getRequest, listRequests, prepareRequest, touchAgent } from '../src/modules/ai-delegation.js';
 import { createShot } from '../src/modules/shots.js';
 import { listBeats, updateStory } from '../src/modules/story.js';
 import { cleanupTempRoot, makeProject, makeStore, type ProjectContext } from './helpers.js';
@@ -115,4 +115,46 @@ test('unknown requests and actions fail with explicit codes', async () => {
     (error: unknown) => (error as { code?: string }).code === 'not_found',
   );
   await assert.rejects(() => prepareRequest(ai, p, 'not_an_action', {}, null), /unknown action/);
+});
+
+test('agent presence tracks attach, activity, and detach', async () => {
+  detachAgent();
+  assert.equal(agentStatus(null).attached, false);
+  touchAgent('deepseek-v4');
+  const attached = agentStatus(null);
+  assert.equal(attached.attached, true);
+  assert.equal(attached.modelLabel, 'deepseek-v4');
+  assert.ok(attached.lastSeenAt);
+  detachAgent();
+  assert.equal(agentStatus(null).attached, false);
+  assert.equal(agentStatus(null).modelLabel, null);
+
+  // A delegated prepare refreshes presence with the declared model label.
+  const p = await project('ai-deleg-presence');
+  detachAgent();
+  await prepareRequest(offlineAi(), p, 'story_to_beats', {}, 'test-model');
+  assert.equal(agentStatus(p).attached, true);
+  assert.equal(agentStatus(p).modelLabel, 'test-model');
+  assert.equal(agentStatus(p).pending, 1);
+  detachAgent();
+});
+
+test('pending requests can be cancelled; completed ones cannot', async () => {
+  const p = await project('ai-deleg-cancel');
+  const ai = offlineAi();
+  const prepared = await prepareRequest(ai, p, 'story_to_beats', {}, null);
+  const cancelled = cancelRequest(p, prepared.requestId);
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(countPending(p), 0);
+  // A cancelled request must not accept a late agent answer.
+  await assert.rejects(
+    () => applyResult(ai, p, prepared.requestId, '[]', null),
+    (error: unknown) => (error as { code?: string }).code === 'cancelled',
+  );
+
+  const completed = await prepareRequest(ai, p, 'story_to_beats', {}, null);
+  const outcome = await applyResult(ai, p, completed.requestId, JSON.stringify([{ title: 'A', summary: 'B' }]), null);
+  assert.equal(outcome.status, 'applied');
+  assert.throws(() => cancelRequest(p, completed.requestId), (error: unknown) => (error as { code?: string }).code === 'not_pending');
+  detachAgent();
 });

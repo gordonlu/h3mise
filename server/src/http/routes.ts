@@ -1111,6 +1111,7 @@ export function buildRoutes(services: AppServices): App {
     return c.json({
       ...services.ai.status,
       skills: services.ai.skillsDir,
+      agent: delegationMod.agentStatus(ctx),
       delegation: {
         supported: true,
         prepare: '/api/ai/actions/{action}/prepare',
@@ -1119,12 +1120,41 @@ export function buildRoutes(services: AppServices): App {
       },
     });
   });
+  app.get('/api/ai/agent', (c) => c.json(delegationMod.agentStatus(services.store.current)));
+  app.post('/api/ai/agent/session', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const label = typeof body.model === 'string' && body.model.trim()
+      ? body.model.trim()
+      : c.req.header('x-h3mise-agent-model') ?? null;
+    delegationMod.touchAgent(label);
+    return c.json(delegationMod.agentStatus(services.store.current));
+  });
+  app.delete('/api/ai/agent/session', (c) => {
+    delegationMod.detachAgent();
+    return c.json(delegationMod.agentStatus(services.store.current));
+  });
   app.get('/api/ai/skills', async (c) => c.json(await services.ai.loadSkills()));
   app.post('/api/ai/actions/:action', async (c) => {
     const ctx = p(c);
     const body = await c.req.json();
     const action = c.req.param('action');
     const projectId = ctx.meta.id;
+    // An attached external agent is the session's inference authority: defer
+    // UI-initiated actions to it instead of calling the project's own model.
+    // `defer: false` explicitly forces the built-in path.
+    const agent = delegationMod.agentStatus(ctx);
+    const wantDefer = body.defer === true || (body.defer !== false && agent.attached);
+    if (wantDefer) {
+      try {
+        const prepared = await delegationMod.prepareRequest(services.ai, ctx, action, body, agent.modelLabel);
+        services.bus.emit({ type: 'ai.request.created', requestId: prepared.requestId, action });
+        return c.json({ deferred: true, requestId: prepared.requestId, status: 'pending' }, 202);
+      } catch (error) {
+        if (error instanceof delegationMod.AiDelegationError) return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
+        const message = error instanceof Error ? error.message : String(error);
+        return c.json({ error: message, code: 'prepare_failed' }, 400);
+      }
+    }
     // P1: detached context — AI actions can run long; a project switch in the
     // UI must not close the database out from under them.
     const job = services.jobs.start('ai.action', `AI: ${action}`, async (update) => {
@@ -1138,7 +1168,7 @@ export function buildRoutes(services: AppServices): App {
         pctx.close();
       }
     });
-    return c.json({ jobId: job.id, status: job.status }, 202);
+    return c.json({ deferred: false, jobId: job.id, status: job.status }, 202);
   });
   app.post('/api/ai/chat', async (c) => {
     const body = await c.req.json();
@@ -1185,9 +1215,28 @@ export function buildRoutes(services: AppServices): App {
     try {
       const outcome = await delegationMod.applyResult(services.ai, ctx, id, (body as { result: unknown }).result, vision);
       if (outcome.status === 'applied') {
+        const action = delegationMod.getRequest(ctx, id)?.action ?? 'unknown';
+        services.bus.emit({ type: 'ai.request.applied', requestId: id, action });
         return c.json({ status: 'applied', requestId: id, result: outcome.result, vision: outcome.vision });
       }
       return c.json({ status: 'continue', requestId: id, inference: delegationMod.wireStep(outcome.step) });
+    } catch (error) {
+      if (error instanceof delegationMod.AiDelegationError) {
+        const detail = delegationMod.getRequest(ctx, id);
+        if (detail?.status === 'failed') services.bus.emit({ type: 'ai.request.failed', requestId: id, action: detail.action, error: error.message });
+        return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
+      }
+      throw error;
+    }
+  });
+
+  app.post('/api/ai/requests/:id/cancel', (c) => {
+    const ctx = p(c);
+    const id = c.req.param('id');
+    try {
+      const summary = delegationMod.cancelRequest(ctx, id);
+      services.bus.emit({ type: 'ai.request.cancelled', requestId: id, action: summary.action });
+      return c.json(summary);
     } catch (error) {
       if (error instanceof delegationMod.AiDelegationError) return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
       throw error;

@@ -18,6 +18,7 @@ export const zh = {
     quickEdit: '快速剪辑', quickEditDesc: '简化选片和成片整理',
     timelineExport: '时间线与导出', timelineExportDesc: '微调转场、声音和交付',
     workspaceAria: '项目工作流',
+    sideNext: '下一步', sideGo: '去处理', sideNoProject: '选择或新建项目', sidePalette: '搜索 / 指令', sideProgress: '已选片 {selected}/{total}',
   },
   common: {
     renderQueue: '渲染队列',
@@ -346,6 +347,7 @@ export const en: typeof zh = {
     quickEdit: 'Quick Edit', quickEditDesc: 'Simple take selection and assembly',
     timelineExport: 'Timeline & Export', timelineExportDesc: 'Transitions, sound, and delivery',
     workspaceAria: 'Project workflow',
+    sideNext: 'Next step', sideGo: 'Go', sideNoProject: 'Select or create a project', sidePalette: 'Search / commands', sideProgress: '{selected}/{total} selected',
   },
   common: {
     renderQueue: 'Render Queue',
@@ -674,6 +676,7 @@ export const ja: typeof zh = {
     quickEdit: 'クイック編集', quickEditDesc: 'Take 選択と本編整理を簡略化',
     timelineExport: 'タイムラインと書き出し', timelineExportDesc: 'トランジション、音声、納品',
     workspaceAria: 'プロジェクト制作フロー',
+    sideNext: '次のステップ', sideGo: '対応する', sideNoProject: 'プロジェクトを選択または作成', sidePalette: '検索 / コマンド', sideProgress: '選片済み {selected}/{total}',
   },
   common: {
     renderQueue: 'レンダーキュー', cancel: 'キャンセル', confirm: '確認', delete: '削除', create: '作成', save: '保存',

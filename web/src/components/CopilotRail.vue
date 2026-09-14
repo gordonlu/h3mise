@@ -60,6 +60,43 @@ const sourceLabel = computed(() => {
   return t('brain.offline');
 });
 const sourceModel = computed(() => ai.agentAttached ? ai.agentLabel : ai.configured ? ai.status?.model ?? null : null);
+
+// --- AI assistant: run a review on the most relevant shot -----------------
+
+const aiAvailable = computed(() => ai.configured || ai.agentAttached);
+const aiBusy = ref(false);
+const aiError = ref('');
+const aiResult = ref<{ shotId: string; label: string; text: string } | null>(null);
+
+/** The shot the rail should focus on: the first next-action that names a
+ * shot, otherwise the first shot that is neither done nor rendering. */
+const aiTarget = computed<{ shotId: string; label: string } | null>(() => {
+  const action = (overview.value?.nextActions ?? []).find((item) => item.shotId);
+  if (action?.shotId) {
+    const shot = overview.value?.shots.find((item) => item.shotId === action.shotId);
+    return { shotId: action.shotId, label: shot?.title || action.shotId };
+  }
+  const pendingShot = (overview.value?.shots ?? []).find((item) => item.stage !== 'done' && item.stage !== 'active');
+  return pendingShot ? { shotId: pendingShot.shotId, label: pendingShot.title || pendingShot.shotId } : null;
+});
+
+async function runCheck(kind: 'reality_check' | 'continuity_check'): Promise<void> {
+  const target = aiTarget.value;
+  if (!target || aiBusy.value) return;
+  aiBusy.value = true;
+  aiError.value = '';
+  aiResult.value = null;
+  try {
+    const { result } = await ai.runAction<{ text?: string }>(kind, { shotId: target.shotId });
+    const text = result?.text?.trim();
+    if (!text) throw new Error(t('copilot.aiNoText'));
+    aiResult.value = { shotId: target.shotId, label: target.label, text };
+  } catch (error) {
+    aiError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    aiBusy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -86,6 +123,28 @@ const sourceModel = computed(() => ai.agentAttached ? ai.agentLabel : ai.configu
         </article>
       </template>
       <div v-else class="cp-empty muted">{{ t('copilot.allClear') }}</div>
+    </div>
+
+    <div v-if="aiAvailable && aiTarget" class="cp-section">
+      <div class="cp-label">{{ t('copilot.aiTitle') }}</div>
+      <div class="cp-ai-focus">{{ t('copilot.aiFocus', { shot: aiTarget.label }) }}</div>
+      <div class="cp-ai-actions">
+        <button class="sm" :disabled="aiBusy" @click="runCheck('reality_check')">
+          {{ aiBusy ? (ai.agentAttached ? t('copilot.aiWaitingAgent') : t('copilot.aiRunning')) : t('copilot.aiReality') }}
+        </button>
+        <button class="sm" :disabled="aiBusy" @click="runCheck('continuity_check')">
+          {{ aiBusy ? (ai.agentAttached ? t('copilot.aiWaitingAgent') : t('copilot.aiRunning')) : t('copilot.aiContinuity') }}
+        </button>
+      </div>
+      <p v-if="aiError" class="cp-ai-error">{{ aiError }}</p>
+      <div v-if="aiResult" class="cp-ai-result">
+        <div class="cp-ai-result-head">
+          <span>{{ aiResult.label }}</span>
+          <button class="ghost cp-cancel" :title="t('common.close')" @click="aiResult = null">✕</button>
+        </div>
+        <pre class="cp-ai-text">{{ aiResult.text }}</pre>
+        <router-link :to="`/shots/${aiResult.shotId}`" class="cp-ai-link">{{ t('copilot.aiOpen') }}</router-link>
+      </div>
     </div>
 
     <div v-if="totalIssues" class="cp-section">
@@ -136,6 +195,14 @@ const sourceModel = computed(() => ai.agentAttached ? ai.agentLabel : ai.configu
 .cp-card-detail { margin: 0; color: var(--text-2); font-size: 11.5px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .cp-open { align-self: flex-start; margin-top: 2px; }
 .cp-empty { font-size: 12px; padding: 4px 2px; }
+.cp-ai-focus { font-size: 11.5px; color: var(--text-2); }
+.cp-ai-actions { display: flex; gap: 6px; }
+.cp-ai-actions .sm { flex: 1; }
+.cp-ai-error { margin: 0; color: var(--bad); font-size: 11.5px; line-height: 1.5; }
+.cp-ai-result { display: grid; gap: 6px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-subtle); }
+.cp-ai-result-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; font-weight: 600; }
+.cp-ai-text { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--sans); font-size: 11.5px; line-height: 1.6; color: var(--text-2); }
+.cp-ai-link { font-size: 11.5px; }
 .cp-counts { display: flex; gap: 6px; background: none; border: none; padding: 0; box-shadow: none; cursor: pointer; }
 .cp-counts:hover { background: none; }
 .cp-count { display: flex; flex-direction: column; align-items: center; gap: 1px; flex: 1; padding: 7px 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-subtle); color: var(--text-3); font-size: 10.5px; }

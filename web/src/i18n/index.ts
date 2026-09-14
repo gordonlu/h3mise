@@ -46,6 +46,8 @@ export const zh = {
   copilot: {
     title: '场记', suggestions: '建议', open: '前往', issues: '问题总览',
     allClear: '暂无需要处理的建议', footnote: '建议由本地规则生成；AI 分析按当前推理来源执行',
+    aiTitle: 'AI 助手', aiFocus: '焦点：{shot}', aiReality: '现实检查', aiContinuity: '连续性检查',
+    aiRunning: '检查中…', aiWaitingAgent: '等待外部 Agent…', aiNoText: 'AI 未返回内容', aiOpen: '打开镜头 →',
   },
   queue: {
     title: '渲染队列', summary: '{active} 个进行中 · {done} 个已结束',
@@ -361,6 +363,8 @@ export const en: typeof zh = {
   copilot: {
     title: 'Script Supervisor', suggestions: 'Suggestions', open: 'Open', issues: 'Issues',
     allClear: 'Nothing needs attention', footnote: 'Suggestions come from local rules; AI analysis uses the current inference source',
+    aiTitle: 'AI assistant', aiFocus: 'Focus: {shot}', aiReality: 'Reality check', aiContinuity: 'Continuity check',
+    aiRunning: 'Checking…', aiWaitingAgent: 'Waiting for the external agent…', aiNoText: 'The AI returned no text', aiOpen: 'Open shot →',
   },
   queue: {
     title: 'Render Queue', summary: '{active} in flight · {done} finished',
@@ -665,6 +669,8 @@ export const ja: typeof zh = {
   copilot: {
     title: 'スクリプト', suggestions: '提案', open: '開く', issues: '問題一覧',
     allClear: '対応が必要な項目はありません', footnote: '提案はローカルルールによるもの。AI 分析は現在の推論ソースで実行されます',
+    aiTitle: 'AI アシスタント', aiFocus: '対象：{shot}', aiReality: 'リアリティチェック', aiContinuity: '連続性チェック',
+    aiRunning: 'チェック中…', aiWaitingAgent: '外部エージェントを待機中…', aiNoText: 'AI が内容を返しませんでした', aiOpen: 'Shot を開く →',
   },
   queue: {
     title: 'レンダーキュー', summary: '実行中 {active} · 完了 {done}',

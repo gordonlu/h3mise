@@ -83,9 +83,9 @@ function nextAction(shot: ShotCard): string {
   const status = SHOT_USER_STATUS[shot.status as ShotStatus];
   if (status === 'review') return t('workflow.shots.selectTake3');
   if (status === 'rendering') return t('workflow.shots.generating2');
-  if (status === 'done') return '查看成片';
-  if (shot.missing?.length) return '补充素材';
-  return status === 'ready' ? '开始生成' : '继续设计';
+  if (status === 'done') return t('pages.shots.viewFilm');
+  if (shot.missing?.length) return t('pages.shots.completeAssets');
+  return status === 'ready' ? t('pages.shots.startGenerating') : t('pages.shots.continueDesign');
 }
 
 function entityName(id: string | null): string {
@@ -106,7 +106,7 @@ async function analyzeBatch() {
     if (batchMegapixels.value !== undefined) params.set('megapixels', String(batchMegapixels.value));
     batchPlan.value = await get<RenderBatchPlan>(`/api/render/batch/plan?${params}`);
   } catch (e) {
-    toasts.push({ kind: 'err', text: `分析生成计划失败：${e instanceof Error ? e.message : e}` });
+    toasts.push({ kind: 'err', text: t('pages.shots.batchAnalyzeFailed', { msg: e instanceof Error ? e.message : String(e) }) });
   } finally {
     batchBusy.value = false;
   }
@@ -123,9 +123,14 @@ async function prepareBatch() {
     await load();
     const ok = result.prepared.filter((item) => !item.blocked).length;
     const blocked = result.prepared.filter((item) => item.blocked).length;
-    toasts.push({ kind: blocked ? 'info' : 'ok', text: `批量准备完成：${ok} 个就绪${blocked ? `，${blocked} 个检查未通过` : ''}；尚未提交视频生成` });
+    toasts.push({
+      kind: blocked ? 'info' : 'ok',
+      text: blocked
+        ? t('pages.shots.batchPreparedBlocked', { ok, blocked })
+        : t('pages.shots.batchPrepared', { ok }),
+    });
   } catch (e) {
-    toasts.push({ kind: 'err', text: `批量准备失败：${e instanceof Error ? e.message : e}` });
+    toasts.push({ kind: 'err', text: t('pages.shots.batchPrepareFailed', { msg: e instanceof Error ? e.message : String(e) }) });
   } finally {
     batchBusy.value = false;
   }
@@ -135,10 +140,17 @@ async function submitReadyBatch() {
   const ready = batchPlan.value?.shots.filter((item) => item.stage === 'ready' && item.promptVersionId) ?? [];
   if (!ready.length) return;
   const paid = batchProviderId.value === 'runninghub';
+  const message = [
+    t('pages.shots.submitProvider', { provider: batchProviderId.value }),
+    t('pages.shots.submitConcurrency', { concurrency: batchPlan.value?.providerConcurrency ?? 1 }),
+    ...(batchMegapixels.value !== undefined ? [t('pages.shots.submitMegapixels', { mp: batchMegapixels.value })] : []),
+    '',
+    t('pages.shots.submitTasks', { n: ready.length }) + (paid ? t('pages.shots.submitPaidNote') : ''),
+  ].join('\n');
   const ok = await confirmDialog({
-    title: `开始生成 ${ready.length} 个 Shot？`,
-    message: `生成服务：${batchProviderId.value}\n并发上限：${batchPlan.value?.providerConcurrency ?? 1}${batchMegapixels.value !== undefined ? `\n输出像素：${batchMegapixels.value} MP` : ''}\n\n将提交 ${ready.length} 个独立生成任务。${paid ? 'RunningHub 可能分别计费；任务提交后云端通常无法真正取消。' : ''}`,
-    confirmLabel: paid ? `确认并提交 ${ready.length} 个付费任务` : `加入 ${ready.length} 个任务`,
+    title: t('pages.shots.submitTitle', { n: ready.length }),
+    message,
+    confirmLabel: paid ? t('pages.shots.confirmPaid', { n: ready.length }) : t('pages.shots.confirmQueue', { n: ready.length }),
     danger: paid,
   });
   if (!ok) return;
@@ -154,10 +166,10 @@ async function submitReadyBatch() {
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
     await Promise.all([load(), renderStore.refresh()]);
     await analyzeBatch();
-    if (submitted) toasts.push({ kind: 'ok', text: `已将 ${submitted} 个 Shot 加入全局渲染队列` });
+    if (submitted) toasts.push({ kind: 'ok', text: t('pages.shots.submittedQueue', { n: submitted }) });
     if (failures.length) {
       const first = failures[0]?.reason;
-      toasts.push({ kind: 'err', text: `${failures.length} 个 Shot 未能提交：${first instanceof Error ? first.message : String(first)}` });
+      toasts.push({ kind: 'err', text: t('pages.shots.submitFailed', { n: failures.length, msg: first instanceof Error ? first.message : String(first) }) });
     }
   } finally {
     batchBusy.value = false;
@@ -169,7 +181,7 @@ async function createShot() {
   try {
     const shot = await post<Shot>('/api/shots', { ...newShot.value, h3Mode: newShot.value.h3Mode || null });
     showCreate.value = false;
-    toasts.push({ kind: 'ok', text: `Shot ${shot.id} 已创建` });
+    toasts.push({ kind: 'ok', text: t('pages.shots.shotCreated', { id: shot.id }) });
     router.push(`/shots/${shot.id}`);
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
@@ -180,15 +192,15 @@ async function createShot() {
 
 async function deleteShot(shot: ShotCard) {
   const ok = await confirmDialog({
-    title: `删除 Shot「${shot.title || shot.id}」？`,
-    message: '将同时删除其导演计划、Prompt 版本、Takes、生成任务和 Timeline 片段，不可恢复。',
-    confirmLabel: '删除',
+    title: t('pages.shots.deleteTitle', { title: shot.title || shot.id }),
+    message: t('pages.shots.deleteMessage'),
+    confirmLabel: t('common.delete'),
     danger: true,
   });
   if (!ok) return;
   try {
     await del(`/api/shots/${shot.id}`);
-    toasts.push({ kind: 'ok', text: 'Shot 已删除' });
+    toasts.push({ kind: 'ok', text: t('pages.shots.deleted') });
     await load();
   } catch (e) {
     toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
@@ -213,9 +225,9 @@ async function pasteShots() {
       // 按行拆分会误建成多个 Shot —— 先让用户确认。
       if (lines.length > 1 && lines.every((l) => l.startsWith('【'))) {
         const proceed = await confirmDialog({
-          title: '看起来像单条提示词？',
-          message: `检测到 ${lines.length} 段以【】开头的段落，通常是同一条提示词的分段，而不是镜头列表。确认要按行拆分成 ${lines.length} 个镜头吗？\n\n如需整段输入提示词，请进入镜头制作页 → 提示词 → 手动输入提示词。`,
-          confirmLabel: '仍要拆分',
+          title: t('pages.shots.looksLikePrompt'),
+          message: t('pages.shots.splitPromptWarning', { n: lines.length }),
+          confirmLabel: t('pages.shots.splitAnyway'),
           danger: true,
         });
         if (!proceed) return;
@@ -223,12 +235,12 @@ async function pasteShots() {
       items = lines.map((l) => ({ title: l.replace(/^\d+[.、)\s]*/, '').slice(0, 60) }));
     }
     const res = await post<Shot[]>('/api/shots/bulk', { items });
-    toasts.push({ kind: 'ok', text: `已创建 ${res.length} 个 Shot` });
+    toasts.push({ kind: 'ok', text: t('pages.shots.createdCount', { n: res.length }) });
     pasteText.value = '';
     showPaste.value = false;
     await load();
   } catch (e) {
-    toasts.push({ kind: 'err', text: `解析失败：${e instanceof Error ? e.message : e}` });
+    toasts.push({ kind: 'err', text: t('pages.shots.parseFailed', { msg: e instanceof Error ? e.message : String(e) }) });
   } finally {
     busy.value = false;
   }
@@ -242,14 +254,14 @@ onMounted(load);
     <div class="page-head">
       <div>
         <h1>{{ t('pages.shots.title') }}</h1>
-        <p>以镜头为单位推进设计、生成与选片，下一步始终清晰可见。</p>
+        <p>{{ t('pages.shots.subtitle') }}</p>
       </div>
       <div class="head-side">
-        <div class="shot-summary" aria-label="镜头状态概览">
-          <span>共 {{ shots.length }} 镜头</span>
-          <span>制作中 {{ statusCounts.rendering ?? 0 }}</span>
-          <span>待选片 {{ statusCounts.review ?? 0 }}</span>
-          <span>已完成 {{ statusCounts.done ?? 0 }}</span>
+        <div class="shot-summary" :aria-label="t('pages.shots.summaryAria')">
+          <span>{{ t('pages.shots.summaryTotal', { n: shots.length }) }}</span>
+          <span>{{ t('pages.shots.summaryRendering', { n: statusCounts.rendering ?? 0 }) }}</span>
+          <span>{{ t('pages.shots.summaryReview', { n: statusCounts.review ?? 0 }) }}</span>
+          <span>{{ t('pages.shots.summaryDone', { n: statusCounts.done ?? 0 }) }}</span>
         </div>
         <div class="row">
           <button @click="showPaste = !showPaste; showCreate = false">{{ t('workflow.shots.pasteShotList') }}</button>
@@ -267,7 +279,7 @@ onMounted(load);
         <option value="">{{ t('workflow.shots.allStatuses') }}</option>
         <option v-for="(_, key) in SHOT_USER_STATUS_LABEL" :key="key" :value="key">{{ statusLabel(String(key)) }}</option>
       </select>
-      <span class="toolbar-result">显示 {{ filtered.length }} 个</span>
+      <span class="toolbar-result">{{ t('pages.shots.showing', { n: filtered.length }) }}</span>
       <button class="batch-trigger" @click="batchOpen ? batchOpen = false : analyzeBatch()">{{ batchOpen ? t('workflow.shots.hideBatchGeneration') : t('workflow.shots.batchGeneration') }}</button>
     </div>
 
@@ -337,7 +349,7 @@ onMounted(load);
     <div v-if="showPaste" class="panel create-panel">
       <div class="panel-title">{{ t('workflow.shots.pasteExternalAIManualShotListOne') }}</div>
       <div class="panel-body col">
-        <textarea v-model="pasteText" rows="6" placeholder="1. 雨夜小巷，女子走入镜头&#10;2. 她在路灯下停步&#10;…"></textarea>
+        <textarea v-model="pasteText" rows="6" :placeholder="t('pages.shots.pastePlaceholder')"></textarea>
         <div class="row">
           <button class="primary" :disabled="busy || !pasteText.trim()" @click="pasteShots">{{ t('workflow.shots.importShots') }}</button>
           <button @click="showPaste = false">{{ t('common.cancel') }}</button>
@@ -374,14 +386,14 @@ onMounted(load);
             playsinline
           />
           <span v-if="!s.cover && hoveredId !== s.id" class="cover-idx">SHOT<br />{{ String(i + 1).padStart(2, '0') }}</span>
-          <span v-if="hoveredId === s.id && s.previewTakeId" class="preview-chip">▶ 预览</span>
+          <span v-if="hoveredId === s.id && s.previewTakeId" class="preview-chip">{{ t('pages.shots.preview') }}</span>
           <span class="cover-duration">{{ s.durationSeconds }}s</span>
         </div>
         <div class="card-body">
           <div class="card-heading">
             <span class="shot-number">{{ String(i + 1).padStart(2, '0') }}</span>
             <span class="card-title">{{ s.title || s.id }}</span>
-            <span :class="['st', `st-${SHOT_USER_STATUS[s.status]}`]" :title="`内部状态：${SHOT_STATUS_LABEL[s.status]}`">
+            <span :class="['st', `st-${SHOT_USER_STATUS[s.status]}`]" :title="t('pages.shots.internalStatus', { status: SHOT_STATUS_LABEL[s.status] })">
               <i />{{ statusLabel(SHOT_USER_STATUS[s.status]) }}
             </span>
             <button class="ghost shot-delete" :title="t('workflow.shots.deleteShotIncludingItsPlanPromptsTakes')" @click.stop.prevent="deleteShot(s)">•••</button>
@@ -399,7 +411,7 @@ onMounted(load);
           </div>
           <div class="spread card-foot">
             <span class="take-info">{{ s.takeCount }} Takes · {{ s.selectedTakeId ? t('workflow.shots.selected') : t('workflow.shots.notSelected') }}</span>
-            <span v-if="s.risk" :class="['risk-text', `risk-${RISK_BADGE[s.risk]}`]" title="最近一次 Preflight 风险">Risk {{ s.risk }}</span>
+            <span v-if="s.risk" :class="['risk-text', `risk-${RISK_BADGE[s.risk]}`]" :title="t('pages.shots.lastRisk')">Risk {{ s.risk }}</span>
             <span class="edit-link">{{ nextAction(s) }} <b>→</b></span>
           </div>
         </div>

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import type { VideoAnalysis } from '@h3mise/shared';
 import { fileUrl, post } from '../api/client';
+import { t } from '../stores/locale';
 
 const props = defineProps<{ takeId: string }>();
 const analysis = ref<VideoAnalysis | null>(null);
@@ -37,32 +38,32 @@ function position(time: number): string {
   <section class="analysis-strip">
     <div class="strip-head">
       <div>
-        <strong>动作 Filmstrip</strong>
-        <span>本地 FFmpeg 均匀抽帧，并检测明显镜头切换；不调用 AI。</span>
+        <strong>{{ t('shot.filmstrip.title') }}</strong>
+        <span>{{ t('shot.filmstrip.hint') }}</span>
       </div>
-      <button v-if="!analysis" class="sm" :disabled="loading" @click="analyze(false)">{{ loading ? '正在分析…' : '分析画面' }}</button>
-      <button v-else class="sm ghost" :disabled="loading" title="忽略缓存重新分析" @click="analyze(true)">{{ loading ? '分析中…' : '重新分析' }}</button>
+      <button v-if="!analysis" class="sm" :disabled="loading" @click="analyze(false)">{{ loading ? t('shot.filmstrip.analyzing') : t('shot.filmstrip.analyze') }}</button>
+      <button v-else class="sm ghost" :disabled="loading" :title="t('shot.filmstrip.forceHint')" @click="analyze(true)">{{ loading ? t('shot.filmstrip.reanalyze') : t('shot.filmstrip.reanalyzeIdle') }}</button>
     </div>
-    <p v-if="error" class="analysis-error">分析失败：{{ error }}</p>
+    <p v-if="error" class="analysis-error">{{ t('shot.filmstrip.error', { msg: error }) }}</p>
     <template v-if="analysis">
       <div class="risk" :class="analysis.suitability.level">
-        <b>{{ analysis.suitability.level === 'good' ? '参考素材未见明显风险' : analysis.suitability.level === 'warning' ? '建议先检查或裁剪' : '不建议整段直接使用' }}</b>
+        <b>{{ analysis.suitability.level === 'good' ? t('shot.filmstrip.riskGood') : analysis.suitability.level === 'warning' ? t('shot.filmstrip.riskWarning') : t('shot.filmstrip.riskPoor') }}</b>
         <span>{{ analysis.suitability.reasons.join('；') }}</span>
       </div>
       <div class="frames-wrap">
         <div class="frames">
           <figure v-for="frame in analysis.frames" :key="frame.relPath">
-            <img :src="fileUrl(frame.relPath)" :alt="`${frame.timeSeconds.toFixed(1)} 秒`" />
+            <img :src="fileUrl(frame.relPath)" :alt="t('shot.filmstrip.frameAlt', { t: frame.timeSeconds.toFixed(1) })" />
             <figcaption>{{ frame.timeSeconds.toFixed(1) }}s</figcaption>
           </figure>
         </div>
-        <i v-for="cut in cuts" :key="cut" class="cut" :style="{ left: position(cut) }" :title="`检测到镜头切换：${cut.toFixed(2)}s`"><span>{{ cut.toFixed(1) }}s cut</span></i>
+        <i v-for="cut in cuts" :key="cut" class="cut" :style="{ left: position(cut) }" :title="t('shot.filmstrip.cutTitle', { t: cut.toFixed(2) })"><span>{{ cut.toFixed(1) }}s cut</span></i>
       </div>
       <div class="strip-meta">
         <span>{{ analysis.width ?? '—' }} × {{ analysis.height ?? '—' }}</span>
         <span>{{ analysis.durationSeconds.toFixed(1) }}s</span>
-        <span>{{ analysis.frames.length }} 帧预览</span>
-        <span :class="cuts.length ? 'cut-count warn' : 'cut-count'">{{ cuts.length }} 个明显切换</span>
+        <span>{{ t('shot.filmstrip.framesPreview', { n: analysis.frames.length }) }}</span>
+        <span :class="cuts.length ? 'cut-count warn' : 'cut-count'">{{ t('shot.filmstrip.cutsCount', { n: cuts.length }) }}</span>
       </div>
     </template>
   </section>

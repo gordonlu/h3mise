@@ -18,7 +18,7 @@ const props = defineProps<{
 const pickerOpen = ref(false);
 const videoProfileNotice = ref('');
 async function detectVideoProfile() {
-  videoProfileNotice.value = '正在检测视频参考工作流…';
+  videoProfileNotice.value = t('shot.references.vrefDetecting');
   try {
     const profile = await post<{ verification: { note: string } }>('/api/providers/runninghub/video-reference-profile/verify', {});
     videoProfileNotice.value = profile.verification.note;
@@ -51,8 +51,8 @@ const groups = computed<RefGroup[]>(() => {
   const videos = props.media.filter((m) => m.kind === 'video');
   const out: RefGroup[] = [];
   if (props.currentMode === 'vref2va') return [
-    { id: 'refvideo', label: '参考视频（必填 1 个）', limit: 1, items: videos, role: 'motion' },
-    { id: 'refimg', label: '参考图片（可选，最多 3 张）', limit: 3, items: images },
+    { id: 'refvideo', label: t('shot.references.vrefGroupVideo'), limit: 1, items: videos, role: 'motion' },
+    { id: 'refimg', label: t('shot.references.vrefGroupImages'), limit: 3, items: images },
   ];
   if (props.currentMode === 'ref2va') {
     if (slots.value.images > 0) out.push({ id: 'refimg', label: t('shot.references.refImages'), limit: slots.value.images, items: images });
@@ -74,7 +74,7 @@ const groups = computed<RefGroup[]>(() => {
 
 const hasSlots = computed(() => groups.value.length > 0);
 const videosAvailable = computed(() => props.media.some((m) => m.kind === 'video'));
-const modeHint = computed(() => props.currentMode === 'vref2va' ? '使用参考视频驱动生成；图片可选。首次使用请检测专用工作流节点。' : t(`shot.references.modeHint.${props.currentMode}`));
+const modeHint = computed(() => props.currentMode === 'vref2va' ? t('shot.references.vrefModeHint') : t(`shot.references.modeHint.${props.currentMode}`));
 /** Ref2VA is slower and pricier — if the shot only has frame images and no
  * other references, the dedicated frame modes do the same job for less. */
 const suggestFrameMode = computed(() => {
@@ -130,8 +130,8 @@ function selectAsset(group: RefGroup, assetId: string) {
 <template>
   <div class="col">
     <div v-if="currentMode === 'vref2va'" class="col">
-      <span class="muted">视频必填 1 个；参考图片可选，最多 3 张。App：2093714693130113026</span>
-      <button class="sm" @click="detectVideoProfile">检测视频参考工作流节点（不生成）</button>
+      <span class="muted">{{ t('shot.references.vrefBindHint') }}</span>
+      <button class="sm" @click="detectVideoProfile">{{ t('shot.references.vrefDetect') }}</button>
       <span v-if="videoProfileNotice" class="muted">{{ videoProfileNotice }}</span>
     </div>
     <div class="row">
@@ -140,9 +140,9 @@ function selectAsset(group: RefGroup, assetId: string) {
       <span v-if="!bindings.length" class="muted">{{ modeHint }}</span>
     </div>
     <details v-if="videosAvailable" class="note">
-      <summary>从视频拉片添加参考</summary>
+      <summary>{{ t('shot.references.addFromBreakdown') }}</summary>
       <div v-for="m in media.filter(m => m.kind === 'video')" :key="m.id">
-        <router-link :to="{ path: `/assets/${m.id}/breakdown`, query: { shotId: String(route.params.id ?? '') } }">{{ m.label || m.id }} → 选择片段</router-link>
+        <router-link :to="{ path: `/assets/${m.id}/breakdown`, query: { shotId: String(route.params.id ?? '') } }">{{ m.label || m.id }} {{ t('shot.references.pickSegment') }}</router-link>
       </div>
     </details>
 

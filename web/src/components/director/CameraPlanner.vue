@@ -348,8 +348,8 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
 
 <template>
   <div class="camera-planner">
-    <div class="camera-purpose"><strong>设计取景变化 → 预演 → 用于生成</strong><p>这里预演的是二维裁切，不包含三维环绕、视差或景深。真实运镜意图请在导演计划中描述。</p><ol><li>保存计划后，重新编译 Prompt，将取景方向与节奏写入生成指令。</li><li>导出首尾帧可用于首尾帧生成；原有绑定会保留。</li><li>本地视频用于检查节奏；仅当 Provider 支持视频输入时，才可作为相机参考。</li></ol></div>
-    <div class="cp-render-row"><button class="sm" @click="preset('static')">固定</button><button class="sm" @click="preset('push')">收紧取景</button><button class="sm" @click="preset('pull')">展开取景</button><button class="sm" @click="preset('left')">向左取景</button><button class="sm" @click="preset('right')">向右取景</button></div>
+    <div class="camera-purpose"><strong>{{ tr('shot.camera.purposeTitle') }}</strong><p>{{ tr('shot.camera.purposeBody') }}</p><ol><li>{{ tr('shot.camera.purposeStep1') }}</li><li>{{ tr('shot.camera.purposeStep2') }}</li><li>{{ tr('shot.camera.purposeStep3') }}</li></ol></div>
+    <div class="cp-render-row"><button class="sm" @click="preset('static')">{{ tr('shot.camera.presetStatic') }}</button><button class="sm" @click="preset('push')">{{ tr('shot.camera.presetPush') }}</button><button class="sm" @click="preset('pull')">{{ tr('shot.camera.presetPull') }}</button><button class="sm" @click="preset('left')">{{ tr('shot.camera.presetLeft') }}</button><button class="sm" @click="preset('right')">{{ tr('shot.camera.presetRight') }}</button></div>
     <!-- Source + mode -->
     <div class="cp-header">
       <label class="field source-field">
@@ -479,7 +479,7 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
       <!-- Render -->
       <div class="cp-render">
         <div class="cp-render-header">{{ tr('shot.camera.renderActions') }}</div>
-        <p class="camera-summary">生成指令：{{ cameraSummary }}</p>
+        <p class="camera-summary">{{ tr('shot.camera.summary', { summary: cameraSummary }) }}</p>
         <div class="cp-render-row">
           <button class="primary sm" :disabled="Boolean(motionJob) || !sourceAsset" @click="renderMotion">
             {{ motionJob ? (tr('shot.camera.motionLabel') + ' …') : tr('shot.camera.renderMotion') }}
@@ -494,7 +494,7 @@ function fmtTime(f: number): string { return `${(f * plan.value.durationSeconds)
         </div>
         <span v-if="lastSaved" class="muted">{{ tr('shot.camera.saved') }} · {{ lastSaved }}</span>
         <video v-if="motionAssetId" :src="mediaUrl(motionAssetId)" controls playsinline class="cp-motion-video" />
-        <router-link v-if="motionAssetId" :to="{ path: `/assets/${motionAssetId}/breakdown`, query: { shotId: shot.id } }">打开参考准备并绑定到此 Shot →</router-link>
+        <router-link v-if="motionAssetId" :to="{ path: `/assets/${motionAssetId}/breakdown`, query: { shotId: shot.id } }">{{ tr('shot.camera.openBreakdown') }}</router-link>
       </div>
     </template>
   </div>

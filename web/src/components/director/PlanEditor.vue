@@ -29,61 +29,33 @@ watch(isDirty, (d) => emit('dirtyChange', d), { immediate: true });
 
 interface FieldDef {
   path: readonly string[];
-  cn: string;
-  en: string;
   type: string;
   options?: readonly string[];
-  placeholder?: string;
 }
 
 interface SectionDef {
   key: string;
-  cn: string;
-  en: string;
   fields: FieldDef[];
 }
 
-interface EssentialFieldDef extends FieldDef {
-  question: string;
-  help: string;
-}
+type EssentialFieldDef = FieldDef;
 
 const essentialFields: EssentialFieldDef[] = [
   {
     path: ['intent', 'visualThesis'],
-    cn: '镜头目标',
-    en: 'Visual Thesis',
     type: 'textarea',
-    question: '这个镜头最重要的画面是什么？',
-    help: '一句话描述观众应该看到和感受到什么。',
-    placeholder: '例如：空荡的放映室里，MISE 在应急灯下显得孤独而渺小',
   },
   {
     path: ['subject', 'action'],
-    cn: '主体动作',
-    en: 'Subject Action',
     type: 'textarea',
-    question: '主体在镜头里做什么？',
-    help: '只写看得见的动作，不需要写镜头语言。',
-    placeholder: '例如：MISE 低着头静止片刻，然后缓慢抬头',
   },
   {
     path: ['camera', 'dominantBehavior'],
-    cn: '摄影机',
-    en: 'Camera',
     type: 'textarea',
-    question: '摄影机怎么拍？',
-    help: '写景别和主要运镜；不确定时写“固定镜头”即可。',
-    placeholder: '例如：中景，固定机位，缓慢推近 MISE',
   },
   {
     path: ['intent', 'endState'],
-    cn: '结束画面',
-    en: 'End State',
     type: 'textarea',
-    question: '镜头最后停在哪里？',
-    help: '描述最后一帧的主体姿态和画面状态。',
-    placeholder: '例如：停在 MISE 抬头望向墙上时钟的中近景',
   },
 ];
 
@@ -91,97 +63,88 @@ const essentialPathKeys = new Set(essentialFields.map((field) => field.path.join
 
 const sections: SectionDef[] = [
   {
-    key: 'intent', cn: '意图', en: 'Intent',
-    fields: [
-      { path: ['intent', 'visualThesis'], cn: '视觉主题', en: 'Visual Thesis', type: 'textarea', placeholder: '这个镜头在画面上要表达什么' },
-      { path: ['intent', 'dramaticGoal'], cn: '戏剧目标', en: 'Dramatic Goal', type: 'textarea' },
-      { path: ['intent', 'peak'], cn: '峰值时刻', en: 'Peak', type: 'textarea', placeholder: '情绪/动作的最高点发生在何时' },
-      { path: ['intent', 'endState'], cn: '结束状态', en: 'End State', type: 'textarea', placeholder: '镜头落幅时画面停在哪里' },
+    key: 'intent', fields: [
+      { path: ['intent', 'visualThesis'], type: 'textarea' },
+      { path: ['intent', 'dramaticGoal'], type: 'textarea' },
+      { path: ['intent', 'peak'], type: 'textarea' },
+      { path: ['intent', 'endState'], type: 'textarea' },
     ],
   },
   {
-    key: 'subject', cn: '主体', en: 'Subject',
-    fields: [
-      { path: ['subject', 'primarySubject'], cn: '主主体', en: 'Primary Subject', type: 'text' },
-      { path: ['subject', 'action'], cn: '动作', en: 'Action', type: 'textarea' },
-      { path: ['subject', 'primaryMotionOwner'], cn: '运动主体', en: 'Motion Owner', type: 'text' },
+    key: 'subject', fields: [
+      { path: ['subject', 'primarySubject'], type: 'text' },
+      { path: ['subject', 'action'], type: 'textarea' },
+      { path: ['subject', 'primaryMotionOwner'], type: 'text' },
     ],
   },
   {
-    key: 'blocking', cn: '走位', en: 'Blocking',
-    fields: [
-      { path: ['blocking', 'startPosition'], cn: '起始位置', en: 'Start Position', type: 'text' },
-      { path: ['blocking', 'endPosition'], cn: '结束位置', en: 'End Position', type: 'text' },
-      { path: ['blocking', 'facing'], cn: '朝向', en: 'Facing', type: 'text' },
-      { path: ['blocking', 'movementAxis'], cn: '运动轴', en: 'Movement Axis', type: 'text' },
-      { path: ['blocking', 'travelPath'], cn: '路径', en: 'Travel Path', type: 'text' },
-      { path: ['blocking', 'spatialRelationships'], cn: '空间关系', en: 'Spatial Relationships', type: 'text' },
+    key: 'blocking', fields: [
+      { path: ['blocking', 'startPosition'], type: 'text' },
+      { path: ['blocking', 'endPosition'], type: 'text' },
+      { path: ['blocking', 'facing'], type: 'text' },
+      { path: ['blocking', 'movementAxis'], type: 'text' },
+      { path: ['blocking', 'travelPath'], type: 'text' },
+      { path: ['blocking', 'spatialRelationships'], type: 'text' },
     ],
   },
   {
-    key: 'camera', cn: '摄影机', en: 'Camera',
-    fields: [
-      { path: ['camera', 'shotSizeStart'], cn: '起幅景别', en: 'Shot Size Start', type: 'text', placeholder: '如 wide / medium / close-up' },
-      { path: ['camera', 'shotSizePeak'], cn: '峰值景别', en: 'Shot Size Peak', type: 'text' },
-      { path: ['camera', 'shotSizeEnd'], cn: '落幅景别', en: 'Shot Size End', type: 'text' },
-      { path: ['camera', 'geometry'], cn: '机位几何', en: 'Geometry', type: 'text' },
-      { path: ['camera', 'lensIntent'], cn: '镜头意图', en: 'Lens Intent', type: 'text', placeholder: '如 35mm  handheld intimacy' },
-      { path: ['camera', 'dominantBehavior'], cn: '主导运动', en: 'Dominant Behavior', type: 'text', placeholder: '如 slow push-in / lateral dolly' },
-      { path: ['camera', 'trigger'], cn: '运动触发', en: 'Trigger', type: 'text' },
-      { path: ['camera', 'speedRelation'], cn: '速度关系', en: 'Speed Relation', type: 'text', placeholder: '摄影机与主体的速度关系' },
-      { path: ['camera', 'stopCondition'], cn: '停止条件', en: 'Stop Condition', type: 'text' },
+    key: 'camera', fields: [
+      { path: ['camera', 'shotSizeStart'], type: 'text' },
+      { path: ['camera', 'shotSizePeak'], type: 'text' },
+      { path: ['camera', 'shotSizeEnd'], type: 'text' },
+      { path: ['camera', 'geometry'], type: 'text' },
+      { path: ['camera', 'lensIntent'], type: 'text' },
+      { path: ['camera', 'dominantBehavior'], type: 'text' },
+      { path: ['camera', 'trigger'], type: 'text' },
+      { path: ['camera', 'speedRelation'], type: 'text' },
+      { path: ['camera', 'stopCondition'], type: 'text' },
     ],
   },
   {
-    key: 'performance', cn: '表演', en: 'Performance',
-    fields: [
-      { path: ['performance', 'objective'], cn: '目标', en: 'Objective', type: 'text' },
-      { path: ['performance', 'obstacle'], cn: '障碍', en: 'Obstacle', type: 'text' },
-      { path: ['performance', 'tactic'], cn: '策略', en: 'Tactic', type: 'text' },
-      { path: ['performance', 'performanceTurn'], cn: '转折', en: 'Turn', type: 'text' },
-      { path: ['performance', 'movementQuality', 'weight'], cn: '重量感', en: 'Weight', type: 'text', placeholder: '如 heavy / light' },
-      { path: ['performance', 'movementQuality', 'time'], cn: '时间感', en: 'Time', type: 'text', placeholder: '如 sudden / sustained' },
-      { path: ['performance', 'movementQuality', 'space'], cn: '空间感', en: 'Space', type: 'text', placeholder: '如 direct / indirect' },
-      { path: ['performance', 'movementQuality', 'flow'], cn: '流动感', en: 'Flow', type: 'text', placeholder: '如 bound / free' },
-      { path: ['performance', 'anticipation'], cn: '预备', en: 'Anticipation', type: 'text' },
-      { path: ['performance', 'primaryAction'], cn: '主动作', en: 'Primary Action', type: 'text' },
-      { path: ['performance', 'followThrough'], cn: '缓冲', en: 'Follow-through', type: 'text' },
-      { path: ['performance', 'recovery'], cn: '还原', en: 'Recovery', type: 'text' },
-      { path: ['performance', 'gaze'], cn: '视线', en: 'Gaze', type: 'text' },
-      { path: ['performance', 'endPose'], cn: '结束姿势', en: 'End Pose', type: 'text' },
+    key: 'performance', fields: [
+      { path: ['performance', 'objective'], type: 'text' },
+      { path: ['performance', 'obstacle'], type: 'text' },
+      { path: ['performance', 'tactic'], type: 'text' },
+      { path: ['performance', 'performanceTurn'], type: 'text' },
+      { path: ['performance', 'movementQuality', 'weight'], type: 'text' },
+      { path: ['performance', 'movementQuality', 'time'], type: 'text' },
+      { path: ['performance', 'movementQuality', 'space'], type: 'text' },
+      { path: ['performance', 'movementQuality', 'flow'], type: 'text' },
+      { path: ['performance', 'anticipation'], type: 'text' },
+      { path: ['performance', 'primaryAction'], type: 'text' },
+      { path: ['performance', 'followThrough'], type: 'text' },
+      { path: ['performance', 'recovery'], type: 'text' },
+      { path: ['performance', 'gaze'], type: 'text' },
+      { path: ['performance', 'endPose'], type: 'text' },
     ],
   },
   {
-    key: 'environment', cn: '环境', en: 'Environment',
-    fields: [
-      { path: ['environment', 'location'], cn: '地点', en: 'Location', type: 'text' },
-      { path: ['environment', 'weather'], cn: '天气', en: 'Weather', type: 'text' },
-      { path: ['environment', 'medium'], cn: '介质', en: 'Medium', type: 'text', placeholder: '如 rain / fog / dust' },
-      { path: ['environment', 'wind'], cn: '风', en: 'Wind', type: 'text' },
-      { path: ['environment', 'lighting'], cn: '灯光', en: 'Lighting', type: 'text' },
-      { path: ['environment', 'foreground'], cn: '前景', en: 'Foreground', type: 'text' },
-      { path: ['environment', 'midground'], cn: '中景', en: 'Midground', type: 'text' },
-      { path: ['environment', 'background'], cn: '背景', en: 'Background', type: 'text' },
+    key: 'environment', fields: [
+      { path: ['environment', 'location'], type: 'text' },
+      { path: ['environment', 'weather'], type: 'text' },
+      { path: ['environment', 'medium'], type: 'text' },
+      { path: ['environment', 'wind'], type: 'text' },
+      { path: ['environment', 'lighting'], type: 'text' },
+      { path: ['environment', 'foreground'], type: 'text' },
+      { path: ['environment', 'midground'], type: 'text' },
+      { path: ['environment', 'background'], type: 'text' },
     ],
   },
   {
-    key: 'reality', cn: '现实规则', en: 'Reality',
-    fields: [
-      { path: ['reality', 'mode'], cn: '模式', en: 'Mode', type: 'select', options: ['strict_realism', 'plausible_stylized', 'deliberate_fantasy'] },
-      { path: ['reality', 'constraints'], cn: '约束（每行一条）', en: 'Constraints', type: 'list', placeholder: '如：角色不会飞；车辆遵守惯性' },
+    key: 'reality', fields: [
+      { path: ['reality', 'mode'], type: 'select', options: ['strict_realism', 'plausible_stylized', 'deliberate_fantasy'] },
+      { path: ['reality', 'constraints'], type: 'list' },
     ],
   },
   {
-    key: 'continuity', cn: '连续性（计划）', en: 'Continuity',
-    fields: [
-      { path: ['continuity', 'plannedStartState'], cn: '计划起始状态', en: 'Planned Start State', type: 'textarea' },
-      { path: ['continuity', 'plannedEndState'], cn: '计划结束状态', en: 'Planned End State', type: 'textarea' },
+    key: 'continuity', fields: [
+      { path: ['continuity', 'plannedStartState'], type: 'textarea' },
+      { path: ['continuity', 'plannedEndState'], type: 'textarea' },
     ],
   },
   {
-    key: 'generation', cn: '声音', en: 'Audio',
-    fields: [
-      { path: ['generation', 'audioIntent'], cn: '声音设计', en: 'Audio Intent', type: 'textarea' },
+    key: 'generation', fields: [
+      { path: ['generation', 'audioIntent'], type: 'textarea' },
     ],
   },
 ];
@@ -199,9 +162,7 @@ function fieldLabel(field: FieldDef): string {
 }
 
 function fieldPlaceholder(field: FieldDef): string {
-  const key = `shot.plan.placeholder.${pathKey(field.path)}`;
-  const translated = t(key);
-  return translated === key ? (field.placeholder ?? '') : translated;
+  return t(`shot.plan.placeholder.${pathKey(field.path)}`);
 }
 
 function essentialText(field: EssentialFieldDef, part: 'question' | 'help' | 'placeholder'): string {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useShot } from '../composables/useShot';
 import { useProjectStore } from '../stores/project';
@@ -15,10 +15,8 @@ import PromptPanel from '../components/director/PromptPanel.vue';
 import PreflightPanel from '../components/director/PreflightPanel.vue';
 import TakesPanel from '../components/director/TakesPanel.vue';
 import ReferencesPanel from '../components/director/ReferencesPanel.vue';
-import CameraPlanner from '../components/director/CameraPlanner.vue';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import GuideStepper from '../components/GuideStepper.vue';
-import WorkspacePanel from '../components/director/WorkspacePanel.vue';
 import { t as tr } from '../stores/locale';
 
 const route = useRoute();
@@ -78,7 +76,15 @@ const currentActualContinuity = computed(() => [...(sDetail.value?.continuity ??
   .reverse()
   .find((entry) => entry.scope === 'visual' && entry.kind === 'actual') ?? null);
 
-const tab = ref<'workspace' | 'plan' | 'camera' | 'references' | 'prompt' | 'preflight' | 'external'>('workspace');
+/** Single-page workflow sections (replaces the old inspector tabs). */
+type FlowSection = 'design' | 'references' | 'prompt' | 'preflight' | 'takes' | 'external';
+
+function scrollToSection(section: FlowSection): void {
+  void nextTick(() => {
+    const el = document.getElementById(`sec-${section}`) ?? document.getElementById(section);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
 const media = ref<MediaAsset[]>([]);
 const aiJobs = ref<Record<string, boolean>>({}); // actionKey -> in flight
 const ai = useAiStore();
@@ -202,20 +208,27 @@ function openGuideAction(action: NextAction) {
     takesSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return;
   }
-  if (action.kind === 'design_shot') tab.value = 'plan';
-  else if (action.kind === 'add_reference') tab.value = 'references';
-  else if (action.kind === 'review_prompt') tab.value = 'prompt';
-  else if (action.kind === 'run_preflight' || action.kind === 'render') tab.value = 'preflight';
+  if (action.kind === 'design_shot') scrollToSection('design');
+  else if (action.kind === 'add_reference') scrollToSection('references');
+  else if (action.kind === 'review_prompt') scrollToSection('prompt');
+  else if (action.kind === 'run_preflight' || action.kind === 'render') scrollToSection('preflight');
   else void router.push(action.to);
 }
 
+const SECTION_FOR_QUERY: Record<string, FlowSection> = {
+  workspace: 'design', plan: 'design', camera: 'design',
+  references: 'references', prompt: 'prompt', preflight: 'preflight', external: 'external',
+  design: 'design', takes: 'takes',
+};
+
+/** Deep links from other pages (?tab=…, ?guide=…, #takes) scroll the matching
+ * section instead of switching a tab. */
 function applyGuideQuery() {
-  if (route.query.tab === 'references') tab.value = 'references';
-  const target = route.query.guide;
-  if (target === 'design') tab.value = 'plan';
-  else if (target === 'references') tab.value = 'references';
-  else if (target === 'prompt') tab.value = 'prompt';
-  else if (target === 'preflight') tab.value = 'preflight';
+  const hashTarget = route.hash ? SECTION_FOR_QUERY[route.hash.slice(1)] : undefined;
+  const tabTarget = typeof route.query.tab === 'string' ? SECTION_FOR_QUERY[route.query.tab] : undefined;
+  const guideTarget = typeof route.query.guide === 'string' ? SECTION_FOR_QUERY[route.query.guide] : undefined;
+  const target = hashTarget ?? guideTarget ?? tabTarget;
+  if (target) scrollToSection(target);
 }
 
 const EXTERNAL_TASKS = computed(() => [
@@ -375,7 +388,7 @@ async function createTakeRevision(input: {
     revisionReason: input.revisionReason,
     preservedAspects: input.preservedAspects,
   });
-  tab.value = 'prompt';
+  scrollToSection('prompt');
   toasts.push({ kind: 'ok', text: tr('shot.toast.revisionPromptSaved') });
   return prompt;
 }
@@ -436,13 +449,7 @@ async function refreshPromptReferences() {
   });
 }
 
-function openWorkspaceTarget(target: 'plan' | 'references' | 'prompt' | 'preflight' | 'takes') {
-  if (target === 'takes') {
-    takesSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    return;
-  }
-  tab.value = target;
-}
+
 
 async function contextPackage(): Promise<Record<string, unknown>> {
   return s.contextPackage(externalTask.value);
@@ -479,7 +486,7 @@ async function applyParsed() {
     toasts.push({ kind: 'ok', text: tr('shot.toast.externalPlanApplied') });
     parseResult.value = null;
     pasteText.value = '';
-    tab.value = 'plan';
+    scrollToSection('design');
   }
 }
 
@@ -611,24 +618,26 @@ onMounted(async () => {
   });
 });
 
-// Deep links (?guide=…) switch tabs without remounting the page, so
-// unsaved editor drafts survive (v-show tab bodies stay alive).
+// Deep links (?guide=…, ?tab=…, #takes) scroll the matching workflow section.
 watch(() => route.query.guide, applyGuideQuery);
+watch(() => route.hash, (hash) => { if (hash) applyGuideQuery(); });
 
 onUnmounted(() => {
   off?.();
   window.removeEventListener('beforeunload', beforeUnload);
 });
 
-const TABS = computed(() => [
-  { id: 'workspace', label: tr('shot.tab.workspace') },
-  { id: 'plan', label: tr('shot.tab.plan') },
-  // camera tab hidden — feature has unresolved bugs; code and v-show kept for re-enable
-  { id: 'references', label: tr('shot.tab.references') },
-  { id: 'prompt', label: tr('shot.tab.prompt') },
-  { id: 'preflight', label: tr('shot.tab.preflight') },
-  { id: 'external', label: tr('shot.tab.external') },
-] as const);
+const flowNav = computed(() => {
+  const missing = (sDetail.value?.requirements ?? []).filter((r) => r.level === 'required').length;
+  return [
+    { id: 'design' as FlowSection, label: tr('shot.plan.shotDesign'), state: sPlan.value ? (planDirty.value ? 'dirty' : 'done') : 'todo' },
+    { id: 'references' as FlowSection, label: tr('shot.tab.references'), state: missing ? 'dirty' : 'done' },
+    { id: 'prompt' as FlowSection, label: tr('shot.tab.prompt'), state: latestPrompt() ? 'done' : 'todo' },
+    { id: 'preflight' as FlowSection, label: tr('shot.tab.preflight'), state: (sDetail.value?.preflights.length ?? 0) > 0 ? 'done' : 'todo' },
+    { id: 'takes' as FlowSection, label: 'Takes', state: (sDetail.value?.takes.length ?? 0) > 0 ? 'done' : 'todo' },
+    { id: 'external' as FlowSection, label: tr('shot.tab.external'), state: 'todo' },
+  ];
+});
 
 function modeLabel(mode: string): string {
   return tr(`shot.mode.${mode}`);
@@ -749,9 +758,9 @@ function localizeRequirement(value: string): string {
       </div>
     </header>
 
-    <section v-if="sDetail?.guide" :class="['panel', 'shot-guide', { 'guide-workspace': tab === 'workspace' }]">
+    <section v-if="sDetail?.guide" class="panel shot-guide">
       <GuideStepper :stages="sDetail.guide.state.steps" class="shot-guide-steps" />
-      <div v-if="tab !== 'workspace'" class="next-action">
+      <div class="next-action">
         <div class="next-copy">
           <span class="next-kicker">{{ tr('shot.nextStep') }}</span>
           <strong>{{ localizedNextAction(sDetail.guide.nextAction).title }}</strong>
@@ -761,18 +770,93 @@ function localizeRequirement(value: string): string {
       </div>
     </section>
 
-    <!-- Three-column core -->
-    <div :class="['core', { 'workspace-mode': tab === 'workspace' }]">
-      <!-- Assets rail -->
-      <aside class="rail">
+    <!-- Single-page workflow: sticky preview + stacked sections -->
+    <div class="workspace-grid">
+      <aside class="side-col">
+        <section class="stage panel">
+          <div class="panel-title spread">
+            <span>{{ tr('shot.directorMonitor') }}</span>
+            <span v-if="sSelected" class="badge ok no-dot">SELECTED {{ sSelected.id }}</span>
+          </div>
+          <div class="panel-body">
+            <VideoPlayer
+              v-if="sSelected"
+              :src="takeVideoUrl(sSelected.id)"
+              :poster="sSelected.posterPath ? fileUrl(sSelected.posterPath) : undefined"
+              :label="`Selected take ${sSelected.id}`"
+              :max-height="420"
+            />
+            <div v-else class="empty-stage">
+              <img v-if="firstFrameThumb" :src="firstFrameThumb" class="ff-preview" alt="first frame" />
+              <div class="empty-stage-text">
+                <template v-if="(sDetail?.takes.length ?? 0) > 0">
+                  {{ tr('shot.stageCandidates', { n: sDetail?.takes.length ?? 0 }) }}<br />{{ tr('shot.stageSelectHint') }}
+                </template>
+                <template v-else>
+                  {{ tr('shot.stageWaiting') }}<br />
+                  <span class="muted">{{ tr('shot.stageWorkflowHint') }}</span>
+                </template>
+              </div>
+            </div>
+            <div v-if="sSelected" class="muted selected-info">
+              {{ tr('shot.currentSelected') }}<span class="mono">{{ sSelected.id }}</span> · {{ sSelected.duration.toFixed(1) }}s
+              <button class="sm ghost" @click="guarded(() => s.rejectTake(sSelected!.id), tr('shot.toast.selectionCancelled'))">{{ tr('shot.takes.cancelSelection') }}</button>
+            </div>
+          </div>
+        </section>
+
         <div class="panel">
-          <div class="panel-title">{{ tr('shot.assetRequirements') }}</div>
+          <div class="panel-title">{{ tr('shot.continuity') }}</div>
           <div class="panel-body col">
-            <div v-for="r in sDetail?.requirements ?? []" :key="r.kind" class="req-row">
+            <div class="row"><span class="status-dot" :style="{ background: sDetail?.continuityLatest?.visualActual?.state ? 'var(--ok)' : 'var(--line-2)' }"></span><span class="muted">{{ tr('shot.actualCommitted') }}</span></div>
+            <div class="row"><span class="status-dot" :style="{ background: sPlan?.plan.continuity.plannedStartState ? 'var(--info)' : 'var(--line-2)' }"></span><span class="muted">{{ tr('shot.planned') }}</span></div>
+            <div v-if="sDetail?.continuityLatest?.visualActual?.state" class="muted mono state-box">
+              {{ JSON.stringify(sDetail.continuityLatest.visualActual.state, null, 1).slice(0, 500) }}
+            </div>
+            <button class="sm" @click="scrollToSection('design')">{{ tr('shot.editPlannedContinuity') }} →</button>
+            <button class="sm" :disabled="!sDetail?.continuityLatest?.visualActual?.state" @click="inheritContinuity">
+              {{ tr('shot.inheritContinuity') }}
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="flow-col">
+        <nav class="flow-nav">
+          <button v-for="item in flowNav" :key="item.id" class="flow-chip" :class="item.state" @click="scrollToSection(item.id)">
+            <i />{{ item.label }}
+          </button>
+        </nav>
+
+        <section id="sec-design" class="flow-section">
+          <div class="flow-head">
+            <span class="flow-step">1</span>
+            <strong>{{ tr('shot.plan.shotDesign') }}</strong>
+            <span v-if="planDirty" class="badge warn">{{ tr('shot.plan.unsavedChanges') }}</span>
+          </div>
+          <PlanEditor
+            :plan="editorPlan"
+            :ai-enabled="aiEnabled"
+            :ai-busy="aiBusy"
+            :on-ai-suggest="aiSuggest"
+            :on-parse-brief="parseBrief"
+            @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), tr('shot.toast.planSaved'))"
+            @paste="scrollToSection('external')"
+            @dirty-change="(d: boolean) => (planDirty = d)"
+          />
+        </section>
+
+        <section id="sec-references" class="flow-section">
+          <div class="flow-head">
+            <span class="flow-step">2</span>
+            <strong>{{ tr('shot.tab.references') }}</strong>
+          </div>
+          <div class="requirements-row">
+            <div v-for="r in sDetail?.requirements ?? []" :key="r.kind" class="req-item">
               <span :class="['badge', r.level === 'ok' ? 'ok' : r.level === 'required' ? 'bad' : 'no-dot muted']">
                 {{ r.level === 'ok' ? '✓' : r.level === 'required' ? '⚠' : '' }} {{ localizeRequirement(r.label) }}
               </span>
-              <div class="muted req-detail">{{ localizeRequirement(r.detail) }}</div>
+              <span class="muted req-detail">{{ localizeRequirement(r.detail) }}</span>
             </div>
             <button v-if="canCorrectReferenceMode" class="sm primary" @click="correctToRef2va">
               {{ hasRefImageBinding ? tr('shot.switchToRefMode') : tr('shot.switchToRefAndBind') }}
@@ -784,130 +868,6 @@ function localizeRequirement(value: string): string {
               {{ missingFrameRole ? tr('shot.uploadAndBindFrame', { frame: missingFrameRole === 'first_frame' ? tr('shot.firstFrame') : tr('shot.lastFrame') }) : tr('shot.uploadImageAudio') }}
             </router-link>
           </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-title spread">
-            <span>{{ tr('shot.boundReferences') }}</span>
-            <button class="sm ghost" @click="tab = 'references'">{{ tr('shot.manage') }} →</button>
-          </div>
-          <div class="panel-body col">
-            <div v-if="!sDetail?.bindings.length" class="muted">{{ referenceModeHint }}</div>
-            <div v-for="b in sDetail?.bindings ?? []" :key="b.id" class="ref-card">
-              <div class="ref-thumb">
-                <img v-if="thumbOf(b.assetId)" :src="thumbOf(b.assetId)!" :alt="b.label" />
-                <span v-else class="mono muted">{{ b.type === 'audio' ? '♪' : '▶' }}</span>
-              </div>
-              <div class="ref-meta">
-                <div class="ref-label" :title="b.label">{{ b.label || b.id }}</div>
-                <div class="ref-roles">{{ b.roles.join(' · ') || (b.type === 'audio' ? 'RefAudio' : 'RefImage') }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-title">{{ tr('shot.continuity') }}</div>
-          <div class="panel-body col">
-            <div class="row"><span class="status-dot" :style="{ background: sDetail?.continuityLatest?.visualActual?.state ? 'var(--ok)' : 'var(--line-2)' }"></span><span class="muted">{{ tr('shot.actualCommitted') }}</span></div>
-            <div class="row"><span class="status-dot" :style="{ background: sPlan?.plan.continuity.plannedStartState ? 'var(--info)' : 'var(--line-2)' }"></span><span class="muted">{{ tr('shot.planned') }}</span></div>
-            <div v-if="sDetail?.continuityLatest?.visualActual?.state" class="muted mono state-box">
-              {{ JSON.stringify(sDetail.continuityLatest.visualActual.state, null, 1).slice(0, 500) }}
-            </div>
-            <button class="sm" @click="tab = 'plan'">{{ tr('shot.editPlannedContinuity') }} →</button>
-            <button class="sm" :disabled="!sDetail?.continuityLatest?.visualActual?.state" @click="inheritContinuity">
-              {{ tr('shot.inheritContinuity') }}
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      <!-- Stage -->
-      <section v-show="tab !== 'workspace'" class="stage panel">
-        <div class="panel-title spread">
-          <span>{{ tr('shot.directorMonitor') }}</span>
-          <span v-if="sSelected" class="badge ok no-dot">SELECTED {{ sSelected.id }}</span>
-        </div>
-        <div class="panel-body">
-          <VideoPlayer
-            v-if="sSelected"
-            :src="takeVideoUrl(sSelected.id)"
-            :poster="sSelected.posterPath ? fileUrl(sSelected.posterPath) : undefined"
-            :label="`Selected take ${sSelected.id}`"
-            :max-height="520"
-          />
-          <div v-else class="empty-stage">
-            <img v-if="firstFrameThumb" :src="firstFrameThumb" class="ff-preview" alt="first frame" />
-            <div class="empty-stage-text">
-              <template v-if="(sDetail?.takes.length ?? 0) > 0">
-                {{ tr('shot.stageCandidates', { n: sDetail?.takes.length ?? 0 }) }}<br />{{ tr('shot.stageSelectHint') }}
-              </template>
-              <template v-else>
-                {{ tr('shot.stageWaiting') }}<br />
-                <span class="muted">{{ tr('shot.stageWorkflowHint') }}</span>
-              </template>
-            </div>
-          </div>
-          <div v-if="sSelected" class="muted selected-info">
-            {{ tr('shot.currentSelected') }}<span class="mono">{{ sSelected.id }}</span> · {{ sSelected.duration.toFixed(1) }}s
-            <button class="sm ghost" @click="guarded(() => s.rejectTake(sSelected!.id), tr('shot.toast.selectionCancelled'))">{{ tr('shot.takes.cancelSelection') }}</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Inspector -->
-      <section class="inspector panel">
-        <div class="tabs">
-          <button v-for="t in TABS" :key="t.id" :class="['tab', { active: tab === t.id }]" @click="tab = t.id">
-            {{ t.label }}
-            <span v-if="t.id === 'plan' && planDirty" class="dirty-dot" :title="tr('shot.plan.unsavedChanges')">●</span>
-          </button>
-        </div>
-
-        <!-- keep-alive via v-show: unsaved drafts survive tab switches -->
-        <div v-show="tab === 'workspace'" class="tab-body workspace-body">
-          <WorkspacePanel
-            v-if="sDetail?.guide"
-            :shot="sShot"
-            :plan="sPlan"
-            :bindings="sDetail.bindings"
-            :requirements="sDetail.requirements"
-            :prompt="latestPrompt()"
-            :reports="sDetail.preflights"
-            :provider="activeProvider"
-            :takes="sDetail.takes"
-            :selected-take="sSelected"
-            :guide="sDetail.guide.state"
-            :next-action="localizedNextAction(sDetail.guide.nextAction)"
-            :next-action-label="guideActionLabel"
-            @open="openWorkspaceTarget"
-            @action="openGuideAction"
-          />
-        </div>
-
-        <div v-show="tab === 'plan'" class="tab-body">
-          <PlanEditor
-            :plan="editorPlan"
-            :ai-enabled="aiEnabled"
-            :ai-busy="aiBusy"
-            :on-ai-suggest="aiSuggest"
-            :on-parse-brief="parseBrief"
-            @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), tr('shot.toast.planSaved'))"
-            @paste="tab = 'external'"
-            @dirty-change="(d: boolean) => (planDirty = d)"
-          />
-        </div>
-
-        <div v-show="tab === 'camera'" class="tab-body camera-body">
-          <CameraPlanner
-            :shot="sShot"
-            :media="media"
-            :bindings="sDetail?.bindings ?? []"
-            @assets-added="async () => { await loadMedia(); await s.load(); }"
-          />
-        </div>
-
-        <div v-show="tab === 'references'" class="tab-body">
           <ReferencesPanel
             :bindings="sDetail?.bindings ?? []"
             :media="media"
@@ -917,9 +877,13 @@ function localizeRequirement(value: string): string {
             :on-update="s.updateBinding"
             :on-remove="(id: string) => guarded(() => s.removeBinding(id), tr('shot.toast.referenceRemoved'))"
           />
-        </div>
+        </section>
 
-        <div v-show="tab === 'prompt'" class="tab-body">
+        <section id="sec-prompt" class="flow-section">
+          <div class="flow-head">
+            <span class="flow-step">3</span>
+            <strong>{{ tr('shot.tab.prompt') }}</strong>
+          </div>
           <PromptPanel
             :prompts="sDetail?.prompts ?? []"
             :current-mode="sShot.h3Mode"
@@ -928,9 +892,13 @@ function localizeRequirement(value: string): string {
             :on-raw="(text: string, m: string) => guarded(() => s.importRawPrompt(text, m), tr('shot.toast.promptSaved'))"
             :on-ai-compile="aiCompile"
           />
-        </div>
+        </section>
 
-        <div v-show="tab === 'preflight'" class="tab-body">
+        <section id="sec-preflight" class="flow-section">
+          <div class="flow-head">
+            <span class="flow-step">4</span>
+            <strong>{{ tr('shot.tab.preflight') }}</strong>
+          </div>
           <PreflightPanel
             :megapixels="megapixels"
             :reports="sDetail?.preflights ?? []"
@@ -944,9 +912,46 @@ function localizeRequirement(value: string): string {
             :on-refresh-prompt="refreshPromptReferences"
             :on-render="doRender"
           />
-        </div>
+        </section>
 
-        <div v-show="tab === 'external'" class="tab-body">
+        <section id="sec-takes" ref="takesSection" class="flow-section takes-section">
+          <div class="flow-head">
+            <span class="flow-step">5</span>
+            <strong>Takes</strong>
+            <span class="muted">{{ tr('shot.takes.count', { n: sDetail?.takes.length ?? 0 }) }} · {{ tr('shot.takes.shotVsTake') }}</span>
+          </div>
+          <TakesPanel
+            :takes="sDetail?.takes ?? []"
+            :prompts="sDetail?.prompts ?? []"
+            :selected-take-id="sSelected?.id ?? null"
+            :ai-enabled="aiEnabled"
+            :actual-state="currentActualContinuity?.state ?? null"
+            :committed-take-id="currentActualContinuity?.sourceTakeId ?? null"
+            :entities="sDetail?.entities ?? []"
+            :character-states="sDetail?.characterStates ?? []"
+            :on-import="s.importTake"
+            :on-select="s.selectTake"
+            :on-reject="s.rejectTake"
+            :on-delete="s.deleteTake"
+            :on-update="s.updateTake"
+            :on-create-revision="createTakeRevision"
+            :on-ai-diagnose="aiDiagnose"
+            :on-ai-continuity="aiContinuity"
+            :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"
+            :on-use-last-frame="(tid: string) => useTakeFrame(tid, 'last')"
+            :on-use-first-frame="(tid: string) => useTakeFrame(tid, 'first')"
+          />
+          <div v-for="(v, k) in aiResults" :key="k" v-show="k.startsWith('diag:')" class="panel ai-note">
+            <div class="panel-title">{{ tr('shot.takes.aiDiagnosis') }} — {{ k }}</div>
+            <pre class="ai-text">{{ aiText(v) }}</pre>
+          </div>
+        </section>
+
+        <section id="sec-external" class="flow-section">
+          <div class="flow-head">
+            <span class="flow-step">6</span>
+            <strong>{{ tr('shot.tab.external') }}</strong>
+          </div>
           <div class="external-flow">
             <header class="external-intro">
               <strong>{{ tr('shot.external.title') }}</strong>
@@ -1003,42 +1008,10 @@ function localizeRequirement(value: string): string {
               </div>
             </section>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
 
-    <!-- Takes -->
-    <section id="takes" ref="takesSection" class="takes-section filmstrip">
-      <div class="spread takes-head">
-        <h2>Takes <span class="muted">{{ tr('shot.takes.count', { n: sDetail?.takes.length ?? 0 }) }}</span></h2>
-        <span class="muted">{{ tr('shot.takes.shotVsTake') }}</span>
-      </div>
-      <TakesPanel
-        :takes="sDetail?.takes ?? []"
-        :prompts="sDetail?.prompts ?? []"
-        :selected-take-id="sSelected?.id ?? null"
-        :ai-enabled="aiEnabled"
-        :actual-state="currentActualContinuity?.state ?? null"
-        :committed-take-id="currentActualContinuity?.sourceTakeId ?? null"
-        :entities="sDetail?.entities ?? []"
-        :character-states="sDetail?.characterStates ?? []"
-        :on-import="s.importTake"
-        :on-select="s.selectTake"
-        :on-reject="s.rejectTake"
-        :on-delete="s.deleteTake"
-        :on-update="s.updateTake"
-        :on-create-revision="createTakeRevision"
-        :on-ai-diagnose="aiDiagnose"
-        :on-ai-continuity="aiContinuity"
-        :on-select-commit="(tid: string, st: import('@h3mise/shared').VisualContinuityState) => s.selectAndCommit(tid, st)"
-        :on-use-last-frame="(tid: string) => useTakeFrame(tid, 'last')"
-        :on-use-first-frame="(tid: string) => useTakeFrame(tid, 'first')"
-      />
-      <div v-for="(v, k) in aiResults" :key="k" v-show="k.startsWith('diag:')" class="panel ai-note">
-        <div class="panel-title">{{ tr('shot.takes.aiDiagnosis') }} — {{ k }}</div>
-        <pre class="ai-text">{{ aiText(v) }}</pre>
-      </div>
-    </section>
   </div>
 </template>
 
@@ -1048,7 +1021,7 @@ function localizeRequirement(value: string): string {
 .crumb-link { color: var(--text-2); }
 .crumb-link:hover { color: var(--accent-text); text-decoration: none; }
 .desk-header { display: flex; flex-direction: column; gap: 10px; }
-.desk-header h1 { font-size: 22px; margin: 0; font-family: var(--serif); letter-spacing: 0.01em; }
+.desk-header h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; }
 .shot-guide { padding: 16px 20px; display: grid; grid-template-columns: minmax(420px, 0.9fr) minmax(360px, 1.1fr); gap: 28px; align-items: center; border-color: var(--accent-line); }
 .shot-guide-steps { --guide-count: 4; }
 .next-action { min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
@@ -1063,37 +1036,43 @@ function localizeRequirement(value: string): string {
 .ctl select, .ctl input { max-width: 150px; }
 .mode-ctl select { width: 210px; max-width: 210px; }
 .dur { width: 60px; }
-.core { display: grid; grid-template-columns: 264px 1fr 460px; gap: 14px; align-items: start; }
-.core.workspace-mode { grid-template-columns: 264px minmax(0, 1fr); }
-.core.workspace-mode .inspector { grid-column: 2; }
-.core.workspace-mode .tab-body { max-height: none; overflow: visible; }
-.guide-workspace { grid-template-columns: 1fr; }
-.rail { position: sticky; top: 124px; display: flex; flex-direction: column; gap: 12px; }
+/* single-page workflow layout */
+.workspace-grid { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.side-col { position: sticky; top: 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.flow-col { min-width: 0; display: flex; flex-direction: column; }
+.flow-nav {
+  position: sticky; top: 0; z-index: 6;
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 8px 0 10px; margin-bottom: 2px;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line);
+}
+.flow-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--bg-2); color: var(--text-2); font-size: 12px; box-shadow: none;
+}
+.flow-chip:hover { border-color: var(--line-2); color: var(--text); }
+.flow-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-3); }
+.flow-chip.done i { background: var(--ok); }
+.flow-chip.dirty i { background: var(--warn); }
+.flow-section { display: grid; gap: 12px; padding: 18px 0; border-top: 1px solid var(--line); scroll-margin-top: 64px; min-width: 0; }
+.flow-col .flow-section:first-of-type { border-top: 0; }
+.flow-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.flow-head strong { font-size: 14.5px; }
+.flow-step { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); font-size: 11.5px; font-weight: 800; flex: none; }
+.requirements-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.req-item { display: flex; align-items: center; gap: 6px; }
 .stage, .inspector { min-width: 0; }
 .req-row { display: flex; flex-direction: column; gap: 2px; }
 .req-detail { padding-left: 4px; }
 .rail-link { font-size: 12px; }
-.ref-card { display: flex; gap: 8px; align-items: center; }
-.ref-thumb { width: 56px; height: 38px; flex: none; border-radius: 5px; overflow: hidden; background: var(--inset); display: flex; align-items: center; justify-content: center; }
-.ref-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.ref-meta { min-width: 0; }
-.ref-label { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ref-roles { font-size: 10.5px; color: var(--text-3); }
-.stage .empty-stage { min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-2); text-align: center; }
-.ff-preview { max-height: 260px; max-width: 80%; border-radius: var(--radius-sm); box-shadow: var(--shadow-2); opacity: 0.85; }
+.stage .empty-stage { min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-2); text-align: center; }
+.ff-preview { max-height: 220px; max-width: 80%; border-radius: var(--radius-sm); box-shadow: var(--shadow-2); opacity: 0.85; }
 .empty-stage-text { line-height: 1.7; }
 .selected-info { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 6px; }
-.tab { border: none; background: transparent; border-radius: 0; border-bottom: 2px solid transparent; color: var(--text-2); padding: 11px 10px; box-shadow: none; white-space: nowrap; }
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
 .dirty-dot { color: var(--warn); font-size: 9px; margin-left: 3px; }
-.tab-body { padding: 14px; max-height: calc(100vh - 230px); overflow: auto; }
-.workspace-body { padding: 12px; }
-.camera-body { max-height: none; overflow: visible; }
-.core:has(.camera-body:not([style*="display: none"])) { grid-template-columns: 220px minmax(0, 1fr); }
-.core:has(.camera-body:not([style*="display: none"])) .stage { display: none; }
-.tabs { overflow-x: auto; }
 .check-ctl { gap: 4px; }
 .external-flow { display: grid; gap: 10px; }
 .external-intro { display: flex; flex-direction: column; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
@@ -1114,7 +1093,7 @@ function localizeRequirement(value: string): string {
 .parse-message.warn { background: var(--warn-soft); color: var(--warn); }
 .parse-message.ok { background: var(--ok-soft); color: var(--ok); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.takes-section { border-top: 1px solid var(--line); margin-top: 4px; }
+.takes-section { margin-top: 0; }
 .takes-head { padding: 4px 2px 10px; }
 .takes-head h2 { margin: 0; font-size: 16px; font-family: var(--serif); }
 .sep { border-top: 1px dashed var(--line); margin: 8px 0; }

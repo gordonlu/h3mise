@@ -228,14 +228,20 @@ export async function applyResult(
     if (row.status === 'cancelled') throw new AiDelegationError('该请求已被取消，等待新的请求', 409, 'cancelled');
 
     const body = parseJson<Record<string, unknown>>(row.body_json, {});
-    // Rebuild the first step: any project change since prepare flips the hash.
-    const first = await prepareAction(ai, ctx, row.action, body);
-    if (contextHash(row.action, body, first) !== row.context_hash) {
-      ctx.db.run('UPDATE ai_requests SET status = ?, error = ?, updated_at = ? WHERE id = ?', ['stale', '项目在 prepare 之后已变化', now(), id]);
-      throw new AiDelegationError('项目在 prepare 之后已变化，请重新 prepare', 409, 'stale');
+    const state = parseState(row);
+    // Staleness gate: rebuild the first step and compare hashes so a project
+    // change between prepare and apply is caught. Only checked BEFORE the
+    // first answer is consumed — multi-round pipelines (auto_director) apply
+    // side effects between rounds by design, so later rounds would always
+    // look stale against the prepare-time snapshot.
+    if (state.raws.length === 0) {
+      const first = await prepareAction(ai, ctx, row.action, body);
+      if (contextHash(row.action, body, first) !== row.context_hash) {
+        ctx.db.run('UPDATE ai_requests SET status = ?, error = ?, updated_at = ? WHERE id = ?', ['stale', '项目在 prepare 之后已变化', now(), id]);
+        throw new AiDelegationError('项目在 prepare 之后已变化，请重新 prepare', 409, 'stale');
+      }
     }
 
-    const state = parseState(row);
     let raw = result;
     if (state.pendingJson && typeof raw === 'string') {
       const parsed = extractJsonValue<unknown>(raw);

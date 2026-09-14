@@ -5,6 +5,7 @@ import { get, post, del, fileUrl, takeVideoUrl } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { useRenderStore } from '../stores/render';
+import { useAiStore } from '../stores/ai';
 import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL } from '@h3mise/shared';
@@ -27,6 +28,7 @@ const project = useProjectStore();
 const router = useRouter();
 const toasts = useToastStore();
 const renderStore = useRenderStore();
+const ai = useAiStore();
 const shots = ref<ShotCard[]>([]);
 const entities = ref<Array<{ id: string; name: string; kind: string }>>([]);
 const showCreate = ref(false);
@@ -41,6 +43,9 @@ const batchBusy = ref(false);
 const batchOpen = ref(false);
 /** Hover-to-preview: the card whose Take video is playing inline. */
 const hoveredId = ref<string | null>(null);
+const storyHasContent = ref(false);
+const autoBusy = ref(false);
+const aiAvailable = computed(() => ai.configured || ai.agentAttached);
 
 const batchProviderId = computed(() => project.current?.config.default_provider ?? 'runninghub');
 const batchMegapixels = computed(() => batchProviderId.value === 'runninghub' ? 0.6 : undefined);
@@ -96,6 +101,12 @@ function entityName(id: string | null): string {
 async function load() {
   shots.value = await get<ShotCard[]>('/api/shots');
   entities.value = await get<Array<{ id: string; name: string; kind: string }>>('/api/assets/entities');
+  try {
+    const story = await get<{ body?: string }>('/api/story');
+    storyHasContent.value = Boolean((story.body ?? '').trim());
+  } catch {
+    storyHasContent.value = false;
+  }
 }
 
 async function analyzeBatch() {
@@ -246,6 +257,30 @@ async function pasteShots() {
   }
 }
 
+/** Generative empty state: run the full story -> beats -> shots -> plans
+ * pipeline through the current inference source, stopping before render. */
+async function runAutoDirector(): Promise<void> {
+  if (autoBusy.value) return;
+  autoBusy.value = true;
+  toasts.push({ kind: 'info', text: ai.agentAttached ? t('pages.shots.emptyAiDelegated') : t('pages.shots.emptyAiRunning') });
+  try {
+    const { result } = await ai.runAction<{ beats?: unknown[]; shotsCreated?: number; created?: unknown[] }>('auto_director', {});
+    await load();
+    toasts.push({
+      kind: 'ok',
+      text: t('pages.shots.emptyAiDone', {
+        beats: result?.beats?.length ?? 0,
+        shots: result?.shotsCreated ?? 0,
+        plans: result?.created?.length ?? 0,
+      }),
+    });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  } finally {
+    autoBusy.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -357,11 +392,19 @@ onMounted(load);
       </div>
     </div>
 
-    <div v-if="!shots.length" class="panel">
+    <div v-if="!shots.length" class="panel empty-panel">
       <EmptyState icon="🎬" :title="t('workflow.shots.noShotsYet')" :desc="t('workflow.shots.shotsAreTheDirectorSPrimaryUnit')">
         <button class="primary sm" @click="showCreate = true">{{ t('workflow.shots.newShot2') }}</button>
         <button class="sm" @click="showPaste = true">{{ t('workflow.shots.pasteShotList2') }}</button>
       </EmptyState>
+      <div v-if="aiAvailable" class="empty-ai">
+        <div class="empty-ai-head">✦ {{ t('pages.shots.emptyAiTitle') }}</div>
+        <p class="muted">{{ storyHasContent ? t('pages.shots.emptyAiDesc') : t('pages.shots.emptyAiNoStory') }}</p>
+        <button v-if="storyHasContent" class="primary sm" :disabled="autoBusy" @click="runAutoDirector">
+          {{ autoBusy ? t('pages.shots.emptyAiRunning') : t('pages.shots.emptyAiRun') }}
+        </button>
+        <button v-else class="sm" @click="router.push('/story')">{{ t('nav.storyBeats') }} →</button>
+      </div>
     </div>
 
     <div class="board-layout">
@@ -451,6 +494,11 @@ h1 { font-size: 30px; line-height: 1.15; margin: 0; font-weight: 720; letter-spa
 .board-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; margin-top: 18px; }
 .board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .copilot-col { position: sticky; top: 14px; }
+.empty-panel { display: grid; }
+.empty-ai { margin: 0 22px 22px; padding: 14px 16px; display: grid; gap: 8px; border: 1px dashed var(--accent-line); border-radius: 10px; background: var(--accent-soft); }
+.empty-ai-head { font-size: 12.5px; font-weight: 650; color: var(--accent-text); }
+.empty-ai p { margin: 0; font-size: 12px; line-height: 1.6; }
+.empty-ai .primary, .empty-ai .sm { justify-self: start; }
 .shot-delete { margin-left: 2px; padding: 3px 6px; font-size: 12px; letter-spacing: 1px; flex: none; }
 .card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; box-shadow: none; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
 .card:hover { border-color: var(--line-3); transform: translateY(-2px); box-shadow: var(--shadow-1); text-decoration: none; }

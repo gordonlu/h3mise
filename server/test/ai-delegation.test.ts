@@ -141,6 +141,39 @@ test('brief_to_plan parses a brief into a plan draft (delegated)', async () => {
   }
 });
 
+test('auto_director runs its multi-round pipeline through delegation', async () => {
+  const p = await project('ai-deleg-auto');
+  const ai = offlineAi();
+  const prepared = await prepareRequest(ai, p, 'auto_director', {}, null);
+  assert.equal(prepared.step.json, true);
+
+  const beats = JSON.stringify([
+    { title: '入巷', summary: '主角走进雨夜小巷', durationSeconds: 10 },
+    { title: '推门', summary: '他推开木门', durationSeconds: 8 },
+  ]);
+  const round1 = await applyResult(ai, p, prepared.requestId, beats, null);
+  assert.equal(round1.status, 'continue');
+
+  const base = emptyDirectorPlan();
+  const plan = (thesis: string) => ({
+    intent: { ...base.intent, visualThesis: thesis, endState: '结束画面' },
+    subject: { ...base.subject, action: '连续动作' },
+    camera: { ...base.camera, dominantBehavior: '缓慢推近' },
+  });
+
+  let outcome = await applyResult(ai, p, prepared.requestId, JSON.stringify(plan('第一镜')), null);
+  assert.equal(outcome.status, 'continue');
+  outcome = await applyResult(ai, p, prepared.requestId, JSON.stringify(plan('第二镜')), null);
+  assert.equal(outcome.status, 'applied');
+  if (outcome.status === 'applied') {
+    const result = outcome.result as { kind: string; created: unknown[]; shotsCreated: number };
+    assert.equal(result.kind, 'auto_director_result');
+    assert.equal(result.shotsCreated, 2);
+    assert.equal(result.created.length, 2);
+  }
+  assert.equal(listBeats(p).length, 2);
+});
+
 test('unknown requests and actions fail with explicit codes', async () => {
   const p = await project('ai-deleg-errors');
   const ai = offlineAi();

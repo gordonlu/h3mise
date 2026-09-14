@@ -407,6 +407,8 @@ onMounted(load);
             :title="t('pages.story.noBeatsTitle')"
             :desc="t('pages.story.noBeatsDesc')"
           >
+            <button v-if="aiEnabled" class="primary sm" :disabled="!canAiSplit" @click="aiStoryToBeats">{{ t('pages.story.aiSplit') }}</button>
+            <button class="sm" :disabled="aiBusy" @click="openSkeletons">{{ t('workflow.story.findPacingIdeas') }}</button>
             <button class="sm" :disabled="aiBusy" @click="addBeat">{{ t('pages.story.newBeat') }}</button>
           </EmptyState>
           <div v-for="(b, i) in beats" :key="b.id" class="beat panel">

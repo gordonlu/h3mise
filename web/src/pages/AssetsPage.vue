@@ -367,22 +367,26 @@ onMounted(load);
         <h1>{{ t('pages.assets.title') }}</h1>
         <p class="page-sub">{{ t('pages.assets.subtitle') }}</p>
       </div>
-      <nav class="tabs">
+    </header>
+
+    <div class="library-grid">
+      <nav class="library-nav" :aria-label="t('pages.assets.title')">
         <button
           v-for="tt in ([
-            { id: 'entities', cn: t('pages.assets.tabs.entities'), n: entities.length },
-            { id: 'states', cn: t('pages.assets.tabs.states'), n: states.length },
-            { id: 'media', cn: t('pages.assets.tabs.media'), n: media.length },
-            { id: 'bindings', cn: t('pages.assets.tabs.bindings'), n: bindings.length },
+            { id: 'entities', label: t('pages.assets.tabs.entities'), n: entities.length },
+            { id: 'states', label: t('pages.assets.tabs.states'), n: states.length },
+            { id: 'media', label: t('pages.assets.tabs.media'), n: media.length },
+            { id: 'bindings', label: t('pages.assets.tabs.bindings'), n: bindings.length },
           ] as const)"
           :key="tt.id"
-          :class="['tab', { active: tab === tt.id }]"
+          :class="{ active: tab === tt.id }"
           @click="tab = tt.id"
         >
-          {{ tt.cn }}<span class="tab-count">{{ tt.n }}</span>
+          <span>{{ tt.label }}</span>
+          <span class="library-count">{{ tt.n }}</span>
         </button>
       </nav>
-    </header>
+      <div class="library-content">
 
     <!-- Entities -->
     <section v-if="tab === 'entities'" class="panel">
@@ -572,6 +576,9 @@ onMounted(load);
     </section>
   </div>
 
+      </div>
+    </div>
+
   <div v-if="editing" class="modal-mask" @click.self="editing = null">
     <div class="modal panel">
       <div class="modal-head">
@@ -623,17 +630,18 @@ onMounted(load);
 .return-bar span { color: var(--text-2); font-size: 11.5px; }
 .head-titles h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 4px; }
 .page-sub { margin: 6px 0 0; font-size: 13px; color: var(--text-3); }
-.tabs { display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 9px; padding: 3px; background: var(--bg-2); }
-.tab {
-  border: none; background: transparent; color: var(--text-2);
-  padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
-  transition: background 0.12s, color 0.12s;
+.library-grid { display: grid; grid-template-columns: 184px minmax(0, 1fr); gap: 20px; align-items: start; }
+.library-nav { position: sticky; top: 14px; display: flex; flex-direction: column; gap: 3px; }
+.library-nav button {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 12px; border: none; border-radius: 9px; background: none; box-shadow: none;
+  color: var(--text-2); font-size: 13px; text-align: left;
 }
-.tab:hover { color: var(--text); background: var(--bg-subtle); }
-.tab.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
-.tab-count { font-size: 11px; opacity: 0.65; background: var(--bg-subtle); border-radius: 8px; padding: 0 6px; line-height: 15px; }
-.tab.active .tab-count { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.library-nav button:hover { background: var(--bg-subtle); color: var(--text); }
+.library-nav button.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 650; }
+.library-count { font-size: 11px; color: var(--text-3); background: var(--bg-subtle); border-radius: 999px; padding: 1px 8px; }
+.library-nav button.active .library-count { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-text); }
+.library-content { min-width: 0; }
 
 /* ---------- toolbar ---------- */
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }

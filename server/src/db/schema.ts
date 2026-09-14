@@ -550,6 +550,29 @@ CREATE INDEX idx_storyboards_story ON storyboards(story_id, created_at);
 `,
 });
 
+PROJECT_MIGRATIONS.push({
+  version: 21,
+  name: 'ai-requests',
+  sql: `
+CREATE TABLE IF NOT EXISTS ai_requests (
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'agent',
+  model_label TEXT,
+  context_hash TEXT NOT NULL,
+  body_json TEXT NOT NULL DEFAULT '{}',
+  state_json TEXT NOT NULL DEFAULT '{}',
+  result_json TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_requests_status ON ai_requests(status, created_at);
+`,
+});
+
 export const REGISTRY_MIGRATIONS: Migration[] = [
   {
     version: 1,

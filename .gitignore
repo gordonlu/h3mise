@@ -28,3 +28,4 @@ coverage/
 output/
 .rh-research/
 .h3mise-cookie.txt
+.playwright-mcp/

@@ -30,6 +30,7 @@ export type ActionName =
   | 'plan_shot'
   | 'improve_camera'
   | 'improve_performance'
+  | 'brief_to_plan'
   | 'reality_check'
   | 'continuity_check'
   | 'compile_prompt'
@@ -399,6 +400,30 @@ export async function prepareAction(
         temperature: 0.5,
       };
     }
+    case 'brief_to_plan': {
+      if (!shotId) throw new Error('shotId required');
+      const brief = String(body.brief ?? '').trim();
+      if (!brief) throw new Error('brief is empty');
+      return {
+        system: `你是 H3Mise 导演计划解析器。把导演用自然语言写的镜头简报转换为完整的 DirectorPlan JSON。
+
+规则：
+1. 简报明确写出的内容必须忠实落入对应字段；不要改写意图，也不要添加简报和当前计划都不存在的事实。
+2. 简报未提及的字段保持当前计划原值；当前计划为空的字段可以补全最小可拍摄信息。
+3. 只返回一个完整 DirectorPlan JSON 对象，不要 Markdown、代码围栏或额外说明。所有字段内容一律使用中文。
+
+专业方法参考：
+${skillText}
+
+${PLAN_SCHEMA_HINT}`,
+        messages: [{
+          role: 'user',
+          content: `当前计划：\n${JSON.stringify(plan)}\n\n镜头：${JSON.stringify(shotsMod.getShot(ctx, shotId))}\n\n导演简报：\n${brief}`,
+        }],
+        json: true,
+        temperature: 0.3,
+      };
+    }
     case 'reality_check': {
       if (!shotId) throw new Error('shotId required');
       return {
@@ -561,7 +586,8 @@ export async function advanceAction(
   switch (action as ActionName) {
     case 'plan_shot':
     case 'improve_camera':
-    case 'improve_performance': {
+    case 'improve_performance':
+    case 'brief_to_plan': {
       const { shotId, plan } = resolvePlanContext(ctx, body);
       if (!shotId) throw new Error('shotId required');
       const base = plan ?? emptyDirectorPlan();

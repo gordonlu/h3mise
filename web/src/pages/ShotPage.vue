@@ -327,6 +327,23 @@ async function aiSuggest(currentPlan: DirectorPlan) {
   });
 }
 
+/** Living brief: parse free text into a plan for review. The parsed plan
+ * becomes the editor draft; nothing is saved until the user confirms. */
+async function parseBrief(brief: string): Promise<DirectorPlan | null> {
+  let parsed: DirectorPlan | null = null;
+  await guarded(async () => {
+    const result = await runAi('brief_to_plan', { shotId, brief });
+    const plan = (result as { plan?: DirectorPlan })?.plan;
+    if (plan) {
+      parsed = plan;
+      toasts.push({ kind: 'ok', text: tr('shot.toast.briefParsed') });
+    } else {
+      toasts.push({ kind: 'err', text: tr('shot.toast.aiNoPlan') });
+    }
+  });
+  return parsed;
+}
+
 async function aiCompile() {
   await guarded(async () => {
     const result = await runAi('compile_prompt', { shotId });
@@ -874,6 +891,7 @@ function localizeRequirement(value: string): string {
             :ai-enabled="aiEnabled"
             :ai-busy="aiBusy"
             :on-ai-suggest="aiSuggest"
+            :on-parse-brief="parseBrief"
             @save="(p: DirectorPlan) => guarded(() => s.savePlan(p), tr('shot.toast.planSaved'))"
             @paste="tab = 'external'"
             @dirty-change="(d: boolean) => (planDirty = d)"

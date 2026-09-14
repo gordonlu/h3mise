@@ -107,6 +107,40 @@ test('malformed plan output requests a repair round before applying', async () =
   }
 });
 
+test('brief_to_plan parses a brief into a plan draft (delegated)', async () => {
+  const p = await project('ai-deleg-brief');
+  const ai = offlineAi();
+  const shot = createShot(p, { title: '简报测试', durationSeconds: 6 });
+  const prepared = await prepareRequest(ai, p, 'brief_to_plan', { shotId: shot.id, brief: '中景固定机位，缓慢推近，主角抬头。' }, null);
+  assert.equal(prepared.step.json, true);
+  assert.ok(JSON.stringify(prepared.step.messages).includes('简报'));
+
+  // An empty brief is rejected before any inference is requested.
+  await assert.rejects(
+    () => prepareRequest(ai, p, 'brief_to_plan', { shotId: shot.id, brief: '   ' }, null),
+    /brief is empty/,
+  );
+
+  // Malformed answer → repair round, exactly like plan_shot.
+  const invalid = await applyResult(ai, p, prepared.requestId, JSON.stringify({}), null);
+  assert.equal(invalid.status, 'continue');
+  if (invalid.status === 'continue') assert.ok(invalid.step.system.includes('修复器'));
+
+  const base = emptyDirectorPlan();
+  const valid = {
+    intent: { ...base.intent, visualThesis: '孤独感', endState: '抬头望钟' },
+    subject: { ...base.subject, action: '缓慢抬头' },
+    camera: { ...base.camera, dominantBehavior: '缓慢推近' },
+  };
+  const done = await applyResult(ai, p, prepared.requestId, JSON.stringify(valid), null);
+  assert.equal(done.status, 'applied');
+  if (done.status === 'applied') {
+    const result = done.result as { kind: string; plan: { camera: { dominantBehavior: string } } };
+    assert.equal(result.kind, 'director_plan');
+    assert.equal(result.plan.camera.dominantBehavior, '缓慢推近');
+  }
+});
+
 test('unknown requests and actions fail with explicit codes', async () => {
   const p = await project('ai-deleg-errors');
   const ai = offlineAi();

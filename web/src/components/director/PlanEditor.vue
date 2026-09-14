@@ -5,11 +5,61 @@ import type { DirectorPlan } from '@h3mise/shared';
 import { t } from '../../stores/locale';
 import TemporalBeatsEditor from './TemporalBeatsEditor.vue';
 
-const props = defineProps<{ plan: DirectorPlan; aiEnabled: boolean; onAiSuggest: (plan: DirectorPlan) => void; aiBusy?: boolean }>();
+const props = defineProps<{
+  plan: DirectorPlan;
+  aiEnabled: boolean;
+  onAiSuggest: (plan: DirectorPlan) => void;
+  /** Living brief: parse free text into a DirectorPlan (AI or delegated agent). */
+  onParseBrief?: (brief: string) => Promise<DirectorPlan | null>;
+  aiBusy?: boolean;
+}>();
 const emit = defineEmits<{ save: [plan: DirectorPlan]; paste: []; dirtyChange: [dirty: boolean] }>();
 
 const draft = ref<DirectorPlan>(emptyDirectorPlan());
 const savedSnapshot = ref('');
+const briefText = ref('');
+const briefBusy = ref(false);
+
+/** Compose a readable director's brief from the structured plan. Pure view:
+ * connectors are punctuation and the two labeled lines are localized. */
+function composeBrief(p: DirectorPlan): string {
+  const sentences: string[] = [];
+  const sizes = p.camera.shotSizeStart && p.camera.shotSizeEnd && p.camera.shotSizeStart !== p.camera.shotSizeEnd
+    ? `${p.camera.shotSizeStart} → ${p.camera.shotSizeEnd}`
+    : p.camera.shotSizeStart || p.camera.shotSizeEnd;
+  const camera = [sizes, p.camera.geometry, p.camera.dominantBehavior].filter(Boolean).join('，');
+  if (camera) sentences.push(camera);
+  const subject = [p.subject.primarySubject, p.subject.action].filter(Boolean).join('，');
+  if (subject) sentences.push(subject);
+  if (p.intent.visualThesis) sentences.push(p.intent.visualThesis);
+  const position = [p.blocking.startPosition, p.blocking.endPosition].filter(Boolean).join(' → ');
+  const blocking = [position, p.blocking.facing].filter(Boolean).join('，');
+  if (blocking) sentences.push(blocking);
+  const performance = [p.performance.objective, p.performance.primaryAction].filter(Boolean).join('；');
+  if (performance) sentences.push(performance);
+  const environment = [p.environment.location, p.environment.weather, p.environment.lighting].filter(Boolean).join('，');
+  if (environment) sentences.push(environment);
+  if (p.intent.endState) sentences.push(t('shot.plan.briefEnding', { value: p.intent.endState }));
+  if (p.generation.audioIntent) sentences.push(t('shot.plan.briefAudio', { value: p.generation.audioIntent }));
+  return sentences.length ? `${sentences.join('。')}。` : '';
+}
+
+async function parseBrief(): Promise<void> {
+  if (!props.onParseBrief || briefBusy.value) return;
+  const text = briefText.value.trim();
+  if (!text) return;
+  briefBusy.value = true;
+  try {
+    const parsed = await props.onParseBrief(text);
+    if (!parsed) return;
+    const cloned = structuredClone(toRaw(parsed));
+    if (!Array.isArray(cloned.temporalBeats)) cloned.temporalBeats = [];
+    draft.value = cloned;
+    briefText.value = composeBrief(cloned);
+  } finally {
+    briefBusy.value = false;
+  }
+}
 
 watch(
   () => props.plan,
@@ -19,6 +69,7 @@ watch(
     if (!Array.isArray(cloned.temporalBeats)) cloned.temporalBeats = [];
     draft.value = cloned;
     savedSnapshot.value = JSON.stringify(cloned);
+    briefText.value = composeBrief(cloned);
   },
   { immediate: true, deep: true },
 );
@@ -251,6 +302,23 @@ function requestAiSuggestion() {
       </div>
     </div>
 
+    <section class="panel brief-card">
+      <div class="brief-head">
+        <strong>{{ t('shot.plan.briefTitle') }}</strong>
+        <span class="muted">{{ t('shot.plan.briefHint') }}</span>
+      </div>
+      <textarea v-model="briefText" class="brief-text" rows="4" :placeholder="t('shot.plan.briefPlaceholder')" />
+      <div class="row brief-actions">
+        <button
+          class="sm"
+          :disabled="!props.onParseBrief || !aiEnabled || aiBusy || briefBusy || !briefText.trim()"
+          :title="aiEnabled ? t('shot.plan.briefHint') : t('shot.plan.configureAiTitle')"
+          @click="parseBrief"
+        >{{ briefBusy ? t('shot.plan.briefParsing') : aiEnabled ? t('shot.plan.briefParse') : t('shot.plan.aiNotConfigured') }}</button>
+        <button class="sm ghost" @click="briefText = composeBrief(draft)">{{ t('shot.plan.briefRecompose') }}</button>
+      </div>
+    </section>
+
     <section class="panel essential-card">
       <div class="essential-intro">
         <strong>{{ t('shot.plan.completeFourItems') }}</strong>
@@ -360,4 +428,10 @@ function requestAiSuggestion() {
 .f-en { color: var(--text-3); font-size: 10.5px; font-weight: 400; }
 .pulse { animation: savepulse 1.6s ease-in-out infinite; }
 @keyframes savepulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 108, 55, 0.0); } 50% { box-shadow: 0 0 0 4px rgba(255, 108, 55, 0.18); } }
+.brief-card { padding: 14px 16px; display: grid; gap: 9px; margin-bottom: 14px; }
+.brief-head { display: grid; gap: 2px; }
+.brief-head strong { font-size: 13.5px; }
+.brief-head .muted { font-size: 11.5px; line-height: 1.5; }
+.brief-text { width: 100%; line-height: 1.7; }
+.brief-actions { justify-content: flex-end; }
 </style>

@@ -119,7 +119,7 @@ Rules:
 - `apply` is the only writer for delegated actions. Never write beats, plans, or prompts directly to bypass validation.
 - The server never trusts your answer: it re-validates, normalizes, and keeps its own atomic application and idempotency guarantees.
 - `GET /api/ai/requests?status=pending` lists unfinished delegations; `GET /api/ai/requests/{id}` shows the stored result or error. `GET /api/ai/status` reports a `delegation` block.
-- Actions: `plan_shot`, `improve_camera`, `improve_performance`, `reality_check`, `continuity_check`, `compile_prompt`, `diagnose_take`, `analyze_take_continuity`, `repair_prompt`, `story_to_beats`, `beats_to_shots`, `auto_director`.
+- Actions: `plan_shot`, `improve_camera`, `improve_performance`, `brief_to_plan`, `reality_check`, `continuity_check`, `compile_prompt`, `diagnose_take`, `analyze_take_continuity`, `repair_prompt`, `story_to_beats`, `beats_to_shots`, `auto_director`.
 - Deterministic logic (skeleton matching, style resolution, prompt compilation, basic Preflight, camera geometry) is never delegated: rules stay in H3Mise, inference comes from you.
 
 ## Connect ComfyUI

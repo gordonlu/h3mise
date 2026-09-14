@@ -99,6 +99,8 @@ curl -sS http://127.0.0.1:4789/api/storyboard/pages
 
 When you (an agent) drive H3Mise, bring your own model. Do not configure a project AI and do not ask H3Mise to call one: the inference is yours, so the session keeps a single inference authority.
 
+First call `GET /api/session` and keep the returned `h3mise_session` cookie for every later request: all state-changing routes (POST / PUT / PATCH / DELETE, including `prepare` and `apply`) are session-guarded.
+
 1. `POST /api/ai/actions/{action}/prepare` with the action body. The response contains the exact prompt H3Mise would have sent — `inference.system`, `inference.messages`, `inference.json`, `inference.temperature`, `inference.hasImages` — plus `requestId` and `contextHash`. No model is called.
    Send `X-H3Mise-Agent-Model: <label>` to record which model produced the answer. The label only; never a key.
 2. Run that prompt with your own model. When `inference.json` is true, return exactly one JSON array or object with no prose or fences. When `inference.hasImages` is true the messages contain reference images; read them only if you have vision, otherwise answer from text alone and leave unseen spatial facts empty.

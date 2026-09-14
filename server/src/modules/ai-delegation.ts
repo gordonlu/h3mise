@@ -111,12 +111,14 @@ function parseState(row: AiRequestRow): StoredState {
 }
 
 function toSummary(row: AiRequestRow): AiRequestSummary {
+  const body = parseJson<{ shotId?: unknown }>(row.body_json, {});
   return {
     id: row.id,
     action: row.action,
     status: row.status,
     source: row.source as AiRequestSource,
     modelLabel: row.model_label,
+    shotId: typeof body.shotId === 'string' ? body.shotId : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

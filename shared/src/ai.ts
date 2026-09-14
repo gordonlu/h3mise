@@ -58,6 +58,8 @@ export interface AiRequestSummary {
   status: AiRequestStatus;
   source: AiRequestSource;
   modelLabel: string | null;
+  /** Shot the request belongs to, when the action body carried one. */
+  shotId: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

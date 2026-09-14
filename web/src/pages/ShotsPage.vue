@@ -10,6 +10,7 @@ import { t } from '../stores/locale';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL } from '@h3mise/shared';
 import type { RenderBatchPlan, RenderBatchPrepareResult, RenderBatchShotStage, RenderJob, Shot, ShotRenderReadiness, ShotStatus } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
+import CopilotRail from '../components/CopilotRail.vue';
 
 interface ShotCard extends Shot {
   renderReadiness: ShotRenderReadiness;
@@ -348,7 +349,8 @@ onMounted(load);
       </EmptyState>
     </div>
 
-    <div class="board">
+    <div class="board-layout">
+      <div class="board">
       <router-link v-for="(s, i) in filtered" :key="s.id" :to="`/shots/${s.id}`" class="card panel">
         <div class="cover" :class="{ 'no-cover': !s.cover }">
           <img v-if="s.cover" :src="fileUrl(s.cover)" :alt="s.title" />
@@ -382,6 +384,8 @@ onMounted(load);
           </div>
         </div>
       </router-link>
+      </div>
+      <CopilotRail class="copilot-col" :shot-count="shots.length" />
     </div>
   </div>
 </template>
@@ -412,7 +416,9 @@ h1 { font-size: 30px; line-height: 1.15; margin: 0; font-weight: 720; letter-spa
 .batch-reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .batch-actions { justify-content: flex-end; flex-wrap: wrap; }
 .mode-field select { width: 220px; }
-.board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.board-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; margin-top: 18px; }
+.board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.copilot-col { position: sticky; top: 14px; }
 .shot-delete { margin-left: 2px; padding: 3px 6px; font-size: 12px; letter-spacing: 1px; flex: none; }
 .card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; box-shadow: none; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
 .card:hover { border-color: var(--line-3); transform: translateY(-2px); box-shadow: var(--shadow-1); text-decoration: none; }

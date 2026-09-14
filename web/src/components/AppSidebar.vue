@@ -203,7 +203,7 @@ async function pickProject(id: string): Promise<void> {
 
       <div class="side-brain">
         <button class="side-util" :title="t('brain.title')" @click="brainOpen = !brainOpen">
-          <span class="brain-dot" :class="{ attached: ai.agentAttached, offline: !ai.agentAttached && !ai.configured }" />
+          <span class="side-icon-box"><span class="brain-dot" :class="{ attached: ai.agentAttached, offline: !ai.agentAttached && !ai.configured }" /></span>
           <span>{{ brainLabel() }}</span>
           <span v-if="ai.pendingCount" class="badge accent no-dot">{{ ai.pendingCount }}</span>
         </button>
@@ -348,7 +348,8 @@ async function pickProject(id: string): Promise<void> {
 }
 .side-util:hover { background: var(--bg-subtle); color: var(--text); }
 .side-util svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
-.side-util .kbd { margin-left: auto; }
+.side-util .kbd, .side-util .badge { margin-left: auto; }
+.side-icon-box { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
 .side-brain { position: relative; }
 .side-brain-menu {
   position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 45;

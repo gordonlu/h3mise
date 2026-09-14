@@ -327,14 +327,27 @@ async function verifyStoryboardProfile() {
     verifyingStoryboard.value = false;
   }
 }
+function scrollToSetting(id: string): void {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 </script>
 
 <template>
   <div class="page">
     <h1>{{ t('pages.settings.title') }}</h1>
 
-    <div class="grid">
-      <div class="panel">
+    <div class="settings-layout">
+      <nav class="settings-nav" :aria-label="t('pages.settings.title')">
+        <button @click="scrollToSetting('set-project')">{{ t('pages.settings.currentProject') }}</button>
+        <button @click="scrollToSetting('set-runninghub')">RunningHub</button>
+        <button @click="scrollToSetting('set-storyboard')">Storyboard</button>
+        <button @click="scrollToSetting('set-comfyui')">ComfyUI</button>
+        <button @click="scrollToSetting('set-ai')">AI</button>
+        <button @click="scrollToSetting('set-env')">{{ t('pages.settings.environment') }}</button>
+      </nav>
+
+      <div class="grid">
+      <div id="set-project" class="panel">
         <div class="panel-title">{{ t('pages.settings.currentProject') }}</div>
         <div class="panel-body col" v-if="project.current">
           <p class="muted">{{ t('pages.settings.projectHelp') }}</p>
@@ -375,7 +388,7 @@ async function verifyStoryboardProfile() {
         </div>
       </div>
 
-      <div class="panel">
+      <div id="set-runninghub" class="panel">
         <div class="panel-title">{{ t('pages.settings.runningHubProvider') }}</div>
         <div class="panel-body col">
           <div class="row">
@@ -439,7 +452,7 @@ async function verifyStoryboardProfile() {
         </div>
       </div>
 
-      <div class="panel">
+      <div id="set-storyboard" class="panel">
         <div class="panel-title">{{ t('pages.settings.storyboardProvider') }}</div>
         <div v-if="storyboardProfile" class="panel-body col">
           <div class="row">
@@ -463,7 +476,7 @@ async function verifyStoryboardProfile() {
         </div>
       </div>
 
-      <div class="panel">
+      <div id="set-ai" class="panel">
         <div class="panel-title">{{ t('pages.settings.aiOptional') }}</div>
         <div class="panel-body col">
           <span class="badge" :class="health?.aiConfigured ? 'ok' : 'muted'">
@@ -483,7 +496,7 @@ async function verifyStoryboardProfile() {
         </div>
       </div>
 
-      <div class="panel">
+      <div id="set-comfyui" class="panel">
         <div class="panel-title">{{ t('pages.settings.comfyProvider') }}</div>
         <div class="panel-body col">
           <div class="row">
@@ -510,7 +523,7 @@ async function verifyStoryboardProfile() {
         </div>
       </div>
 
-      <div class="panel">
+      <div id="set-env" class="panel">
         <div class="panel-title">{{ t('pages.settings.environment') }}</div>
         <div class="panel-body col">
           <div class="row">
@@ -524,12 +537,21 @@ async function verifyStoryboardProfile() {
           <p class="muted">{{ t('pages.settings.startupHelp') }}</p>
         </div>
       </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.page { padding: 24px 32px; max-width: 1000px; margin: 0 auto; }
+.page { padding: 28px 36px 56px; max-width: 1240px; margin: 0 auto; }
+.settings-layout { display: grid; grid-template-columns: 184px minmax(0, 1fr); gap: 20px; align-items: start; }
+.settings-nav { position: sticky; top: 14px; display: flex; flex-direction: column; gap: 3px; }
+.settings-nav button {
+  padding: 9px 12px; border: none; border-radius: 9px; background: none; box-shadow: none;
+  color: var(--text-2); font-size: 13px; text-align: left;
+}
+.settings-nav button:hover { background: var(--bg-subtle); color: var(--text); }
+.panel { scroll-margin-top: 14px; }
 h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 22px; }
 .grid { grid-template-columns: 1fr 1fr; }
 .file-button, .button-link {

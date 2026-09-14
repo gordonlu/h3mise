@@ -65,10 +65,10 @@ const shotUploadContext = computed(() => {
 const uploadContextLabel = computed(() => {
   const ctx = shotUploadContext.value;
   if (!ctx) return '';
-  if (ctx.role === 'first_frame') return '上传后将自动绑定为 FirstFrame 首帧';
-  if (ctx.role === 'last_frame') return '上传后将自动绑定为 LastFrame 尾帧';
-  if (ctx.mode === 'ref2va') return '上传图片或音频后将自动绑定到当前镜头的 Ref2VA';
-  return '上传后返回当前镜头继续制作';
+  if (ctx.role === 'first_frame') return t('pages.assets.context.autoFirstFrame');
+  if (ctx.role === 'last_frame') return t('pages.assets.context.autoLastFrame');
+  if (ctx.mode === 'ref2va') return t('pages.assets.context.autoRef2va');
+  return t('pages.assets.context.returnToShot');
 });
 
 type EditingItem =
@@ -101,7 +101,7 @@ async function saveEdit() {
   try {
     if (e.kind === 'entity') {
       await patch(`/api/assets/entities/${e.item.id}`, { name: e.item.name, description: e.item.description, kind: e.item.kind, traits: e.item.traits });
-      toasts.push({ kind: 'ok', text: '实体已更新' });
+      toasts.push({ kind: 'ok', text: t('pages.assets.entity.updated') });
     } else if (e.kind === 'state') {
       await patch(`/api/assets/character-states/${e.item.id}`, {
         name: e.item.name,
@@ -110,13 +110,13 @@ async function saveEdit() {
         injury: e.item.injury,
         heldItems: e.item.heldItems,
       });
-      toasts.push({ kind: 'ok', text: '角色状态已更新' });
+      toasts.push({ kind: 'ok', text: t('pages.assets.states.updated') });
     } else if (e.kind === 'media') {
       await patch(`/api/assets/media/${e.item.id}`, { label: e.item.label, tags: e.item.tags });
-      toasts.push({ kind: 'ok', text: '媒体标签已更新' });
+      toasts.push({ kind: 'ok', text: t('pages.assets.media.updated') });
     } else {
       await patch(`/api/assets/bindings/${e.item.id}`, { label: e.item.label, roles: e.item.roles });
-      toasts.push({ kind: 'ok', text: '绑定已更新' });
+      toasts.push({ kind: 'ok', text: t('pages.assets.bindings.updated') });
     }
     editing.value = null;
     await load();
@@ -142,48 +142,49 @@ async function createEntity() {
     description: newEntity.value.description,
     traits: traitsFromText(newEntity.value.traits),
   });
-  toasts.push({ kind: 'ok', text: `实体「${newEntity.value.name}」已创建` });
+  toasts.push({ kind: 'ok', text: t('pages.assets.entity.created', { name: newEntity.value.name }) });
   newEntity.value = { kind: 'character', name: '', description: '', traits: '' };
   await load();
 }
 
 async function removeEntity(e: Entity) {
   const ok = await confirmDialog({
-    title: `删除实体「${e.name}」？`,
-    message: '关联的 CharacterState 会一并删除；已绑定的 Reference 会解除。删除后不可恢复。',
-    confirmLabel: '删除',
+    title: t('pages.assets.entity.deleteTitle', { name: e.name }),
+    message: t('pages.assets.entity.deleteMessage'),
+    confirmLabel: t('common.delete'),
     danger: true,
   });
   if (!ok) return;
   await del(`/api/assets/entities/${e.id}`);
-  toasts.push({ kind: 'ok', text: `实体「${e.name}」已删除` });
+  toasts.push({ kind: 'ok', text: t('pages.assets.entity.deleted', { name: e.name }) });
   await load();
 }
 
 async function createState() {
   if (!newState.value.name.trim()) {
-    toasts.push({ kind: 'err', text: '请填写 CharacterState 名称' });
+    toasts.push({ kind: 'err', text: t('pages.assets.states.nameRequired') });
     return;
   }
   await post('/api/assets/character-states', {
     ...newState.value,
     heldItems: newState.value.heldItems.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
   });
-  toasts.push({ kind: 'ok', text: `CharacterState「${newState.value.name}」已创建` });
+  toasts.push({ kind: 'ok', text: t('pages.assets.states.created', { name: newState.value.name }) });
   newState.value = { ...newState.value, name: '', costume: '', hair: '', injury: '', heldItems: '' };
   await load();
 }
 
 async function removeState(st: CharacterState) {
-  const ok = await confirmDialog({ title: `删除状态「${st.name}」？`, message: '删除后不可恢复。', confirmLabel: '删除', danger: true });
+  const ok = await confirmDialog({ title: t('pages.assets.states.deleteTitle', { name: st.name }), message: t('common.irreversible'), confirmLabel: t('common.delete'), danger: true });
   if (!ok) return;
   await del(`/api/assets/character-states/${st.id}`);
+  toasts.push({ kind: 'ok', text: t('pages.assets.states.deleted') });
   await load();
 }
 
 async function importFile(file: File): Promise<MediaAsset | null> {
   if (!file.type.startsWith('image/') && !file.type.startsWith('audio/') && !file.type.startsWith('video/')) {
-    toasts.push({ kind: 'err', text: `只支持图片、视频或参考音频：${file.name}` });
+    toasts.push({ kind: 'err', text: t('pages.assets.media.unsupported', { name: file.name }) });
     return null;
   }
   uploading.value += 1;
@@ -195,7 +196,7 @@ async function importFile(file: File): Promise<MediaAsset | null> {
     await load();
     return asset;
   } catch (e) {
-    toasts.push({ kind: 'err', text: `上传失败：${e instanceof Error ? e.message : e}` });
+    toasts.push({ kind: 'err', text: t('pages.assets.media.uploadFailed', { msg: e instanceof Error ? e.message : String(e) }) });
   } finally {
     uploading.value -= 1;
   }
@@ -220,9 +221,9 @@ async function upload(file: File) {
   if (!asset) return;
   try {
     const linked = await associateWithSourceShot(asset);
-    toasts.push({ kind: 'ok', text: linked ? `已上传并关联 ${file.name}` : `已导入 ${file.name}` });
+    toasts.push({ kind: 'ok', text: linked ? t('pages.assets.media.uploadedLinked', { name: file.name }) : t('pages.assets.media.imported', { name: file.name }) });
   } catch (error) {
-    toasts.push({ kind: 'err', text: `图片已上传，但关联镜头失败：${error instanceof Error ? error.message : error}` });
+    toasts.push({ kind: 'err', text: t('pages.assets.media.uploadedLinkedShotFailed', { msg: error instanceof Error ? error.message : String(error) }) });
   }
 }
 
@@ -250,24 +251,24 @@ async function onRelatedImagePick(e: Event) {
     const ownerName = target.kind === 'entity'
       ? entities.value.find((item) => item.id === target.id)?.name
       : states.value.find((item) => item.id === target.id)?.name;
-    const label = `${ownerName || file.name}${target.kind === 'entity' ? ' · 主图' : ' · 状态图'}`;
+    const label = `${ownerName || file.name}${target.kind === 'entity' ? t('pages.assets.media.imageRolePrimary') : t('pages.assets.media.imageRoleState')}`;
     await patch(`/api/assets/media/${asset.id}`, { label });
     const path = target.kind === 'entity' ? `/api/assets/entities/${target.id}` : `/api/assets/character-states/${target.id}`;
     await patch(path, { imageAssetId: asset.id });
     const linked = await associateWithSourceShot({ ...asset, label });
     toasts.push({
       kind: 'ok',
-      text: `${target.kind === 'entity' ? '实体主图已更新' : '角色状态图已覆盖'}${linked ? '，并已关联来源镜头' : ''}`,
+      text: `${target.kind === 'entity' ? t('pages.assets.states.imageUpdated') : t('pages.assets.states.imageReplaced')}${linked ? t('pages.assets.states.andLinkedShot') : ''}`,
     });
     await load();
   } catch (error) {
-    toasts.push({ kind: 'err', text: `图片已上传，但关联失败：${error instanceof Error ? error.message : error}` });
+    toasts.push({ kind: 'err', text: t('pages.assets.media.uploadedLinkFailed', { msg: error instanceof Error ? error.message : String(error) }) });
   }
 }
 
 async function clearStateImage(state: CharacterState) {
   await patch(`/api/assets/character-states/${state.id}`, { imageAssetId: null });
-  toasts.push({ kind: 'ok', text: '已恢复继承实体主图' });
+  toasts.push({ kind: 'ok', text: t('pages.assets.states.inheritRestored') });
   await load();
 }
 
@@ -276,11 +277,11 @@ async function importLocalPath() {
   try {
     const a = await post<MediaAsset>('/api/assets/media/import-path', { path: importPath.value });
     const linked = await associateWithSourceShot(a);
-    toasts.push({ kind: 'ok', text: linked ? `已导入并关联 ${a.label}` : `已导入 ${a.label} (${a.kind})` });
+    toasts.push({ kind: 'ok', text: linked ? t('pages.assets.media.importedLinked', { label: a.label }) : t('pages.assets.media.importedWithKind', { label: a.label, kind: a.kind }) });
     importPath.value = '';
     await load();
   } catch (e) {
-    toasts.push({ kind: 'err', text: `导入失败：${e instanceof Error ? e.message : e}` });
+    toasts.push({ kind: 'err', text: t('pages.assets.media.importFailed', { msg: e instanceof Error ? e.message : String(e) }) });
   } finally {
     importing.value = false;
   }
@@ -288,7 +289,7 @@ async function importLocalPath() {
 
 async function extractFrame(assetId: string) {
   const a = await post<MediaAsset>(`/api/assets/media/${assetId}/extract-frame`, { atSeconds: 0, label: 'Extracted frame' });
-  toasts.push({ kind: 'ok', text: `已抽帧：${a.id}` });
+  toasts.push({ kind: 'ok', text: t('pages.assets.media.frameExtracted', { id: a.id }) });
   await load();
 }
 
@@ -319,26 +320,26 @@ function stateImage(state: CharacterState): { asset: MediaAsset | null; inherite
 async function removeMedia(asset: MediaAsset) {
   const usage = await get<{ bindings: number; entities: number; states: number }>(`/api/assets/media/${asset.id}/usage`);
   const impacts = [
-    usage.bindings ? `${usage.bindings} 个镜头绑定` : '',
-    usage.entities ? `${usage.entities} 个实体主图` : '',
-    usage.states ? `${usage.states} 个状态覆盖图` : '',
+    usage.bindings ? t('pages.assets.usage.shotBindings', { n: usage.bindings }) : '',
+    usage.entities ? t('pages.assets.usage.entityImages', { n: usage.entities }) : '',
+    usage.states ? t('pages.assets.usage.stateImages', { n: usage.states }) : '',
   ].filter(Boolean);
   const ok = await confirmDialog({
-    title: `删除资产「${asset.label || asset.id}」？`,
+    title: t('pages.assets.deleteAsset.title', { name: asset.label || asset.id }),
     message: impacts.length
-      ? `当前仍被 ${impacts.join('、')} 使用，服务端会阻止删除。请先解除这些引用。`
-      : '文件将从项目中删除，此操作不可恢复。',
-    confirmLabel: '删除资产',
+      ? t('pages.assets.deleteAsset.inUse', { impacts: impacts.join('、') })
+      : t('pages.assets.deleteAsset.confirmMessage'),
+    confirmLabel: t('pages.assets.deleteAsset.confirm'),
     danger: true,
   });
   if (!ok) return;
   try {
     await del(`/api/assets/media/${asset.id}`);
   } catch (e) {
-    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : '删除失败' });
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : t('pages.assets.deleteAsset.failed') });
     return;
   }
-  toasts.push({ kind: 'ok', text: '资产已删除' });
+  toasts.push({ kind: 'ok', text: t('pages.assets.deleteAsset.done') });
   await load();
 }
 
@@ -356,10 +357,10 @@ onMounted(load);
     <input ref="relatedImageInput" class="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" @change="onRelatedImagePick" />
     <section v-if="returnTo" class="return-bar">
       <div>
-        <strong>{{ linkedOnVisit ? '素材已关联，可以返回镜头' : '从镜头制作进入资产页' }}</strong>
-        <span>{{ uploadContextLabel || '完成资产操作后返回原页面继续制作' }}</span>
+        <strong>{{ linkedOnVisit ? t('pages.assets.context.linked') : t('pages.assets.context.fromShot') }}</strong>
+        <span>{{ uploadContextLabel || t('pages.assets.context.returnToPage') }}</span>
       </div>
-      <button :class="linkedOnVisit ? 'primary' : ''" @click="goBackToSource">← 返回镜头制作</button>
+      <button :class="linkedOnVisit ? 'primary' : ''" @click="goBackToSource">{{ t('pages.assets.context.backToShot') }}</button>
     </section>
     <header class="page-head">
       <div class="head-titles">
@@ -406,20 +407,20 @@ onMounted(load);
         <EmptyState v-if="!entities.length" icon="❖" :title="t('workflow.assets.noEntitiesYet')" :desc="t('workflow.assets.createCharactersAndScenesFirstShotSubjects')" />
         <div v-else class="grid list">
           <article v-for="e in filteredEntities" :key="e.id" class="card visual-card">
-            <img v-if="entityImage(e)" class="linked-image" :src="mediaUrl(entityImage(e)!.id)" :alt="`${e.name} 主图`" />
+            <img v-if="entityImage(e)" class="linked-image" :src="mediaUrl(entityImage(e)!.id)" :alt="t('pages.assets.entity.primaryAlt', { name: e.name })" />
             <div class="card-top">
               <span class="kind-badge" :style="{ color: KIND_COLOR[e.kind], background: `${KIND_COLOR[e.kind]}1a`, borderColor: `${KIND_COLOR[e.kind]}55` }">{{ kindLabel(e.kind) }}</span>
               <h3 class="card-name" :title="e.name">{{ e.name }}</h3>
               <div class="card-actions">
-                <button class="icon-btn" title="编辑" @click="editing = { kind: 'entity', item: e }">✎</button>
-                <button class="icon-btn danger" title="删除" @click="removeEntity(e)">🗑</button>
+                <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'entity', item: e }">✎</button>
+                <button class="icon-btn danger" :title="t('common.delete')" @click="removeEntity(e)">🗑</button>
               </div>
             </div>
             <p class="card-desc">{{ e.description || '—' }}</p>
             <p v-if="Object.keys(e.traits).length" class="card-meta">{{ Object.entries(e.traits).map(([k, v]) => `${k}: ${v}`).join(' · ') }}</p>
             <div class="image-link-row">
-              <span :class="['badge', entityImage(e) ? 'ok' : 'warn']">{{ entityImage(e) ? '已绑定主图' : '缺少主图' }}</span>
-              <button class="sm" @click="chooseRelatedImage('entity', e.id)">{{ entityImage(e) ? '更换主图' : '＋ 上传主图' }}</button>
+              <span :class="['badge', entityImage(e) ? 'ok' : 'warn']">{{ entityImage(e) ? t('pages.assets.entity.boundPrimary') : t('pages.assets.entity.missingPrimary') }}</span>
+              <button class="sm" @click="chooseRelatedImage('entity', e.id)">{{ entityImage(e) ? t('pages.assets.entity.replacePrimary') : t('pages.assets.entity.uploadPrimary') }}</button>
             </div>
           </article>
         </div>
@@ -428,42 +429,42 @@ onMounted(load);
 
     <!-- CharacterStates -->
     <section v-if="tab === 'states'" class="panel">
-      <div class="panel-title">角色状态 <span class="panel-note">人物或生物在当前剧情状态下的外观（与实体严格分开）</span></div>
+      <div class="panel-title">{{ t('pages.assets.states.title') }} <span class="panel-note">{{ t('pages.assets.states.note') }}</span></div>
       <div class="panel-body">
         <form class="toolbar wrap-toolbar" @submit.prevent="createState">
           <label class="field">
-            <span>角色</span>
+            <span>{{ t('pages.assets.states.character') }}</span>
             <select v-model="newState.characterId">
               <option v-for="e in entities.filter((x) => x.kind === 'character' || x.kind === 'creature')" :key="e.id" :value="e.id">{{ e.name }}</option>
             </select>
           </label>
-          <label class="field"><span>名称</span><input v-model="newState.name" placeholder="如：雨夜湿衣状态" /></label>
-          <label class="field"><span>服装 / 外观</span><input v-model="newState.costume" placeholder="服装、装甲或皮毛状态" /></label>
-          <label class="field"><span>发型 / 毛发</span><input v-model="newState.hair" placeholder="发型或毛发状态" /></label>
-          <label class="field"><span>伤势</span><input v-model="newState.injury" placeholder="forehead_cut" /></label>
-          <label class="field"><span>手持物</span><input v-model="newState.heldItems" placeholder="umbrella, phone" /></label>
-          <button class="primary" :disabled="!newState.name || !entities.some((e) => e.kind === 'character' || e.kind === 'creature')">创建状态</button>
+          <label class="field"><span>{{ t('pages.assets.states.name') }}</span><input v-model="newState.name" :placeholder="t('pages.assets.states.namePlaceholder')" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.costume') }}</span><input v-model="newState.costume" :placeholder="t('pages.assets.states.costumePlaceholder')" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.hair') }}</span><input v-model="newState.hair" :placeholder="t('pages.assets.states.hairPlaceholder')" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.injury') }}</span><input v-model="newState.injury" :placeholder="t('pages.assets.states.injuryPlaceholder')" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.heldItems') }}</span><input v-model="newState.heldItems" :placeholder="t('pages.assets.states.heldItemsPlaceholder')" /></label>
+          <button class="primary" :disabled="!newState.name || !entities.some((e) => e.kind === 'character' || e.kind === 'creature')">{{ t('pages.assets.states.create') }}</button>
         </form>
-        <EmptyState v-if="!states.length" icon="❑" title="还没有角色状态" desc="CharacterState 记录服装 / 发型 / 伤势 / 手持物，是连续性提交与继承的基本单元。" />
+        <EmptyState v-if="!states.length" icon="❑" :title="t('pages.assets.states.emptyTitle')" :desc="t('pages.assets.states.emptyDesc')" />
         <div v-else class="grid list">
           <article v-for="st in states" :key="st.id" class="card visual-card">
-            <img v-if="stateImage(st).asset" class="linked-image" :src="mediaUrl(stateImage(st).asset!.id)" :alt="`${st.name} 状态图`" />
+            <img v-if="stateImage(st).asset" class="linked-image" :src="mediaUrl(stateImage(st).asset!.id)" :alt="t('pages.assets.states.imageAlt', { name: st.name })" />
             <div class="card-top">
               <span class="kind-badge info">{{ entities.find((e) => e.id === st.characterId)?.name ?? st.characterId }}</span>
               <h3 class="card-name" :title="st.name">{{ st.name }}</h3>
               <div class="card-actions">
-                <button class="icon-btn" title="编辑" @click="editing = { kind: 'state', item: st }">✎</button>
-                <button class="icon-btn danger" title="删除" @click="removeState(st)">🗑</button>
+                <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'state', item: st }">✎</button>
+                <button class="icon-btn danger" :title="t('common.delete')" @click="removeState(st)">🗑</button>
               </div>
             </div>
-            <p class="card-desc">服装 {{ st.costume || '—' }} · 发型 {{ st.hair || '—' }} · 伤势 {{ st.injury || '—' }}</p>
-            <p v-if="st.heldItems.length" class="card-meta">手持 {{ st.heldItems.join('、') }}</p>
+            <p class="card-desc">{{ t('pages.assets.states.costumeLine', { costume: st.costume || '—', hair: st.hair || '—', injury: st.injury || '—' }) }}</p>
+            <p v-if="st.heldItems.length" class="card-meta">{{ t('pages.assets.states.heldLine', { items: st.heldItems.join('、') }) }}</p>
             <div class="image-link-row">
               <span :class="['badge', stateImage(st).asset ? 'ok' : 'warn']">
-                {{ stateImage(st).asset ? (stateImage(st).inherited ? '继承实体主图' : '状态图覆盖') : '实体尚无主图' }}
+                {{ stateImage(st).asset ? (stateImage(st).inherited ? t('pages.assets.states.imageInherited') : t('pages.assets.states.imageOverride')) : t('pages.assets.states.noEntityImage') }}
               </span>
-              <button class="sm" @click="chooseRelatedImage('state', st.id)">{{ st.imageAssetId ? '更换状态图' : '＋ 上传状态图' }}</button>
-              <button v-if="st.imageAssetId" class="sm ghost" @click="clearStateImage(st)">恢复继承</button>
+              <button class="sm" @click="chooseRelatedImage('state', st.id)">{{ st.imageAssetId ? t('pages.assets.states.replaceImage') : t('pages.assets.states.uploadImage') }}</button>
+              <button v-if="st.imageAssetId" class="sm ghost" @click="clearStateImage(st)">{{ t('pages.assets.states.restoreInherit') }}</button>
             </div>
           </article>
         </div>
@@ -472,29 +473,29 @@ onMounted(load);
 
     <!-- Media -->
     <section v-if="tab === 'media'" class="panel">
-      <div class="panel-title">媒体库 <span class="panel-note">图片 · 参考音频 · 视频拉片</span></div>
+      <div class="panel-title">{{ t('pages.assets.media.title') }} <span class="panel-note">{{ t('pages.assets.media.note') }}</span></div>
       <div class="panel-body">
         <div v-if="shotUploadContext" class="context-note">
-          <strong>当前上传将关联到来源镜头</strong>
+          <strong>{{ t('pages.assets.media.uploadContext') }}</strong>
           <span>{{ uploadContextLabel }}</span>
         </div>
         <div class="upload-actions">
           <input ref="imageInput" class="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple @change="onFilePick" />
           <input ref="audioInput" class="file-input" type="file" accept="audio/mpeg,audio/wav,audio/aac,audio/flac,audio/mp4" multiple @change="onFilePick" />
-          <button class="primary" :disabled="uploading > 0" @click="imageInput?.click()">{{ uploading ? '上传中…' : '＋ 上传图片' }}</button>
-          <button :disabled="uploading > 0" @click="audioInput?.click()">＋ 上传参考音频</button>
+          <button class="primary" :disabled="uploading > 0" @click="imageInput?.click()">{{ uploading ? t('pages.assets.media.uploading') : t('pages.assets.media.uploadImage') }}</button>
+          <button :disabled="uploading > 0" @click="audioInput?.click()">{{ t('pages.assets.media.uploadAudio') }}</button>
           <input ref="videoInput" class="file-input" type="file" accept="video/mp4,video/webm,video/quicktime" multiple @change="onFilePick" />
-          <button :disabled="uploading > 0" @click="videoInput?.click()">＋ 导入拉片视频</button>
-          <span class="muted">图片用于首尾帧或 Ref2VA；音频仅用于 Ref2VA。</span>
+          <button :disabled="uploading > 0" @click="videoInput?.click()">{{ t('pages.assets.media.uploadVideo') }}</button>
+          <span class="muted">{{ t('pages.assets.media.kindsHint') }}</span>
         </div>
         <div class="drop" @dragover.prevent @drop.prevent="onDrop">
           <div class="drop-icon">⇩</div>
-          <div>拖拽图片、视频或音频到这里</div>
-          <div class="drop-hint">png · jpg · webp · gif · mp3 · wav · m4a · flac · mp4 · mov · webm（最大 100 MB）</div>
+          <div>{{ t('pages.assets.media.dropTitle') }}</div>
+          <div class="drop-hint">{{ t('pages.assets.media.dropHint') }}</div>
         </div>
         <form class="toolbar" @submit.prevent="importLocalPath">
-          <input v-model="importPath" placeholder="或输入图片 / 视频 / 音频的本地绝对路径" class="grow mono" />
-          <button class="primary" :disabled="importing || !importPath">{{ importing ? '导入中…' : '导入路径' }}</button>
+          <input v-model="importPath" :placeholder="t('pages.assets.media.importPlaceholder')" class="grow mono" />
+          <button class="primary" :disabled="importing || !importPath">{{ importing ? t('pages.assets.media.importing') : t('pages.assets.media.importPath') }}</button>
         </form>
         <EmptyState v-if="!visibleMedia.length && !videos.length" icon="▦" :title="t('pages.assets.noVideosTitle')" :desc="t('pages.assets.noVideosDesc')" />
         <!-- Video Showcase — 拉片入口 -->
@@ -526,7 +527,7 @@ onMounted(load);
         </div>
         <label v-if="media.some((m) => m.source === 'frame_extract')" class="muted sys-toggle">
           <input v-model="showSystemFrames" type="checkbox" />
-          显示系统帧资产（Take 首尾帧，供尾帧桥接使用）
+          {{ t('pages.assets.media.showSystemFrames') }}
         </label>
         <div v-if="visibleMedia.length" class="grid list">
           <article v-for="m in visibleMedia" :key="m.id" class="card media-card">
@@ -539,8 +540,8 @@ onMounted(load);
                 <h3 class="card-name media-name" :title="m.label || m.id">{{ m.label || m.id }}</h3>
                 <div class="card-actions">
                   <span class="type-chip">{{ m.kind }}</span>
-                  <button class="icon-btn" title="编辑" @click="editing = { kind: 'media', item: m }">✎</button>
-                  <button class="icon-btn danger" title="删除资产" @click="removeMedia(m)">🗑</button>
+                  <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'media', item: m }">✎</button>
+                  <button class="icon-btn danger" :title="t('pages.assets.media.deleteAsset')" @click="removeMedia(m)">🗑</button>
                 </div>
               </div>
               <p class="card-meta mono file-name" :title="m.fileName">{{ m.fileName }}</p>
@@ -553,9 +554,9 @@ onMounted(load);
 
     <!-- Bindings -->
     <section v-if="tab === 'bindings'" class="panel">
-      <div class="panel-title">全局绑定 <span class="panel-note">对全部 Shot 生效；镜头级绑定在 Shot 详情的参考绑定页管理</span></div>
+      <div class="panel-title">{{ t('pages.assets.bindings.title') }} <span class="panel-note">{{ t('pages.assets.bindings.note') }}</span></div>
       <div class="panel-body">
-        <EmptyState v-if="!bindings.length" icon="➶" title="全局绑定为空" desc="镜头级绑定在 Shot 详情的参考绑定页管理；全局绑定对全部 Shot 生效。" />
+        <EmptyState v-if="!bindings.length" icon="➶" :title="t('pages.assets.bindings.emptyTitle')" :desc="t('pages.assets.bindings.emptyDesc')" />
         <div v-else class="bind-list">
           <article v-for="b in bindings" :key="b.id" class="card binding-card">
             <span class="type-chip">{{ b.type }}</span>
@@ -564,7 +565,7 @@ onMounted(load);
             <div class="roles">
               <span v-for="r in b.roles" :key="r" class="tag active">{{ r }}</span>
             </div>
-            <button class="icon-btn" title="编辑" @click="editing = { kind: 'binding', item: b }">✎</button>
+            <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'binding', item: b }">✎</button>
           </article>
         </div>
       </div>
@@ -574,39 +575,39 @@ onMounted(load);
   <div v-if="editing" class="modal-mask" @click.self="editing = null">
     <div class="modal panel">
       <div class="modal-head">
-        <span>编辑{{ editing.kind === 'entity' ? '实体' : editing.kind === 'state' ? '角色状态' : editing.kind === 'media' ? '媒体' : '绑定' }}</span>
+        <span>{{ t('pages.assets.modal.edit') }}{{ editing.kind === 'entity' ? t('pages.assets.modal.entity') : editing.kind === 'state' ? t('pages.assets.modal.state') : editing.kind === 'media' ? t('pages.assets.modal.media') : t('pages.assets.modal.binding') }}</span>
         <span class="t-close" @click="editing = null">✕</span>
       </div>
       <div class="modal-body">
         <template v-if="editing.kind === 'entity'">
-          <label class="field"><span>名称</span><input v-model="editing.item.name" /></label>
-          <label class="field"><span>类型</span>
+          <label class="field"><span>{{ t('pages.assets.modal.name') }}</span><input v-model="editing.item.name" /></label>
+          <label class="field"><span>{{ t('pages.assets.modal.type') }}</span>
             <select v-model="editing.item.kind">
               <option v-for="k in KINDS" :key="k" :value="k">{{ kindLabel(k) }}</option>
             </select>
           </label>
-          <label class="field"><span>描述</span><textarea v-model="editing.item.description" rows="3"></textarea></label>
-          <label class="field"><span>特征（每行一条，格式「键 = 值」）</span><textarea rows="3" :value="traitsText(editing.item.traits)" @change="editing.item.traits = traitsFromText(($event.target as HTMLTextAreaElement).value)"></textarea></label>
+          <label class="field"><span>{{ t('pages.assets.modal.description') }}</span><textarea v-model="editing.item.description" rows="3"></textarea></label>
+          <label class="field"><span>{{ t('pages.assets.modal.traits') }}</span><textarea rows="3" :value="traitsText(editing.item.traits)" @change="editing.item.traits = traitsFromText(($event.target as HTMLTextAreaElement).value)"></textarea></label>
         </template>
         <template v-else-if="editing.kind === 'state'">
-          <label class="field"><span>状态名称</span><input v-model="editing.item.name" /></label>
-          <label class="field"><span>服装</span><input v-model="editing.item.costume" /></label>
-          <label class="field"><span>发型</span><input v-model="editing.item.hair" /></label>
-          <label class="field"><span>伤势</span><input v-model="editing.item.injury" /></label>
-          <label class="field"><span>手持物</span><input :value="editing.item.heldItems.join(', ')" @change="editing.item.heldItems = ($event.target as HTMLInputElement).value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)" /></label>
+          <label class="field"><span>{{ t('pages.assets.modal.stateName') }}</span><input v-model="editing.item.name" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.costume') }}</span><input v-model="editing.item.costume" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.hair') }}</span><input v-model="editing.item.hair" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.injury') }}</span><input v-model="editing.item.injury" /></label>
+          <label class="field"><span>{{ t('pages.assets.states.heldItems') }}</span><input :value="editing.item.heldItems.join(', ')" @change="editing.item.heldItems = ($event.target as HTMLInputElement).value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)" /></label>
         </template>
         <template v-else-if="editing.kind === 'media'">
-          <label class="field"><span>标签</span><input v-model="editing.item.label" /></label>
-          <label class="field"><span>Tags（逗号分隔）</span><input :value="editing.item.tags.join(', ')" @change="editing.item.tags = ($event.target as HTMLInputElement).value.split(/[,，]/).map((x) => x.trim()).filter(Boolean)" /></label>
-          <p class="muted">文件名：{{ editing.item.fileName }}（重命名文件需重新导入）</p>
+          <label class="field"><span>{{ t('pages.assets.modal.label') }}</span><input v-model="editing.item.label" /></label>
+          <label class="field"><span>{{ t('pages.assets.modal.tags') }}</span><input :value="editing.item.tags.join(', ')" @change="editing.item.tags = ($event.target as HTMLInputElement).value.split(/[,，]/).map((x) => x.trim()).filter(Boolean)" /></label>
+          <p class="muted">{{ t('pages.assets.modal.fileName', { name: editing.item.fileName }) }}</p>
         </template>
         <template v-else>
-          <label class="field"><span>标签</span><input v-model="editing.item.label" /></label>
-          <label class="field"><span>角色（逗号分隔）</span><input :value="editing.item.roles.join(', ')" @change="editing.item.roles = ($event.target as HTMLInputElement).value.split(/[,，]/).map((x) => x.trim()).filter(Boolean) as never" /></label>
+          <label class="field"><span>{{ t('pages.assets.modal.label') }}</span><input v-model="editing.item.label" /></label>
+          <label class="field"><span>{{ t('pages.assets.modal.roles') }}</span><input :value="editing.item.roles.join(', ')" @change="editing.item.roles = ($event.target as HTMLInputElement).value.split(/[,，]/).map((x) => x.trim()).filter(Boolean) as never" /></label>
         </template>
         <div class="modal-foot">
-          <button class="primary" @click="saveEdit">保存</button>
-          <button class="ghost" @click="editing = null">取消</button>
+          <button class="primary" @click="saveEdit">{{ t('common.save') }}</button>
+          <button class="ghost" @click="editing = null">{{ t('common.cancel') }}</button>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import type { MediaAsset, ReferenceAnalysis, ReferenceBreakdown, Shot } from '@h3mise/shared';
 import { fileUrl, get, mediaUrl, post, put } from '../api/client';
 import { useToastStore } from '../stores/toast';
+import { t } from '../stores/locale';
 
 const route = useRoute();
 const toasts = useToastStore();
@@ -61,7 +62,7 @@ async function rangeSave() {
 }
 async function split() {
   const s = selected.value;
-  if (!doc.value || !s || time.value <= s.start + 0.04 || time.value >= s.end - 0.04) throw new Error('请将播放头移到当前片段内部');
+  if (!doc.value || !s || time.value <= s.start + 0.04 || time.value >= s.end - 0.04) throw new Error(t('pages.breakdown.playheadError'));
   const next = [...doc.value.segments];
   next.splice(index.value, 1, { ...s, end: time.value }, { ...s, id: crypto.randomUUID(), start: time.value, label: `${s.label} B` });
   await save(next); select(index.value);
@@ -87,9 +88,9 @@ async function prepare(output: 'clip' | 'first' | 'last' | 'shot', bind = false)
   });
   outputs.value = result.assets;
   if (result.shot) { target.value = result.shot.id; shots.value.push(result.shot); }
-  toasts.push({ kind: 'ok', text: result.shot ? 'Shot 已创建；首尾帧已保存到素材库，可按需选择绑定。' : bind ? '参考已绑定；进入导演台检查生成模式与 Provider 支持。' : '已保存为新素材，原视频保留。' });
+  toasts.push({ kind: 'ok', text: result.shot ? t('pages.breakdown.toastShotCreated') : bind ? t('pages.breakdown.toastClipBound') : t('pages.breakdown.toastSavedAsset') });
 }
-onMounted(() => run('读取视频与检测切镜…', async () => {
+onMounted(() => run(t('pages.breakdown.busyRead'), async () => {
   const [data, list, status] = await Promise.all([post<ReferenceBreakdown>(base), get<Shot[]>('/api/shots'), get<{ configured: boolean }>('/api/ai/status')]);
   doc.value = data; shots.value = list; aiEnabled.value = status.configured; select(0);
   analysis.value = await get<ReferenceAnalysis | null>(`${base}/analysis`);
@@ -98,40 +99,40 @@ onMounted(() => run('读取视频与检测切镜…', async () => {
 
 <template>
   <main class="breakdown">
-    <div class="crumb"><router-link to="/assets">素材库</router-link><span>/</span><span>参考拉片</span></div>
-    <header class="heading"><div><h1>参考拉片</h1><p>选择一个连续镜头，提取导演方法，应用到自己的作品。</p></div><router-link v-if="target" :to="`/shots/${target}?tab=references`" class="button">进入导演台 →</router-link></header>
+    <div class="crumb"><router-link to="/assets">{{ t('pages.breakdown.crumbAssets') }}</router-link><span>/</span><span>{{ t('pages.breakdown.title') }}</span></div>
+    <header class="heading"><div><h1>{{ t('pages.breakdown.title') }}</h1><p>{{ t('pages.breakdown.subtitle') }}</p></div><router-link v-if="target" :to="`/shots/${target}?tab=references`" class="button">{{ t('pages.breakdown.openShot') }}</router-link></header>
     <p v-if="busy" class="notice" role="status">{{ busy }}</p>
     <p v-if="error" class="notice error" role="alert">{{ error }}</p>
     <div v-if="doc" class="workspace" :aria-busy="Boolean(busy)">
       <section class="viewer">
         <div class="screen"><video ref="video" :src="mediaUrl(assetId)" controls playsinline @timeupdate="tick" @loadedmetadata="seek(inPoint)" /></div>
-        <div class="transport"><button :disabled="!doc.fps" title="按平均帧率步进；可变帧率视频为近似定位" @click="seek(time - 1 / (doc.fps ?? 25))">← 前一帧</button><button :disabled="!doc.fps" @click="seek(time + 1 / (doc.fps ?? 25))">后一帧 →</button><span>{{ time.toFixed(2) }} / {{ doc.duration.toFixed(2) }} s</span><button @click="inPoint = Number(time.toFixed(3))">设为 In</button><button @click="outPoint = Number(time.toFixed(3))">设为 Out</button></div>
-        <input class="scrubber" aria-label="播放位置" type="range" min="0" :max="doc.duration" step="0.01" :value="time" @input="seek(Number(($event.target as HTMLInputElement).value))" />
-        <div class="filmstrip"><button v-for="frame in doc.frames" :key="frame.relPath" :title="`${frame.timeSeconds.toFixed(2)} 秒`" @click="seek(frame.timeSeconds)"><img :src="fileUrl(frame.relPath)" alt="视频采样帧" /><span>{{ frame.timeSeconds.toFixed(1) }}s</span></button></div>
+        <div class="transport"><button :disabled="!doc.fps" :title="t('pages.breakdown.frameStepHint')" @click="seek(time - 1 / (doc.fps ?? 25))">{{ t('pages.breakdown.prevFrame') }}</button><button :disabled="!doc.fps" @click="seek(time + 1 / (doc.fps ?? 25))">{{ t('pages.breakdown.nextFrame') }}</button><span>{{ time.toFixed(2) }} / {{ doc.duration.toFixed(2) }} s</span><button @click="inPoint = Number(time.toFixed(3))">{{ t('pages.breakdown.setIn') }}</button><button @click="outPoint = Number(time.toFixed(3))">{{ t('pages.breakdown.setOut') }}</button></div>
+        <input class="scrubber" :aria-label="t('pages.breakdown.scrubberLabel')" type="range" min="0" :max="doc.duration" step="0.01" :value="time" @input="seek(Number(($event.target as HTMLInputElement).value))" />
+        <div class="filmstrip"><button v-for="frame in doc.frames" :key="frame.relPath" :title="t('pages.breakdown.frameTitle', { t: frame.timeSeconds.toFixed(2) })" @click="seek(frame.timeSeconds)"><img :src="fileUrl(frame.relPath)" :alt="t('pages.breakdown.frameAlt')" /><span>{{ frame.timeSeconds.toFixed(1) }}s</span></button></div>
         <div class="segments"><button v-for="(s, i) in doc.segments" :key="s.id" :class="{ selected: i === index }" :disabled="Boolean(busy)" @click="select(i)"><strong>{{ s.label }}</strong><span>{{ s.start.toFixed(2) }} – {{ s.end.toFixed(2) }}s</span></button></div>
-        <div class="editbar"><span>{{ doc.segments.length }} 个片段 · 切镜检测可手动修正</span><button :disabled="Boolean(busy)" @click="run('保存拆分…', split)">在此拆分</button><button :disabled="Boolean(busy) || index === 0" @click="run('保存合并…', () => merge(-1))">合并前段</button><button :disabled="Boolean(busy) || index === doc.segments.length - 1" @click="run('保存合并…', () => merge(1))">合并后段</button></div>
+        <div class="editbar"><span>{{ t('pages.breakdown.segmentsSummary', { n: doc.segments.length }) }}</span><button :disabled="Boolean(busy)" @click="run(t('pages.breakdown.busySaveSplit'), split)">{{ t('pages.breakdown.splitHere') }}</button><button :disabled="Boolean(busy) || index === 0" @click="run(t('pages.breakdown.busySaveMerge'), () => merge(-1))">{{ t('pages.breakdown.mergePrev') }}</button><button :disabled="Boolean(busy) || index === doc.segments.length - 1" @click="run(t('pages.breakdown.busySaveMerge'), () => merge(1))">{{ t('pages.breakdown.mergeNext') }}</button></div>
       </section>
       <aside class="prep">
-        <h2>参考准备</h2><p class="muted">{{ selected?.label }} · 本地处理，无需 AI</p>
-        <div class="ranges"><label>In / 秒<input v-model.number="inPoint" type="number" min="0" :max="doc.duration" step="0.01" /></label><label>Out / 秒<input v-model.number="outPoint" type="number" min="0" :max="doc.duration" step="0.01" /></label></div>
-        <button :disabled="!valid || Boolean(busy)" @click="run('保存范围…', rangeSave)">保存片段范围</button>
-        <dl><div><dt>时长</dt><dd>{{ (outPoint - inPoint).toFixed(2) }} s</dd></div><div><dt>切镜</dt><dd>{{ cutCount }}</dd></div><div><dt>平均帧率</dt><dd>{{ doc.fps?.toFixed(2) ?? '未知' }} FPS</dd></div><div><dt>分辨率</dt><dd>{{ doc.width }} × {{ doc.height }}</dd></div></dl>
-        <div v-if="cutCount" class="notice">片段内仍有切镜，动作参考建议使用连续镜头。<button :disabled="!valid || Boolean(busy)" @click="run('按切镜拆分…', splitCuts)">按切镜拆分</button></div>
-        <label>应用到 Shot<select v-model="target"><option value="">仅保存素材</option><option v-for="s in shots" :key="s.id" :value="s.id">{{ s.id }} · {{ s.title }}</option></select></label>
-        <label>参考用途<select v-model="use"><option value="motion">动作与节奏</option><option value="camera">相机运动</option><option value="composition">构图参考</option><option value="general">通用视频参考</option></select></label>
-        <p class="hint">保留所选导演方法，忽略原演员身份、服装与场景。视频能否用于生成由当前 Provider 和 Preflight 检查决定。</p>
-        <button class="primary" :disabled="!valid || !target || Boolean(busy)" @click="run('裁剪并绑定参考…', () => prepare('clip', true))">裁剪并绑定参考</button>
-        <div class="actions"><button :disabled="!valid || Boolean(busy)" @click="run('提取首帧…', () => prepare('first'))">提取首帧</button><button :disabled="!valid || Boolean(busy)" @click="run('提取尾帧…', () => prepare('last'))">提取尾帧</button><button :disabled="!valid || Boolean(busy)" @click="run('裁剪片段…', () => prepare('clip'))">仅裁剪素材</button><button :disabled="!valid || Boolean(busy)" @click="run('创建 Shot…', () => prepare('shot'))">创建 Shot</button></div>
-        <div v-if="outputs.length" class="outputs"><strong>已生成素材</strong><a v-for="a in outputs" :key="a.id" :href="mediaUrl(a.id)" target="_blank" rel="noopener">{{ a.label }} ↗</a></div>
-        <details :open="aiOpen" @toggle="aiOpen = ($event.target as HTMLDetailsElement).open"><summary>✦ AI 辅助分析 <small>可选</small></summary>
-          <p class="hint">点击后将选定片段的 6 张采样帧发送到已配置的 AI。分析是建议，无法还原精确三维运动。</p>
-          <p v-if="!aiEnabled" class="hint">未配置 AI。上方全部本地功能可正常使用。</p>
-          <button :disabled="!aiEnabled || !valid || Boolean(busy)" @click="run('AI 分析选定镜头…', async () => { analysis = await post(`${base}/analyze`, { start: inPoint, end: outPoint }); })">分析选定镜头</button>
-          <template v-if="analysis"><p v-if="!analysisCurrent" class="notice">范围已改变，请重新分析。</p><dl class="analysis"><div v-for="(label, key) in { action: '动作', camera: '运镜', shotSize: '景别', blocking: '调度', composition: '构图', screenDirection: '屏幕方向' }" :key="key"><dt>{{ label }}</dt><dd>{{ analysis.direction[key] || '未确定' }}</dd></div></dl><p v-for="(a, i) in analysis.direction.assessment" :key="i" class="hint">{{ a }}</p><div class="beatstrip"><span v-for="beat in analysis.direction.beats" :key="beat.id">{{ beat.label }} · {{ Math.round(beat.start * 100) }}–{{ Math.round(beat.end * 100) }}%</span></div><label class="check"><input v-model="cameraSuggestion" type="checkbox" />同时替换相机预演计划：{{ analysis.direction.cameraSuggestion }}</label><button class="primary" :disabled="!analysisCurrent || !target || Boolean(busy)" @click="run('应用导演方法…', async () => { await post(`${base}/apply`, { shotId: target, start: inPoint, end: outPoint, cameraPlan: cameraSuggestion }); toasts.push({ kind: 'ok', text: '已保存新导演计划版本；请重新编译 Prompt 并运行 Preflight。' }); })">提取导演方法并应用</button></template>
+        <h2>{{ t('pages.breakdown.prepTitle') }}</h2><p class="muted">{{ selected?.label }} · {{ t('pages.breakdown.prepLocal') }}</p>
+        <div class="ranges"><label>{{ t('pages.breakdown.labelIn') }}<input v-model.number="inPoint" type="number" min="0" :max="doc.duration" step="0.01" /></label><label>{{ t('pages.breakdown.labelOut') }}<input v-model.number="outPoint" type="number" min="0" :max="doc.duration" step="0.01" /></label></div>
+        <button :disabled="!valid || Boolean(busy)" @click="run(t('pages.breakdown.busySaveRange'), rangeSave)">{{ t('pages.breakdown.saveRange') }}</button>
+        <dl><div><dt>{{ t('pages.breakdown.metaDuration') }}</dt><dd>{{ (outPoint - inPoint).toFixed(2) }} s</dd></div><div><dt>{{ t('pages.breakdown.metaCuts') }}</dt><dd>{{ cutCount }}</dd></div><div><dt>{{ t('pages.breakdown.metaFps') }}</dt><dd>{{ doc.fps?.toFixed(2) ?? t('pages.breakdown.fpsUnknown') }} FPS</dd></div><div><dt>{{ t('pages.breakdown.metaResolution') }}</dt><dd>{{ doc.width }} × {{ doc.height }}</dd></div></dl>
+        <div v-if="cutCount" class="notice">{{ t('pages.breakdown.cutsWarning') }}<button :disabled="!valid || Boolean(busy)" @click="run(t('pages.breakdown.busySplitCuts'), splitCuts)">{{ t('pages.breakdown.splitByCuts') }}</button></div>
+        <label>{{ t('pages.breakdown.applyToShot') }}<select v-model="target"><option value="">{{ t('pages.breakdown.saveAssetOnly') }}</option><option v-for="s in shots" :key="s.id" :value="s.id">{{ s.id }} · {{ s.title }}</option></select></label>
+        <label>{{ t('pages.breakdown.useLabel') }}<select v-model="use"><option value="motion">{{ t('pages.breakdown.useMotion') }}</option><option value="camera">{{ t('pages.breakdown.useCamera') }}</option><option value="composition">{{ t('pages.breakdown.useComposition') }}</option><option value="general">{{ t('pages.breakdown.useGeneral') }}</option></select></label>
+        <p class="hint">{{ t('pages.breakdown.useHint') }}</p>
+        <button class="primary" :disabled="!valid || !target || Boolean(busy)" @click="run(t('pages.breakdown.busyClipBind'), () => prepare('clip', true))">{{ t('pages.breakdown.clipAndBind') }}</button>
+        <div class="actions"><button :disabled="!valid || Boolean(busy)" @click="run(t('pages.breakdown.busyFirst'), () => prepare('first'))">{{ t('pages.breakdown.extractFirst') }}</button><button :disabled="!valid || Boolean(busy)" @click="run(t('pages.breakdown.busyLast'), () => prepare('last'))">{{ t('pages.breakdown.extractLast') }}</button><button :disabled="!valid || Boolean(busy)" @click="run(t('pages.breakdown.busyClip'), () => prepare('clip'))">{{ t('pages.breakdown.clipOnly') }}</button><button :disabled="!valid || Boolean(busy)" @click="run(t('pages.breakdown.busyCreateShot'), () => prepare('shot'))">{{ t('pages.breakdown.createShot') }}</button></div>
+        <div v-if="outputs.length" class="outputs"><strong>{{ t('pages.breakdown.outputs') }}</strong><a v-for="a in outputs" :key="a.id" :href="mediaUrl(a.id)" target="_blank" rel="noopener">{{ a.label }} ↗</a></div>
+        <details :open="aiOpen" @toggle="aiOpen = ($event.target as HTMLDetailsElement).open"><summary>{{ t('pages.breakdown.aiSummary') }} <small>{{ t('pages.breakdown.aiOptional') }}</small></summary>
+          <p class="hint">{{ t('pages.breakdown.aiHint') }}</p>
+          <p v-if="!aiEnabled" class="hint">{{ t('pages.breakdown.aiUnavailable') }}</p>
+          <button :disabled="!aiEnabled || !valid || Boolean(busy)" @click="run(t('pages.breakdown.busyAnalyze'), async () => { analysis = await post(`${base}/analyze`, { start: inPoint, end: outPoint }); })">{{ t('pages.breakdown.analyze') }}</button>
+          <template v-if="analysis"><p v-if="!analysisCurrent" class="notice">{{ t('pages.breakdown.rangeChanged') }}</p><dl class="analysis"><div v-for="(label, key) in { action: t('pages.breakdown.fieldAction'), camera: t('pages.breakdown.fieldCamera'), shotSize: t('pages.breakdown.fieldShotSize'), blocking: t('pages.breakdown.fieldBlocking'), composition: t('pages.breakdown.fieldComposition'), screenDirection: t('pages.breakdown.fieldScreenDirection') }" :key="key"><dt>{{ label }}</dt><dd>{{ analysis.direction[key] || t('pages.breakdown.undetermined') }}</dd></div></dl><p v-for="(a, i) in analysis.direction.assessment" :key="i" class="hint">{{ a }}</p><div class="beatstrip"><span v-for="beat in analysis.direction.beats" :key="beat.id">{{ beat.label }} · {{ Math.round(beat.start * 100) }}–{{ Math.round(beat.end * 100) }}%</span></div><label class="check"><input v-model="cameraSuggestion" type="checkbox" />{{ t('pages.breakdown.replaceCameraPlan') }}{{ analysis.direction.cameraSuggestion }}</label><button class="primary" :disabled="!analysisCurrent || !target || Boolean(busy)" @click="run(t('pages.breakdown.busyApply'), async () => { await post(`${base}/apply`, { shotId: target, start: inPoint, end: outPoint, cameraPlan: cameraSuggestion }); toasts.push({ kind: 'ok', text: t('pages.breakdown.toastApplied') }); })">{{ t('pages.breakdown.extractAndApply') }}</button></template>
         </details>
       </aside>
     </div>
-    <footer>下一步：进入导演台，选择自己的角色与场景，编译提示词并运行 Preflight。</footer>
+    <footer>{{ t('pages.breakdown.footer') }}</footer>
   </main>
 </template>
 

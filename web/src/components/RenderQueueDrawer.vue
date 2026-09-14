@@ -6,6 +6,7 @@ import { useProjectStore } from '../stores/project';
 import { post } from '../api/client';
 import { confirmDialog } from '../stores/confirm';
 import { toast } from '../stores/toast';
+import { t } from '../stores/locale';
 import { H3_MODE_LABEL } from '@h3mise/shared';
 import type { RenderJob } from '@h3mise/shared';
 
@@ -13,11 +14,15 @@ const render = useRenderStore();
 const project = useProjectStore();
 const router = useRouter();
 
-const STATUS_LABEL: Record<string, string> = {
-  LOCAL_QUEUED: '等待生成槽', UPLOADING: '上传中', SUBMITTING: '提交中', QUEUED: '服务排队中', RUNNING: '生成中',
-  SUCCEEDED: '成功', DOWNLOADING: '下载中', LOCAL_READY: '本地就绪',
-  FAILED: '失败', CANCELLED: '已取消', EXPIRED: '过期',
+const STATUS_KEY: Record<string, string> = {
+  LOCAL_QUEUED: 'localQueued', UPLOADING: 'uploading', SUBMITTING: 'submitting', QUEUED: 'queued', RUNNING: 'running',
+  SUCCEEDED: 'succeeded', DOWNLOADING: 'downloading', LOCAL_READY: 'localReady',
+  FAILED: 'failed', CANCELLED: 'cancelled', EXPIRED: 'expired',
 };
+
+function statusLabel(status: string): string {
+  return t(`queue.status.${STATUS_KEY[status] ?? 'unknown'}`, { status });
+}
 
 const STATUS_BADGE: Record<string, string> = {
   LOCAL_QUEUED: 'muted', UPLOADING: 'warn', SUBMITTING: 'warn', QUEUED: 'warn', RUNNING: 'warn', SUCCEEDED: 'ok', DOWNLOADING: 'info', LOCAL_READY: 'ok',
@@ -28,8 +33,8 @@ const ACTIVE = ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 
 const active = computed(() => render.jobs.filter((j) => ACTIVE.includes(j.status)));
 const done = computed(() => render.jobs.filter((j) => !ACTIVE.includes(j.status)).slice(0, 30));
 const queueGroups = computed(() => [
-  { key: 'active', label: '进行中', jobs: active.value },
-  { key: 'done', label: '最近完成', jobs: done.value },
+  { key: 'active', label: t('queue.activeSection'), jobs: active.value },
+  { key: 'done', label: t('queue.recent'), jobs: done.value },
 ].filter((group) => group.jobs.length > 0));
 
 /** PRD §41 成本保护: 全部项目累计渲染消耗。CNY（consumeMoney）与 RH 币
@@ -63,7 +68,7 @@ onUnmounted(() => window.clearInterval(ticker));
 
 function formatSeconds(sec: number): string {
   const m = Math.floor(sec / 60);
-  return m > 0 ? `${m}分${String(sec % 60).padStart(2, '0')}秒` : `${sec}秒`;
+  return m > 0 ? t('queue.durationMinutes', { m, s: String(sec % 60).padStart(2, '0') }) : t('queue.durationSeconds', { s: sec });
 }
 
 function elapsedText(job: RenderJob): string {
@@ -98,9 +103,9 @@ const cancelWarnsRemote = (job: RenderJob) => job.provider !== 'mock' && ['QUEUE
 async function cancel(job: RenderJob) {
   if (cancelWarnsRemote(job)) {
     const ok = await confirmDialog({
-      title: '取消任务',
-      message: 'RunningHub 无法远程取消任务。取消后本地将停止跟踪，但云端任务可能继续运行并产生费用。仍要取消吗？',
-      confirmLabel: '仍要取消',
+      title: t('queue.cancel'),
+      message: t('queue.cancelRemoteMessage'),
+      confirmLabel: t('queue.cancelAnyway'),
       danger: true,
     });
     if (!ok) return;
@@ -130,7 +135,7 @@ function costText(job: RenderJob): string {
   const c = job.cost as { credits?: number; coins?: number };
   const parts: string[] = [];
   if (c.credits) parts.push(`≈¥${Number(c.credits).toFixed(2)} CNY`);
-  if (c.coins) parts.push(`${c.coins} RH币`);
+  if (c.coins) parts.push(t('queue.coins', { n: c.coins }));
   return parts.join(' + ');
 }
 
@@ -150,45 +155,45 @@ onMounted(() => render.refresh());
     <div class="drawer">
       <div class="drawer-head">
         <div class="head-copy">
-          <h2>渲染队列</h2>
-          <span class="muted">{{ active.length }} 个进行中 · {{ done.length }} 个已结束</span>
+          <h2>{{ t('queue.title') }}</h2>
+          <span class="muted">{{ t('queue.summary', { active: active.length, done: done.length }) }}</span>
         </div>
-        <button class="ghost close-btn" aria-label="关闭渲染队列" @click="$emit('close')">✕</button>
+        <button class="ghost close-btn" :aria-label="t('queue.title')" @click="$emit('close')">✕</button>
       </div>
       <div v-if="totals.has" class="cost-bar">
-        <span v-if="totals.cny" class="badge warn">累计消耗 ≈¥{{ totals.cny.toFixed(2) }} CNY</span>
-        <span v-if="totals.coins" class="badge warn">累计消耗 {{ Number(totals.coins.toFixed(2)) }} RH币</span>
-        <span class="muted">（RunningHub usage 回传）</span>
+        <span v-if="totals.cny" class="badge warn">{{ t('queue.cumulativeCny', { amount: totals.cny.toFixed(2) }) }}</span>
+        <span v-if="totals.coins" class="badge warn">{{ t('queue.cumulativeCoins', { amount: Number(totals.coins.toFixed(2)) }) }}</span>
+        <span class="muted">{{ t('queue.usageNote') }}</span>
       </div>
 
       <div class="drawer-body">
-        <div v-if="!render.jobs.length" class="muted">队列为空。</div>
+        <div v-if="!render.jobs.length" class="muted">{{ t('queue.empty') }}</div>
 
         <section v-for="group in queueGroups" :key="group.key" class="queue-section">
           <div class="section-label">{{ group.label }} <span>{{ group.jobs.length }}</span></div>
           <article v-for="job in group.jobs" :key="`${job.projectId}/${job.id}`" class="job panel">
             <div class="job-head">
-              <span :class="['badge', STATUS_BADGE[job.status]]">{{ STATUS_LABEL[job.status] }}</span>
+              <span :class="['badge', STATUS_BADGE[job.status]]">{{ statusLabel(job.status) }}</span>
               <span class="mono muted job-id" :title="job.id">{{ job.id }}</span>
             </div>
             <div class="job-meta muted">
               <button class="shot-link" @click="openShot(job)">{{ job.projectTitle || job.projectId }} · {{ job.shotTitle || job.shotId }}</button>
               <span class="badge no-dot mode-badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
-              <span v-if="job.status !== 'LOCAL_QUEUED'" class="badge no-dot elapsed">{{ active.includes(job) ? '已运行' : '耗时' }} {{ elapsedText(job) }}</span>
+              <span v-if="job.status !== 'LOCAL_QUEUED'" class="badge no-dot elapsed">{{ active.includes(job) ? t('queue.elapsedRunning') : t('queue.elapsedTook') }} {{ elapsedText(job) }}</span>
               <span v-if="costText(job)" class="cost-text">{{ costText(job) }}</span>
             </div>
             <div v-if="job.providerTaskId" class="task-ref">
-              <span>服务任务</span>
+              <span>{{ t('queue.taskRef') }}</span>
               <code :title="job.providerTaskId">{{ job.providerTaskId }}</code>
             </div>
             <div v-if="job.error" class="error mono">{{ job.error.slice(0, 400) }}</div>
             <div v-if="['FAILED', 'CANCELLED'].includes(job.status)" class="job-actions">
-              <button v-if="job.providerTaskId" class="sm" title="重新查询原 RunningHub 任务，不会创建新的付费任务" @click="retry(job)">同步云端结果</button>
-              <button v-else class="sm" @click="retry(job)">重新提交</button>
+              <button v-if="job.providerTaskId" class="sm" :title="t('queue.syncHint')" @click="retry(job)">{{ t('queue.syncCloud') }}</button>
+              <button v-else class="sm" @click="retry(job)">{{ t('queue.resubmit') }}</button>
             </div>
             <div v-if="CANCELLABLE.includes(job.status)" class="job-actions">
-              <button class="sm" @click="theaterKey = `${job.projectId}/${job.id}`">剧院模式</button>
-              <button class="sm danger" @click="cancel(job)">取消任务</button>
+              <button class="sm" @click="theaterKey = `${job.projectId}/${job.id}`">{{ t('queue.theater') }}</button>
+              <button class="sm danger" @click="cancel(job)">{{ t('queue.cancel') }}</button>
             </div>
           </article>
         </section>
@@ -199,8 +204,8 @@ onMounted(() => render.refresh());
     <div v-if="theaterJob" class="theater" @click.self="theaterKey = null">
       <div class="theater-card">
         <div class="theater-head">
-          <span class="theater-status">{{ STATUS_LABEL[theaterJob.status] }}</span>
-          <button class="ghost theater-close" aria-label="关闭" @click="theaterKey = null">✕</button>
+          <span class="theater-status">{{ statusLabel(theaterJob.status) }}</span>
+          <button class="ghost theater-close" :aria-label="t('common.close')" @click="theaterKey = null">✕</button>
         </div>
         <div class="theater-orb-wrap" :class="`is-${theaterJob.status}`">
           <span class="theater-orb" />
@@ -209,31 +214,31 @@ onMounted(() => render.refresh());
         <p class="theater-project">{{ theaterJob.projectTitle || theaterJob.projectId }}</p>
         <div class="theater-elapsed">
           <span class="counter">{{ elapsedText(theaterJob) }}</span>
-          <span class="label">{{ active.includes(theaterJob) ? '已运行' : '总耗时' }}</span>
+          <span class="label">{{ active.includes(theaterJob) ? t('queue.elapsedRunning') : t('queue.elapsedTotal') }}</span>
         </div>
         <div class="theater-stages">
           <span v-for="stage in STAGES" :key="stage" class="stage" :class="stageState(theaterJob, stage)">
             <i />
-            <em>{{ STATUS_LABEL[stage] }}</em>
+            <em>{{ statusLabel(stage) }}</em>
           </span>
         </div>
         <div class="theater-stats">
           <div v-if="costText(theaterJob)" class="stat">
-            <span class="k">累计费用</span>
+            <span class="k">{{ t('queue.costTotal') }}</span>
             <span class="v">{{ costText(theaterJob) }}</span>
           </div>
           <div v-if="theaterJob.providerTaskId" class="stat">
-            <span class="k">服务任务</span>
+            <span class="k">{{ t('queue.taskRef') }}</span>
             <span class="v mono">{{ theaterJob.providerTaskId }}</span>
           </div>
           <div v-if="theaterJob.error" class="stat error-stat">
-            <span class="k">错误</span>
+            <span class="k">{{ t('queue.error') }}</span>
             <span class="v">{{ theaterJob.error.slice(0, 300) }}</span>
           </div>
         </div>
         <div class="theater-actions">
-          <button class="sm" @click="openShot(theaterJob)">查看镜头</button>
-          <button v-if="CANCELLABLE.includes(theaterJob.status)" class="sm danger" @click="cancel(theaterJob)">取消任务</button>
+          <button class="sm" @click="openShot(theaterJob)">{{ t('queue.openShot') }}</button>
+          <button v-if="CANCELLABLE.includes(theaterJob.status)" class="sm danger" @click="cancel(theaterJob)">{{ t('queue.cancel') }}</button>
         </div>
       </div>
     </div>

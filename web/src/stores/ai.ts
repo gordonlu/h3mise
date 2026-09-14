@@ -36,11 +36,18 @@ export const useAiStore = defineStore('ai', () => {
   const pendingCount = computed(() => pendingRequests.value.length);
 
   async function refresh(): Promise<void> {
+    // Fetch independently: a failing pending-list call (e.g. an older server
+    // without the delegation routes) must not hide the inference status that
+    // the brain indicator and Copilot AI section depend on.
     try {
       status.value = await get<AiStatus>('/api/ai/status');
-      pendingRequests.value = await get<AiRequestSummary[]>('/api/ai/requests?status=pending');
     } catch {
       status.value = null;
+    }
+    try {
+      pendingRequests.value = await get<AiRequestSummary[]>('/api/ai/requests?status=pending');
+    } catch {
+      pendingRequests.value = [];
     }
   }
 

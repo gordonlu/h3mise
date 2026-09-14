@@ -433,6 +433,8 @@ export function buildRoutes(services: AppServices): App {
     const shots = shotsMod.listShots(ctx);
     const out = shots.map((s) => {
       const selected = ctx.db.get<{ id: string }>("SELECT id FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1", [s.id]);
+      // Hover preview source: selected take, else the newest non-rejected take.
+      const preview = selected ?? ctx.db.get<{ id: string }>("SELECT id FROM takes WHERE shot_id = ? AND status != 'rejected' ORDER BY created_at DESC LIMIT 1", [s.id]);
       const takeCount = ctx.db.get<{ n: number }>('SELECT COUNT(*) as n FROM takes WHERE shot_id = ?', [s.id])!.n;
       const activeJobs = ctx.db.get<{ n: number }>(
         "SELECT COUNT(*) as n FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING')",
@@ -450,6 +452,7 @@ export function buildRoutes(services: AppServices): App {
         renderReadiness: shotsMod.renderReadiness(ctx, s),
         takeCount,
         selectedTakeId: selected?.id ?? null,
+        previewTakeId: preview?.id ?? null,
         activeJobs,
         missing,
         risk,

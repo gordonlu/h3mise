@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { get, post, del, fileUrl } from '../api/client';
+import { get, post, del, fileUrl, takeVideoUrl } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { useRenderStore } from '../stores/render';
@@ -15,6 +15,7 @@ interface ShotCard extends Shot {
   renderReadiness: ShotRenderReadiness;
   takeCount: number;
   selectedTakeId: string | null;
+  previewTakeId: string | null;
   activeJobs: number;
   missing: string[];
   risk: 'LOW' | 'MEDIUM' | 'HIGH' | null;
@@ -37,6 +38,8 @@ const statusFilter = ref('');
 const batchPlan = ref<RenderBatchPlan | null>(null);
 const batchBusy = ref(false);
 const batchOpen = ref(false);
+/** Hover-to-preview: the card whose Take video is playing inline. */
+const hoveredId = ref<string | null>(null);
 
 const batchProviderId = computed(() => project.current?.config.default_provider ?? 'runninghub');
 const batchMegapixels = computed(() => batchProviderId.value === 'runninghub' ? 0.6 : undefined);
@@ -349,10 +352,27 @@ onMounted(load);
     </div>
 
     <div class="board">
-      <router-link v-for="(s, i) in filtered" :key="s.id" :to="`/shots/${s.id}`" class="card panel">
+      <router-link
+        v-for="(s, i) in filtered"
+        :key="s.id"
+        :to="`/shots/${s.id}`"
+        class="card panel"
+        @mouseenter="hoveredId = s.id"
+        @mouseleave="hoveredId = null"
+      >
         <div class="cover" :class="{ 'no-cover': !s.cover }">
           <img v-if="s.cover" :src="fileUrl(s.cover)" :alt="s.title" />
-          <span v-else class="cover-idx">SHOT<br />{{ String(i + 1).padStart(2, '0') }}</span>
+          <video
+            v-if="hoveredId === s.id && s.previewTakeId"
+            class="cover-preview"
+            :src="takeVideoUrl(s.previewTakeId)"
+            muted
+            loop
+            autoplay
+            playsinline
+          />
+          <span v-if="!s.cover && hoveredId !== s.id" class="cover-idx">SHOT<br />{{ String(i + 1).padStart(2, '0') }}</span>
+          <span v-if="hoveredId === s.id && s.previewTakeId" class="preview-chip">▶ 预览</span>
           <span class="cover-duration">{{ s.durationSeconds }}s</span>
         </div>
         <div class="card-body">
@@ -418,6 +438,12 @@ h1 { font-size: 30px; line-height: 1.15; margin: 0; font-weight: 720; letter-spa
 .card:hover { border-color: var(--line-3); transform: translateY(-2px); box-shadow: var(--shadow-1); text-decoration: none; }
 .cover { position: relative; aspect-ratio: 16 / 9; min-height: 220px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
+.cover-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.preview-chip {
+  position: absolute; top: 10px; left: 10px;
+  background: rgba(20,20,20,0.76); color: #fff; font-size: 11px; font-weight: 600;
+  padding: 3px 9px; border-radius: 5px; pointer-events: none;
+}
 .cover-idx { font-family: var(--mono); letter-spacing: 0.24em; color: var(--text-3); text-align: center; line-height: 1.8; font-size: 12px; }
 .cover-duration {
   position: absolute; bottom: 8px; right: 8px;

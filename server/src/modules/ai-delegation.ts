@@ -79,6 +79,10 @@ interface StoredState {
   extra: Record<string, unknown>;
   pendingJson: boolean;
   vision: VisionStatus | null;
+  /** The step the agent must run next, stored when an apply returns
+   * 'continue'. Round-0 steps are rebuilt from the body instead (they may
+   * carry base64 images and are deterministic). */
+  pendingStep?: InferenceStep | null;
 }
 
 function now(): string {
@@ -107,6 +111,7 @@ function parseState(row: AiRequestRow): StoredState {
     extra: parsed.extra && typeof parsed.extra === 'object' ? parsed.extra : {},
     pendingJson: parsed.pendingJson === true,
     vision: parsed.vision ?? null,
+    pendingStep: parsed.pendingStep ?? null,
   };
 }
 
@@ -202,6 +207,26 @@ export async function prepareRequest(
   return { requestId: id, step, contextHash: hash };
 }
 
+/** The inference a pending request waits on. Round 0 is rebuilt from the
+ * stored body (pure); later rounds return the step stored by the previous
+ * apply. Agents pick up UI-deferred requests with this. */
+export async function pendingStep(ai: AIService, ctx: ProjectContext, id: string): Promise<InferenceStep> {
+  const row = getRow(ctx, id);
+  if (!row) throw new AiDelegationError(`ai request ${id} not found`, 404, 'not_found');
+  if (row.status !== 'pending') {
+    throw new AiDelegationError(`请求不在等待状态（当前：${row.status}）`, 409, 'not_pending');
+  }
+  const state = parseState(row);
+  if (state.raws.length === 0) {
+    const body = parseJson<Record<string, unknown>>(row.body_json, {});
+    return prepareAction(ai, ctx, row.action, body);
+  }
+  if (!state.pendingStep) {
+    throw new AiDelegationError('该请求缺少可重放的推理步骤，请重新发起', 409, 'no_step');
+  }
+  return state.pendingStep;
+}
+
 export type ApplyOutcome =
   | { status: 'applied'; result: unknown; vision: VisionStatus | null }
   | { status: 'continue'; step: InferenceStep };
@@ -276,6 +301,7 @@ export async function applyResult(
     }
 
     state.pendingJson = outcome.step.json;
+    state.pendingStep = outcome.step;
     ctx.db.run('UPDATE ai_requests SET state_json = ?, updated_at = ? WHERE id = ?', [JSON.stringify(state), now(), id]);
     return { status: 'continue', step: outcome.step };
   });

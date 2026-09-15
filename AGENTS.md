@@ -113,7 +113,7 @@ First call `GET /api/session` and keep the returned `h3mise_session` cookie for 
 Presence and UI-deferred work:
 
 - Declare yourself with `POST /api/ai/agent/session` (`{ "model": "<label>" }`); presence lasts 10 minutes and is refreshed by every prepare/apply. `DELETE /api/ai/agent/session` detaches and returns control to the project AI. `GET /api/ai/agent` reports presence and the pending count.
-- While you are attached, AI buttons in the UI no longer call the project model: they create pending `ai_requests`. Treat them exactly like requests you prepared yourself (the step is already stored) and answer with `POST /api/ai/requests/{id}/apply`.
+- While you are attached, AI buttons in the UI no longer call the project model: they create pending `ai_requests`. Fetch the prompt with `GET /api/ai/requests/{id}/step` (same `inference` shape as prepare), run it with your model, and answer with `POST /api/ai/requests/{id}/apply`.
 - Handle them promptly; the user can cancel a pending request from the top-bar inference indicator, which also lets them detach you.
 
 Rules:

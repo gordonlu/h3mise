@@ -1233,6 +1233,18 @@ export function buildRoutes(services: AppServices): App {
     }
   });
 
+  app.get('/api/ai/requests/:id/step', async (c) => {
+    const ctx = p(c);
+    const id = c.req.param('id');
+    try {
+      const step = await delegationMod.pendingStep(services.ai, ctx, id);
+      return c.json({ requestId: id, inference: delegationMod.wireStep(step) });
+    } catch (error) {
+      if (error instanceof delegationMod.AiDelegationError) return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);
+      throw error;
+    }
+  });
+
   app.post('/api/ai/requests/:id/cancel', (c) => {
     const ctx = p(c);
     const id = c.req.param('id');

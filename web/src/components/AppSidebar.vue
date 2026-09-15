@@ -258,7 +258,9 @@ async function pickProject(id: string): Promise<void> {
   box-shadow: var(--shadow-1);
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;
 }
+.side::-webkit-scrollbar { display: none; }
 .side-brand { display: flex; align-items: center; padding: 2px 6px 8px; }
 .side-brand img { height: 34px; width: auto; display: block; }
 

@@ -144,6 +144,7 @@
 
 * { box-sizing: border-box; }
 
+html { background: var(--bg); }
 html, body, #app { height: 100%; min-width: 1024px; }
 
 body {

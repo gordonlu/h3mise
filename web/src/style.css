@@ -79,7 +79,6 @@
   --btn-border: rgba(31, 29, 27, 0.12);
   --btn-shadow: 0 1px 2px rgba(31, 29, 27, 0.06), 0 2px 6px rgba(31, 29, 27, 0.05);
   --btn-shadow-hover: 0 2px 4px rgba(31, 29, 27, 0.07), 0 8px 18px rgba(31, 29, 27, 0.09);
-  --dot: rgba(31, 29, 27, 0.08);
   --sprocket: rgba(31, 29, 27, 0.10);
   --scrollbar: #D8D4D0;
   --scrollbar-hover: #BDB7B2;
@@ -138,7 +137,6 @@
   --btn-border: rgba(255, 255, 255, 0.09);
   --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
   --btn-shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.45), 0 10px 22px rgba(0, 0, 0, 0.45);
-  --dot: rgba(255, 255, 255, 0.06);
   --sprocket: rgba(220, 210, 200, 0.10);
   --scrollbar: #3d4653;
   --scrollbar-hover: #4d5868;
@@ -159,22 +157,6 @@ body {
 
 ::selection { background: var(--accent-soft-2); }
 
-/* animated dot matrix — drifts slowly and breathes, behind all content */
-body { position: relative; }
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.5px);
-  background-size: 26px 26px;
-  animation: dot-drift 38s linear infinite, dot-breathe 14s ease-in-out infinite;
-}
-@keyframes dot-drift { to { background-position: 260px 260px; } }
-@keyframes dot-breathe { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) {
-  body::before { animation: none; opacity: 0.7; }
 }
 
 a { color: var(--accent-text); text-decoration: none; }

@@ -9,6 +9,7 @@ import { useAiStore } from './stores/ai';
 import { t } from './stores/locale';
 import { subscribeEvents, get } from './api/client';
 import AppSidebar from './components/AppSidebar.vue';
+import DotField from './components/DotField.vue';
 import RenderQueueDrawer from './components/RenderQueueDrawer.vue';
 import ToastHost from './components/ToastHost.vue';
 import ConfirmHost from './components/ConfirmHost.vue';
@@ -136,6 +137,8 @@ watch(() => route.path, () => {
 </script>
 
 <template>
+  <DotField />
+
   <div class="shell">
     <AppSidebar
       :guide="projectGuide"

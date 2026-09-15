@@ -1039,7 +1039,7 @@ function localizeRequirement(value: string): string {
 /* single-page workflow layout */
 .workspace-grid { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .side-col { position: sticky; top: 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.flow-col { min-width: 0; display: flex; flex-direction: column; }
+.flow-col { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 .flow-nav {
   position: sticky; top: 0; z-index: 6;
   display: flex; gap: 6px; flex-wrap: wrap;

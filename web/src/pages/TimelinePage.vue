@@ -219,6 +219,8 @@ onUnmounted(() => off?.());
       </div>
     </div>
 
+    <div class="timeline-grid">
+      <div class="timeline-main">
     <!-- visual strip -->
     <div class="panel strip-panel filmstrip">
       <div v-if="clips.length" class="strip-guide">
@@ -359,6 +361,9 @@ onUnmounted(() => off?.());
       </div>
     </div>
 
+      </div>
+
+      <aside class="timeline-rail">
     <div class="panel">
       <div class="panel-title">{{ t('workflow.timeline.addClipSelectedTakesOnly') }}</div>
       <div class="panel-body col">
@@ -376,6 +381,9 @@ onUnmounted(() => off?.());
       </div>
     </div>
 
+      </aside>
+    </div>
+
     <div v-if="playUrl" class="panel export-panel">
       <div class="panel-title">{{ t('workflow.timeline.exportPreview') }} <span v-if="exports[0]" class="muted mono">{{ exports[0].relPath }}</span></div>
       <div class="panel-body">
@@ -386,7 +394,10 @@ onUnmounted(() => off?.());
 </template>
 
 <style scoped>
-.page { padding: 24px 32px; max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.page { padding: 28px 36px 56px; max-width: 1440px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.timeline-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+.timeline-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.timeline-rail { position: sticky; top: 14px; min-width: 0; }
 h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; }
 .strip-panel { overflow-x: auto; }
 .strip-guide { position: sticky; left: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px 0; }

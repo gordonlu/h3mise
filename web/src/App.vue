@@ -162,7 +162,7 @@ watch(() => route.path, () => {
 </template>
 
 <style scoped>
-.shell { position: relative; z-index: 1; display: grid; grid-template-columns: 276px minmax(0, 1fr); height: 100%; }
-.main { min-width: 0; overflow: auto; }
+.shell { position: relative; z-index: 1; display: grid; grid-template-columns: 276px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; overflow: hidden; }
+.main { min-width: 0; min-height: 0; overflow: auto; }
 .main :deep(.page) { width: 100%; max-width: 1440px; margin: 0 auto; padding: 28px 36px 56px; }
 </style>

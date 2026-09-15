@@ -56,6 +56,10 @@ function batchStageLabel(stage: RenderBatchShotStage): string {
 function modeLabel(mode: string): string {
   return ({ t2va: t('workflow.shots.textToVideoT2VA'), i2va: t('workflow.shots.imageToVideoI2VA'), fl2va: t('workflow.shots.firstLastFrameVideoFL2VA'), ref2va: t('workflow.shots.referenceVideoRef2VA') } as Record<string, string>)[mode] ?? H3_MODE_LABEL[mode as keyof typeof H3_MODE_LABEL] ?? mode;
 }
+function functionLabel(fn: string): string {
+  return t(`shot.function.${fn}`);
+}
+
 function statusLabel(status: string): string {
   return ({ draft: t('workflow.shots.needsDirection'), ready: t('workflow.shots.ready2'), rendering: t('workflow.shots.generating'), review: t('workflow.shots.selectTake2'), done: t('workflow.shots.complete2') } as Record<string, string>)[status] ?? status;
 }
@@ -360,7 +364,7 @@ onMounted(load);
             <input v-model="newShot.title" :placeholder="t('workflow.shots.shotTitle')" @keyup.enter="createShot" />
           </label>
           <label class="field mode-field">
-            H3 Mode
+            {{ t('shot.h3Mode') }}
             <select v-model="newShot.h3Mode">
               <option v-for="m in availableModes" :key="m" :value="m">{{ modeLabel(m) }}</option>
             </select>
@@ -444,7 +448,7 @@ onMounted(load);
           <div class="muted purpose">{{ s.purpose || '—' }}</div>
           <div class="shot-meta">
             <span>{{ modeLabel(s.h3Mode ?? 't2va') }}</span>
-            <span>{{ s.shotFunction }}</span>
+            <span>{{ functionLabel(s.shotFunction) }}</span>
             <span v-if="entityName(s.primaryCharacterId)">{{ entityName(s.primaryCharacterId) }}</span>
             <span v-if="entityName(s.sceneId)">{{ entityName(s.sceneId) }}</span>
           </div>

@@ -643,6 +643,10 @@ function modeLabel(mode: string): string {
   return tr(`shot.mode.${mode}`);
 }
 
+function functionLabel(fn: string): string {
+  return tr(`shot.function.${fn}`);
+}
+
 function userStatusLabel(status: string): string {
   return tr(`shot.status.user.${status}`);
 }
@@ -684,7 +688,7 @@ function localizeRequirement(value: string): string {
         <span class="badge accent no-dot">{{ modeLabel(sShot.h3Mode ?? 't2va') }}</span>
         <span class="badge no-dot">{{ sShot.durationSeconds }}s</span>
         <span class="badge no-dot">{{ sShot.aspectRatio }}</span>
-        <span class="badge no-dot">{{ sShot.shotFunction }}</span>
+        <span class="badge no-dot">{{ functionLabel(sShot.shotFunction) }}</span>
         <span v-if="sShot.sequenceId" class="badge info no-dot">{{ sDetail?.sequences.find((x) => x.id === sShot?.sequenceId)?.title }}</span>
         <span v-if="renderReadiness" :class="['badge', renderReadiness.ready ? 'ok' : 'warn']" :title="renderReadiness.reason">
           {{ renderReadiness.ready ? tr('shot.readyForQueue') : localizeRequirement(renderReadiness.reason) }}
@@ -693,7 +697,7 @@ function localizeRequirement(value: string): string {
       <div class="row controls">
         <button class="sm danger ghost" :title="tr('shot.deleteTitle')" @click="deleteThisShot">{{ tr('shot.deleteShot') }}</button>
         <label class="ctl mode-ctl">
-          <span class="ctl-label">H3 Mode</span>
+          <span class="ctl-label">{{ tr('shot.h3Mode') }}</span>
           <select v-model="sShot.h3Mode" @change="s.updateShot({ h3Mode: sShot?.h3Mode ?? 't2va' })">
             <option v-for="m in availableModes" :key="m" :value="m">{{ modeLabel(m) }}</option>
           </select>

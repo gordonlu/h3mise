@@ -389,8 +389,8 @@ onMounted(load);
       <div class="library-content">
 
     <!-- Entities -->
-    <section v-if="tab === 'entities'" class="panel">
-      <div class="panel-title">{{ t('workflow.assets.entities') }}</div>
+    <section v-if="tab === 'entities'" class="library-section">
+      <div class="library-head">{{ t('workflow.assets.entities') }}</div>
       <div class="panel-body">
         <form class="toolbar" @submit.prevent="createEntity">
           <select v-model="newEntity.kind">
@@ -432,8 +432,8 @@ onMounted(load);
     </section>
 
     <!-- CharacterStates -->
-    <section v-if="tab === 'states'" class="panel">
-      <div class="panel-title">{{ t('pages.assets.states.title') }} <span class="panel-note">{{ t('pages.assets.states.note') }}</span></div>
+    <section v-if="tab === 'states'" class="library-section">
+      <div class="library-head">{{ t('pages.assets.states.title') }} <span class="panel-note">{{ t('pages.assets.states.note') }}</span></div>
       <div class="panel-body">
         <form class="toolbar wrap-toolbar" @submit.prevent="createState">
           <label class="field">
@@ -476,8 +476,8 @@ onMounted(load);
     </section>
 
     <!-- Media -->
-    <section v-if="tab === 'media'" class="panel">
-      <div class="panel-title">{{ t('pages.assets.media.title') }} <span class="panel-note">{{ t('pages.assets.media.note') }}</span></div>
+    <section v-if="tab === 'media'" class="library-section">
+      <div class="library-head">{{ t('pages.assets.media.title') }} <span class="panel-note">{{ t('pages.assets.media.note') }}</span></div>
       <div class="panel-body">
         <div v-if="shotUploadContext" class="context-note">
           <strong>{{ t('pages.assets.media.uploadContext') }}</strong>
@@ -557,8 +557,8 @@ onMounted(load);
     </section>
 
     <!-- Bindings -->
-    <section v-if="tab === 'bindings'" class="panel">
-      <div class="panel-title">{{ t('pages.assets.bindings.title') }} <span class="panel-note">{{ t('pages.assets.bindings.note') }}</span></div>
+    <section v-if="tab === 'bindings'" class="library-section">
+      <div class="library-head">{{ t('pages.assets.bindings.title') }} <span class="panel-note">{{ t('pages.assets.bindings.note') }}</span></div>
       <div class="panel-body">
         <EmptyState v-if="!bindings.length" icon="➶" :title="t('pages.assets.bindings.emptyTitle')" :desc="t('pages.assets.bindings.emptyDesc')" />
         <div v-else class="bind-list">
@@ -654,8 +654,10 @@ onMounted(load);
 .wrap-toolbar { flex-wrap: wrap; }
 .kind-filter { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; flex-wrap: wrap; }
 .filter-label { font-size: 12px; color: var(--text-3); margin-right: 4px; }
-.panel-title { font-size: 13px; }
-.panel-note { font-weight: 400; font-size: 11.5px; color: var(--text-3); margin-left: 8px; }
+.library-section { display: grid; gap: 14px; min-width: 0; }
+.library-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 15px; font-weight: 650; color: var(--text); }
+.library-head .panel-note { font-weight: 400; font-size: 11.5px; color: var(--text-3); }
+.library-section .panel-body { padding: 0; }
 
 /* ---------- cards ---------- */
 .list { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }

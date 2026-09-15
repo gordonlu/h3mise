@@ -78,7 +78,7 @@ function frame(now: number): void {
   if (!ctx || !sprite || !spriteAccent) return;
   const t = (now - started) / 1000;
   const dim = theme.theme === 'dark';
-  const base = dim ? 0.42 : 0.34;
+  const base = dim ? 0.28 : 0.16;
   ctx.clearRect(0, 0, width, height);
   for (const d of dots) {
     // travelling diagonal wave
@@ -91,7 +91,7 @@ function frame(now: number): void {
     d.hit += (target - d.hit) * 0.12;
     const s = DOT_RADIUS * 2 * (0.45 + wave * 0.6 + d.hit * 0.7);
     // neutral dot fades out as the accent takes over, so nothing reads dirty
-    const neutral = base * (0.22 + wave * 1.05) * (1 - d.hit * 0.9);
+    const neutral = base * (0.25 + wave * 0.85) * (1 - d.hit * 0.9);
     if (neutral > 0.004) {
       ctx.globalAlpha = Math.min(1, neutral);
       ctx.drawImage(sprite, d.x - s / 2, d.y - s / 2, s, s);

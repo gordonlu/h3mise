@@ -172,6 +172,11 @@ scripts/  # 运维与验证脚本
 
 技术栈：Vue 3 + TypeScript + Vite · Node.js + Hono · SQLite (`node:sqlite`) · FFmpeg · SSE
 
+## H3 提示词与技能资源
+
+- [h3skills.com](https://www.h3skills.com/)：MiniMax H3 提示词与导演技法集合。
+- [awesome-minimax-h3-skills](https://github.com/gordonlu/awesome-minimax-h3-skills)：对应的开源技能与提示词仓库，可直接作为外部 AI 或 Agent 的参考。
+
 ## License
 
 H3Mise 使用 [MIT License](LICENSE) 开源。Copyright © 2026 Gordon.

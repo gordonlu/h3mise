@@ -153,7 +153,8 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
     "shot.render.noReferencesSubmitted": "无参考素材",
     "shot.render.currentProvider": "当前 Provider",
 
-    "shot.external.title": "External AI",
+    "shot.external.title": "外部 AI",
+    "shot.external.skillsLink": "浏览 H3 Skills 提示词与技法集合 ↗",
     "shot.external.description": "将 Context Package 复制给任意外部 AI，获取导演计划后粘贴回来。",
     "shot.external.chooseTask": "选择任务",
     "shot.external.planShot": "Plan Shot",
@@ -812,6 +813,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
     "shot.render.currentProvider": "Current provider",
 
     "shot.external.title": "External AI",
+    "shot.external.skillsLink": "Browse the H3 Skills prompt & technique collection ↗",
     "shot.external.description": "Copy the Context Package to any external AI, get a director plan back, and paste it here.",
     "shot.external.chooseTask": "Choose task",
     "shot.external.planShot": "Plan Shot",
@@ -1470,6 +1472,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
     "shot.render.currentProvider": "現在の Provider",
 
     "shot.external.title": "外部 AI",
+    "shot.external.skillsLink": "H3 Skills のプロンプト・技法集を見る ↗",
     "shot.external.description": "Context Package を任意の外部 AI にコピーし、演出計画を取得してここに貼り付けます。",
     "shot.external.chooseTask": "タスクを選択",
     "shot.external.planShot": "Plan Shot",

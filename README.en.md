@@ -170,6 +170,11 @@ scripts/  # Ops and verification scripts
 
 Stack: Vue 3 + TypeScript + Vite · Node.js + Hono · SQLite (`node:sqlite`) · FFmpeg · SSE
 
+## H3 prompt & skill resources
+
+- [h3skills.com](https://www.h3skills.com/): a MiniMax H3 prompt and directing-technique collection.
+- [awesome-minimax-h3-skills](https://github.com/gordonlu/awesome-minimax-h3-skills): the matching open-source skills and prompts repository, usable as reference material for an external AI or agent.
+
 ## License
 
 H3Mise is open source under the [MIT License](LICENSE). Copyright © 2026 Gordon.

@@ -170,6 +170,11 @@ scripts/  # 運用・検証スクリプト
 
 技術スタック: Vue 3 + TypeScript + Vite · Node.js + Hono · SQLite (`node:sqlite`) · FFmpeg · SSE
 
+## H3 プロンプト・スキルリソース
+
+- [h3skills.com](https://www.h3skills.com/)：MiniMax H3 のプロンプトと演出技法のコレクション。
+- [awesome-minimax-h3-skills](https://github.com/gordonlu/awesome-minimax-h3-skills)：対応するオープンソースのスキル・プロンプト集。外部 AI やエージェントの参考資料として使えます。
+
 ## License
 
 H3Mise は [MIT License](LICENSE) でオープンソース公開されています。Copyright © 2026 Gordon.

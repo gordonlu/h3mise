@@ -960,6 +960,7 @@ function localizeRequirement(value: string): string {
             <header class="external-intro">
               <strong>{{ tr('shot.external.title') }}</strong>
               <span>{{ tr('shot.external.description') }}</span>
+              <a class="external-skills" href="https://www.h3skills.com/" target="_blank" rel="noopener">{{ tr('shot.external.skillsLink') }}</a>
             </header>
 
             <section class="external-step">
@@ -1088,6 +1089,7 @@ function localizeRequirement(value: string): string {
 .external-flow { display: grid; gap: 10px; }
 .external-intro { display: flex; flex-direction: column; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .external-intro strong { font-size: 15px; }
+.external-skills { font-size: 12px; font-weight: 600; }
 .external-intro span { color: var(--text-2); font-size: 11.5px; line-height: 1.5; }
 .external-step { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
 .external-step:last-child { border-bottom: 0; }

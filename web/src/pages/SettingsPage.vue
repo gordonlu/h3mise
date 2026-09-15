@@ -493,6 +493,11 @@ function scrollToSetting(id: string): void {
             <span class="muted">{{ t('pages.settings.aiConcurrencyHelp') }}</span>
           </label>
           <p class="muted">{{ t('pages.settings.externalAiHelp') }}</p>
+          <div class="resource-links">
+            <span class="muted">{{ t('pages.settings.skillsResources') }}</span>
+            <a href="https://www.h3skills.com/" target="_blank" rel="noopener">{{ t('pages.settings.skillsSite') }} ↗</a>
+            <a href="https://github.com/gordonlu/awesome-minimax-h3-skills" target="_blank" rel="noopener">{{ t('pages.settings.skillsRepo') }} ↗</a>
+          </div>
         </div>
       </div>
 

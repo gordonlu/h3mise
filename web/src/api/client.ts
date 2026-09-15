@@ -13,10 +13,24 @@ export class ApiError extends Error {
 
 let sessionReady: Promise<void> | null = null;
 
+const REQUEST_TIMEOUT_MS = 20_000;
+
+/** Local requests can stall (a dropped keep-alive connection, a busy
+ * server). Without a bound the UI would wait forever, so GET/HEAD get a
+ * timeout plus one retry; mutating requests fail fast and never retry. */
+async function fetchWithGuard(path: string, init: RequestInit, retry: boolean): Promise<Response> {
+  try {
+    return await fetch(path, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  } catch (error) {
+    if (!retry) throw error;
+    return fetch(path, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  }
+}
+
 async function ensureSession(): Promise<void> {
   if (!sessionReady) {
     sessionReady = (async () => {
-      const res = await fetch('/api/session', { credentials: 'same-origin' });
+      const res = await fetchWithGuard('/api/session', { credentials: 'same-origin' }, true);
       if (!res.ok) throw new ApiError('session bootstrap failed', res.status);
     })().catch((e) => {
       sessionReady = null;
@@ -29,12 +43,12 @@ async function ensureSession(): Promise<void> {
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   await ensureSession();
   const isFormData = body instanceof FormData;
-  const res = await fetch(path, {
+  const res = await fetchWithGuard(path, {
     method,
     credentials: 'same-origin',
     headers: body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : undefined,
     body: body !== undefined ? (isFormData ? body : JSON.stringify(body)) : undefined,
-  });
+  }, method === 'GET' || method === 'HEAD');
   const text = await res.text();
   let data: unknown = null;
   try {

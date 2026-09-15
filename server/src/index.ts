@@ -85,6 +85,12 @@ async function main(): Promise<void> {
   );
 
   const server = serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' });
+  // Keep idle connections alive longer than Node's 5s default: browsers may
+  // reuse a socket the server just closed, which loses that request and
+  // leaves the UI waiting (a race we reproduced against the built SPA).
+  const http = server as unknown as { keepAliveTimeout: number; headersTimeout: number };
+  http.keepAliveTimeout = 65_000;
+  http.headersTimeout = 70_000;
   console.log(`\n  H3Mise API server running at http://127.0.0.1:${config.port}`);
   if (!config.webDist) {
     console.log('  (API only — UI runs on Vite: http://localhost:5188)');

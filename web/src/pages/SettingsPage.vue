@@ -557,6 +557,9 @@ function scrollToSetting(id: string): void {
 }
 .settings-nav button:hover { background: var(--bg-subtle); color: var(--text); }
 .panel { scroll-margin-top: 14px; }
+.resource-links { display: grid; gap: 5px; padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-subtle); }
+.resource-links .muted { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.resource-links a { font-size: 12.5px; }
 h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 22px; }
 .grid { grid-template-columns: 1fr 1fr; }
 .file-button, .button-link {

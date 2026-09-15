@@ -165,11 +165,10 @@ body::before {
   content: '';
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   pointer-events: none;
   background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.5px);
   background-size: 26px 26px;
-  mask-image: radial-gradient(1500px 900px at 70% -8%, #000 0%, rgba(0, 0, 0, 0.5) 48%, transparent 80%);
   animation: dot-drift 38s linear infinite, dot-breathe 14s ease-in-out infinite;
 }
 @keyframes dot-drift { to { background-position: 260px 260px; } }

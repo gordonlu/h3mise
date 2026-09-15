@@ -9,6 +9,7 @@ This file tells coding assistants how to help a user run and configure H3Mise sa
 - The built-in Mock Provider is the safe fallback for learning and offline testing.
 - ComfyUI Local is a separate render provider. Its workflow mapping and safe Agent procedure are documented in `ComfyUI.md`; read that file before importing or editing a ComfyUI profile.
 - A `Shot` is the plan; a `Take` is a generated result. Never overwrite a Take to represent a new render.
+- Continuity beats retries: for a themed story, create the character/entity assets (each with a main image) before designing Shots, and prefer first-frame-to-video (`i2va`) or frame-bridge chaining (`previous_take` dependency, then resolve it) over pure text generation. A bound first frame keeps identity, wardrobe, and set stable across shots; `t2va` lets every shot re-cast the subject.
 - Storyboard is an optional visual planning layer before Shot design. Creating or editing its text panels is free; generating a sheet or regenerating one panel through RunningHub is a separate paid image task.
 - Story skeletons and director-style presets are planning aids. Applying a skeleton restructures canonical StoryBeats in place by default; it must not append a duplicate set or silently render.
 

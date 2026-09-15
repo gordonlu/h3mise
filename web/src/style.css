@@ -234,6 +234,7 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px rgba(255, 108, 55, 0.14);
 }
 textarea { resize: vertical; line-height: 1.6; }
+select option { background: var(--bg-2); color: var(--text); }
 label.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-size: 12px; font-weight: 500; color: var(--text-2); line-height: 1.4; }
 label.field > *:not(:first-child) { width: 100%; font-weight: 400; }
 

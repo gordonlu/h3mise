@@ -50,6 +50,6 @@ defineExpose({ currentTime, seek, play, pause });
 </template>
 
 <style scoped>
-.player { width: 100%; background: #000; border-radius: var(--radius-sm); overflow: hidden; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); }
-video { display: block; width: 100%; background: #000; }
+.player { width: 100%; background: linear-gradient(180deg, #16191e, #0c0e11); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-1); }
+video { display: block; width: 100%; background: transparent; }
 </style>

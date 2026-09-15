@@ -1057,8 +1057,15 @@ function localizeRequirement(value: string): string {
 .flow-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-3); }
 .flow-chip.done i { background: var(--ok); }
 .flow-chip.dirty i { background: var(--warn); }
-.flow-section { display: grid; gap: 12px; padding: 18px 0; border-top: 1px solid var(--line); scroll-margin-top: 64px; min-width: 0; }
-.flow-col .flow-section:first-of-type { border-top: 0; }
+.flow-section {
+  display: grid; gap: 12px; min-width: 0;
+  padding: 18px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  scroll-margin-top: 64px;
+}
 .flow-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .flow-head strong { font-size: 14.5px; }
 .flow-step { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); font-size: 11.5px; font-weight: 800; flex: none; }

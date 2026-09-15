@@ -304,15 +304,15 @@ async function pickProject(id: string): Promise<void> {
 
 .side-empty { padding: 10px 8px; font-size: 12px; }
 
-.side-section { margin-top: 10px; display: flex; flex-direction: column; gap: 1px; }
+.side-section { margin-top: 8px; display: flex; flex-direction: column; gap: 0; }
 .side-section-label {
-  padding: 6px 10px 3px; color: var(--text-3);
+  padding: 5px 10px 2px; color: var(--text-3);
   font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
 }
 .side-item {
   position: relative;
   display: flex; align-items: center; gap: 11px;
-  padding: 9px 12px; border-radius: 11px;
+  padding: 7px 12px; border-radius: 10px;
   color: var(--text-2); font-size: 13.5px; text-decoration: none;
 }
 .side-item:hover { background: var(--bg-subtle); color: var(--text); text-decoration: none; }

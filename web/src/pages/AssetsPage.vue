@@ -644,10 +644,12 @@ onMounted(load);
 .library-content { min-width: 0; }
 
 /* ---------- toolbar ---------- */
-.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
-.toolbar input, .toolbar select { flex: none; }
-.toolbar input.grow { flex: 1; }
-.toolbar .traits-input { flex: 1.2; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.toolbar select { flex: 0 0 128px; }
+.toolbar input:not(.grow) { flex: 1 1 170px; }
+.toolbar input.grow { flex: 1 1 100%; }
+.toolbar .traits-input { flex: 1 1 100%; }
+.toolbar .primary { flex: none; margin-left: auto; }
 .toolbar .field { flex: 1 1 160px; }
 .toolbar .field select, .toolbar .field input { width: 100%; }
 .toolbar .primary { flex: none; }

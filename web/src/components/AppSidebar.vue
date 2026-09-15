@@ -244,15 +244,18 @@ async function pickProject(id: string): Promise<void> {
 
 <style scoped>
 .side {
-  width: 100%;
-  height: 100%;
+  width: calc(100% - 10px);
+  height: calc(100% - 20px);
   min-width: 0;
+  margin: 10px 0 10px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 12px 12px 14px;
-  border-right: 1px solid var(--line);
+  padding: 14px 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
   background: var(--bg-2);
+  box-shadow: var(--shadow-1);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -263,7 +266,7 @@ async function pickProject(id: string): Promise<void> {
 .side-project-btn {
   width: 100%;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px;
   background: var(--bg-subtle); color: var(--text); font-weight: 600; font-size: 13px;
   box-shadow: none;
 }
@@ -288,8 +291,9 @@ async function pickProject(id: string): Promise<void> {
 
 .side-oneclick {
   display: flex; align-items: center; justify-content: center; gap: 7px;
-  padding: 9px 12px; margin-bottom: 6px; border-radius: 9px;
-  background: var(--accent); color: #fff; font-weight: 650; font-size: 13px;
+  padding: 11px 12px; margin-bottom: 6px; border-radius: 12px;
+  background: var(--accent); color: #fff; font-weight: 650; font-size: 13.5px;
+  box-shadow: 0 6px 18px rgba(255, 108, 55, 0.25);
   text-decoration: none;
 }
 .side-oneclick svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
@@ -300,14 +304,14 @@ async function pickProject(id: string): Promise<void> {
 
 .side-section { margin-top: 10px; display: flex; flex-direction: column; gap: 1px; }
 .side-section-label {
-  padding: 4px 8px; color: var(--text-3);
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
+  padding: 6px 10px 3px; color: var(--text-3);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
 }
 .side-item {
   position: relative;
-  display: flex; align-items: center; gap: 9px;
-  padding: 7px 9px; border-radius: 8px;
-  color: var(--text-2); font-size: 13px; text-decoration: none;
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 12px; border-radius: 11px;
+  color: var(--text-2); font-size: 13.5px; text-decoration: none;
 }
 .side-item:hover { background: var(--bg-subtle); color: var(--text); text-decoration: none; }
 .side-item.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
@@ -315,7 +319,7 @@ async function pickProject(id: string): Promise<void> {
   content: ''; position: absolute; left: -12px; top: 6px; bottom: 6px; width: 3px;
   border-radius: 0 3px 3px 0; background: var(--accent);
 }
-.side-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
+.side-icon { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
 .side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-count { flex: none; font-size: 10.5px; color: var(--text-3); background: var(--bg-subtle); border-radius: 999px; padding: 1px 7px; }
 .side-item.active .side-count { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-text); }
@@ -342,8 +346,8 @@ async function pickProject(id: string): Promise<void> {
 
 .side-utils { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .side-util {
-  display: flex; align-items: center; gap: 9px; width: 100%;
-  padding: 7px 9px; border: none; border-radius: 8px; background: none; box-shadow: none;
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: none; border-radius: 10px; background: none; box-shadow: none;
   color: var(--text-2); font-size: 12.5px; text-align: left;
 }
 .side-util:hover { background: var(--bg-subtle); color: var(--text); }

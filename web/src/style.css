@@ -3,8 +3,9 @@
    never a filler. Themes: [data-theme="light"] (default) / [data-theme="dark"]. */
 
 :root {
-  --radius: 8px;
-  --radius-sm: 6px;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
   --mono: 'SFMono-Regular', ui-monospace, 'Cascadia Code', Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --serif: var(--sans);
@@ -68,11 +69,11 @@
   --violet-soft: #F1EEFA;
 
   --focus-ring: 0 0 0 3px rgba(255, 108, 55, 0.18);
-  --shadow-1: 0 1px 2px rgba(31, 29, 27, 0.05);
-  --shadow-2: 0 10px 30px rgba(31, 29, 27, 0.10);
+  --shadow-1: 0 1px 2px rgba(31, 29, 27, 0.03), 0 10px 30px rgba(31, 29, 27, 0.06);
+  --shadow-2: 0 18px 50px rgba(31, 29, 27, 0.12);
   --shadow-modal: 0 16px 48px rgba(31, 29, 27, 0.14);
   --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  --glow: none;
+  --glow: radial-gradient(1200px 520px at 78% -12%, rgba(255, 108, 55, 0.055), transparent 62%);
   --sprocket: rgba(31, 29, 27, 0.10);
   --scrollbar: #D8D4D0;
   --scrollbar-hover: #BDB7B2;
@@ -121,8 +122,8 @@
   --violet-soft: rgba(155, 140, 232, 0.16);
 
   --focus-ring: 0 0 0 3px rgba(255, 108, 55, 0.28);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.25);
-  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.42);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.32);
+  --shadow-2: 0 18px 50px rgba(0, 0, 0, 0.5);
   --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.5);
   --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --glow: radial-gradient(1100px 480px at 72% -12%, rgba(255, 108, 55, 0.06), transparent 62%);
@@ -157,7 +158,8 @@ button {
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  padding: 8px 14px;
+  padding: 10px 16px;
+  font-weight: 550;
   cursor: pointer;
   box-shadow: var(--inset-hi);
   transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s, transform 0.1s;
@@ -171,10 +173,10 @@ button.primary {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
+  font-weight: 650;
+  box-shadow: 0 6px 18px rgba(255, 108, 55, 0.25);
 }
-button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: #fff; box-shadow: 0 8px 22px rgba(255, 108, 55, 0.32); }
 button.primary:active { background: var(--accent-3); border-color: var(--accent-3); }
 button.primary:disabled { background: var(--accent-disabled); border-color: var(--accent-disabled); color: rgba(255, 255, 255, 0.9); }
 
@@ -182,7 +184,7 @@ button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 4
 button.danger:hover { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 button.ghost { background: transparent; border-color: transparent; color: var(--text-2); box-shadow: none; }
 button.ghost:hover { background: var(--bg-subtle); border-color: transparent; color: var(--text); }
-button.sm { padding: 5px 11px; font-size: 12px; }
+button.sm { padding: 6px 12px; font-size: 12px; border-radius: 9px; }
 
 :is(button, a, input, select, textarea, [tabindex]):focus-visible {
   outline: none;
@@ -195,19 +197,20 @@ input, select, textarea {
   font-family: inherit;
   font-size: 13px;
   color: var(--text);
-  background: var(--bg-2);
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  padding: 9px 12px;
+  background: var(--bg-subtle);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
   outline: none;
-  box-shadow: inset 0 1px 2px rgba(31, 29, 27, 0.02);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  box-shadow: none;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 input::placeholder, textarea::placeholder { color: var(--text-3); }
-input:hover, select:hover, textarea:hover { border-color: var(--line-3); }
+input:hover, select:hover, textarea:hover { background: var(--bg-muted); }
 input:focus, select:focus, textarea:focus {
+  background: var(--bg-2);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(255, 108, 55, 0.12);
+  box-shadow: 0 0 0 3px rgba(255, 108, 55, 0.14);
 }
 textarea { resize: vertical; line-height: 1.6; }
 label.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-size: 12px; font-weight: 500; color: var(--text-2); line-height: 1.4; }
@@ -232,7 +235,7 @@ label.field > *:not(:first-child) { width: 100%; font-weight: 400; }
   gap: 8px;
 }
 .panel-title::after { display: none; }
-.panel-body { padding: 16px; }
+.panel-body { padding: 18px; }
 
 /* ----------------------------------------------------------------- badges */
 .badge {

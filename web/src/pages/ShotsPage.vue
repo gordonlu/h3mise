@@ -478,8 +478,9 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; }
 .toolbar-search { position: relative; flex: 1; min-width: 260px; }
 .toolbar-search svg { position: absolute; left: 12px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); fill: none; stroke: var(--text-3); stroke-width: 1.6; pointer-events: none; }
-.search { width: 100%; padding-left: 38px; background: var(--bg-subtle); border-color: transparent; }
-.search:focus { background: var(--bg-2); }
+.search { width: 100%; padding-left: 38px; border-radius: var(--radius-pill); }
+.toolbar > button { border-radius: var(--radius-pill); }
+.status-filter { border-radius: var(--radius-pill); padding-left: 14px; }
 .status-filter { width: 132px; }
 .toolbar-result { padding: 0 6px; color: var(--text-3); font-size: 12px; white-space: nowrap; }
 .batch-trigger { margin-left: auto; }
@@ -501,8 +502,9 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .empty-ai .primary, .empty-ai .sm { justify-self: start; }
 .shot-delete { margin-left: 2px; padding: 3px 6px; font-size: 12px; letter-spacing: 1px; flex: none; }
 .card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; box-shadow: none; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
-.card:hover { border-color: var(--line-3); transform: translateY(-2px); box-shadow: var(--shadow-1); text-decoration: none; }
-.cover { position: relative; aspect-ratio: 16 / 9; min-height: 220px; background: var(--inset); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.card:hover { border-color: var(--line-3); transform: translateY(-3px); box-shadow: var(--shadow-2); text-decoration: none; }
+.cover { position: relative; aspect-ratio: 16 / 9; min-height: 220px; background: linear-gradient(140deg, var(--bg-muted) 0%, var(--bg-subtle) 55%, var(--accent-soft) 140%); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.cover.no-cover .cover-idx { color: var(--text-3); }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
 .cover-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .preview-chip {
@@ -520,12 +522,11 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .card-body { padding: 15px 16px 14px; display: flex; flex-direction: column; gap: 9px; }
 .card-heading { display: flex; align-items: center; gap: 10px; }
 .shot-number { font-family: var(--mono); color: var(--text); font-size: 16px; font-weight: 700; padding-right: 10px; border-right: 1px solid var(--line-2); }
-.card-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 680; font-size: 15px; }
-.purpose { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; min-height: 20px; color: var(--text-2); }
-.shot-meta { display: flex; flex-wrap: wrap; gap: 0; color: var(--text-2); font-size: 11.5px; }
-.shot-meta span { padding: 0 9px; border-right: 1px solid var(--line-2); }
-.shot-meta span:first-child { padding-left: 0; }
-.shot-meta span:last-child { border-right: 0; }
+.card-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+.purpose { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 38px; color: var(--text-2); line-height: 1.55; }
+.shot-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--text-3); font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; }
+.shot-meta span { padding: 0; border: 0; position: relative; }
+.shot-meta span + span::before { content: '·'; position: absolute; left: -7px; color: var(--line-3); }
 .wrap { flex-wrap: wrap; }
 .missing-row { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: 6px; color: var(--bad); background: var(--bad-soft); font-size: 11.5px; }
 .missing-row span { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

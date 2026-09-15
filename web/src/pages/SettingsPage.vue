@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
@@ -15,6 +15,18 @@ const profileJson = ref('');
 const editingProfile = ref(false);
 const apiKeyInfo = ref<{ source: 'settings' | 'env' | 'none'; configured: boolean } | null>(null);
 const apiKeyInput = ref('');
+const agentCopied = ref(false);
+const agentInstruction = computed(() => t('pages.settings.agentInstruction'));
+
+async function copyAgentInstruction(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(agentInstruction.value);
+    agentCopied.value = true;
+    setTimeout(() => (agentCopied.value = false), 2200);
+  } catch {
+    /* clipboard unavailable — the textarea is selectable as a fallback */
+  }
+}
 const savingKey = ref(false);
 const comfyProfile = ref<ComfyUiWorkflowProfile | null>(null);
 const comfyProfileJson = ref('');
@@ -479,6 +491,18 @@ function scrollToSetting(id: string): void {
       <div id="set-ai" class="panel">
         <div class="panel-title">{{ t('pages.settings.aiOptional') }}</div>
         <div class="panel-body col">
+          <div class="agent-card">
+            <div class="agent-card-head">
+              <strong>{{ t('pages.settings.agentCardTitle') }}</strong>
+              <span class="badge accent no-dot">{{ t('pages.settings.agentCardTag') }}</span>
+            </div>
+            <p class="muted">{{ t('pages.settings.agentCardDesc') }}</p>
+            <textarea class="agent-instruction" rows="4" readonly :value="agentInstruction"></textarea>
+            <div class="row">
+              <button class="primary sm" @click="copyAgentInstruction">{{ agentCopied ? t('pages.settings.agentCardCopied') : t('pages.settings.agentCardCopy') }}</button>
+              <a class="sm button-link" href="https://github.com/gordonlu/h3mise/blob/master/AGENTS.md" target="_blank" rel="noopener">{{ t('pages.settings.agentsGuide') }} ↗</a>
+            </div>
+          </div>
           <span class="badge" :class="health?.aiConfigured ? 'ok' : 'muted'">
             {{ t('pages.settings.builtInAi', { status: health?.aiConfigured ? t('pages.settings.configured') : t('pages.settings.notConfigured') }) }}
           </span>
@@ -497,6 +521,7 @@ function scrollToSetting(id: string): void {
             <span class="muted">{{ t('pages.settings.skillsResources') }}</span>
             <a href="https://www.h3skills.com/" target="_blank" rel="noopener">{{ t('pages.settings.skillsSite') }} ↗</a>
             <a href="https://github.com/gordonlu/awesome-minimax-h3-skills" target="_blank" rel="noopener">{{ t('pages.settings.skillsRepo') }} ↗</a>
+            <a href="https://github.com/gordonlu/h3mise/blob/master/AGENTS.md" target="_blank" rel="noopener">{{ t('pages.settings.agentsGuide') }} ↗</a>
           </div>
         </div>
       </div>
@@ -557,6 +582,10 @@ function scrollToSetting(id: string): void {
 }
 .settings-nav button:hover { background: var(--bg-subtle); color: var(--text); }
 .panel { scroll-margin-top: 14px; }
+.agent-card { display: grid; gap: 9px; padding: 13px 14px; border: 1px solid var(--accent-line); border-radius: var(--radius-sm); background: var(--accent-soft); }
+.agent-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.agent-card-head strong { font-size: 13.5px; }
+.agent-instruction { width: 100%; font-size: 12px; line-height: 1.6; background: var(--bg-2); }
 .resource-links { display: grid; gap: 5px; padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-subtle); }
 .resource-links .muted { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .resource-links a { font-size: 12.5px; }

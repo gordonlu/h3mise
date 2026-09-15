@@ -32,6 +32,19 @@ Story → Narrative skeleton / StoryBeat → (optional Storyboard) → Shot desi
 
 ![Good Boy director desk](docs/screenshots/director-desk.png)
 
+## Let your AI agent drive it (zero config)
+
+Don't want to configure a provider or an AI? Send the block below to your coding agent (Claude Code / Cursor / opencode…). It follows the protocol in [AGENTS.md](AGENTS.md) to create the project, write the story, design shots, and generate the video — and asks you before any paid render:
+
+```text
+Read AGENTS.md: https://github.com/gordonlu/h3mise/blob/master/AGENTS.md
+Then follow its protocol to produce a video with H3Mise on this theme: ____.
+Do the inference yourself (prepare/apply delegation); before submitting a paid render, show the cost and parameters and wait for my confirmation.
+```
+
+The agent drives H3Mise through its local API the whole way; you can take over the same project in the UI at any time.
+
+
 ## What it is for
 
 - Producing one AI film with multiple generation tools while keeping project state in one place.

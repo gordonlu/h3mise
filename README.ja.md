@@ -32,6 +32,18 @@ H3Mise が管理するのはまさにその層です:
 
 ![Good Boy 監督デスク](docs/screenshots/director-desk.png)
 
+## AI エージェントに任せる（設定不要）
+
+Provider や AI の設定は不要です。下のブロックをコーディングエージェント（Claude Code / Cursor / opencode など）に送るだけ。[AGENTS.md](AGENTS.md) のプロトコルに従って、プロジェクト作成・ストーリー・ショット設計・動画生成まで進め、有料レンダーの前には必ず確認を取ります：
+
+```text
+AGENTS.md を読んでください：https://github.com/gordonlu/h3mise/blob/master/AGENTS.md
+そのプロトコルに従い、H3Mise で次のテーマの動画を制作してください：____。
+推論はあなたが担当（prepare/apply 委任プロトコル）。有料レンダー送信前に費用とパラメータを示し、承認を待つこと。
+```
+
+エージェントはローカル API 経由で H3Mise を操作します。同じプロジェクトを UI でいつでも引き継げます。
+
 ## こんな用途に
 
 - 複数の生成ツールでひとつの AI 映像を作り、プロジェクト状態をひとつに管理したい。

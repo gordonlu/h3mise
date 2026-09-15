@@ -32,6 +32,19 @@ H3Mise 管理的正是这一层：
 
 ![Good Boy 导演台](docs/screenshots/director-desk.png)
 
+## 让 AI 助手代劳（零配置）
+
+不想配置 Provider 和 AI？把下面这段直接发给你常用的编码助手（Claude Code / Cursor / opencode 等），它会按 [AGENTS.md](AGENTS.md) 里的协议创建项目、写故事、设计镜头、生成视频，并在任何付费渲染前先向你确认：
+
+```text
+请阅读 AGENTS.md：https://github.com/gordonlu/h3mise/blob/master/AGENTS.md
+然后按它的协议帮我用 H3Mise 生成一支视频，主题是：____。
+推理由你完成（prepare/apply 委托协议）；提交付费渲染前先展示费用与参数并等我确认。
+```
+
+助手全程通过本地 API 驱动 H3Mise；你也可以随时在界面里接手同一个项目。
+
+
 ## 它适合什么
 
 - 使用多个生成工具制作同一部 AI 视频，需要统一管理项目状态。

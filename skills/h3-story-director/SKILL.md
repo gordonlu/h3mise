@@ -19,13 +19,21 @@ The Skill should improve what gets filmed, not merely make the writing sound mor
 
 Load only what the active task needs:
 
-- Story creation / repair / diagnosis: read `references/story-writing-core.md`.
-- Story or continuity verification: add `references/story-state-engine.md`.
-- Converting approved beats into H3-executable production choices: read `references/h3-adaptation-rules.md`.
-- Building or revising a multi-shot sequence: add `references/sequence-directing.md`.
-- Before final handoff, or when a result feels flat / repetitive / overbuilt: run `references/story-shot-critic.md`.
+- Story creation / repair / diagnosis: read [`story-writing-core.md`](references/story-writing-core.md).
+- Story or continuity verification: add [`story-state-engine.md`](references/story-state-engine.md).
+- Converting approved beats into H3-executable production choices: read [`h3-adaptation-rules.md`](references/h3-adaptation-rules.md).
+- Building or revising a multi-shot sequence: add [`sequence-directing.md`](references/sequence-directing.md).
+- Before final handoff, or when a result feels flat / repetitive / overbuilt: run [`story-shot-critic.md`](references/story-shot-critic.md).
 
 Do not load every reference by default when one is sufficient.
+
+### Reference Index
+
+- [Story Writing Core](references/story-writing-core.md)
+- [Story State Engine](references/story-state-engine.md)
+- [MiniMax H3 Adaptation Rules](references/h3-adaptation-rules.md)
+- [Story & Shot Critic](references/story-shot-critic.md)
+- [Sequence Directing](references/sequence-directing.md)
 
 ## Scope
 
@@ -105,7 +113,7 @@ Do not replace locked assets, states, selected Takes, or approved story facts me
 
 ### STEP 1: Story Pass
 
-Read `references/story-writing-core.md`.
+Read [`story-writing-core.md`](references/story-writing-core.md).
 
 Build or repair:
 
@@ -126,7 +134,7 @@ Do not plan Shots yet.
 
 ### STEP 2: Story State Check
 
-For substantial story work, read `references/story-state-engine.md`.
+For substantial story work, read [`story-state-engine.md`](references/story-state-engine.md).
 
 Verify:
 
@@ -142,7 +150,7 @@ Do not confuse planned VisualContinuity with actual generated continuity from a 
 
 ### STEP 3: Story Critic
 
-Run the story portion of `references/story-shot-critic.md`.
+Run the story portion of [`story-shot-critic.md`](references/story-shot-critic.md).
 
 Find the earliest consequential problem:
 
@@ -158,7 +166,7 @@ Repair upstream before proceeding.
 
 ### STEP 4: H3 Adaptation
 
-Read `references/h3-adaptation-rules.md`.
+Read [`h3-adaptation-rules.md`](references/h3-adaptation-rules.md).
 
 For each meaningful visible event choose:
 
@@ -182,7 +190,7 @@ A HIGH-risk shot may still be correct when the action itself carries the drama.
 
 ### STEP 5: Shot Sequence
 
-Read `references/sequence-directing.md`.
+Read [`sequence-directing.md`](references/sequence-directing.md).
 
 Create the minimum useful sequence.
 
@@ -207,7 +215,7 @@ Do not fully direct the camera or performance here.
 
 ### STEP 6: Shot Critic
 
-Run the shot portion of `references/story-shot-critic.md`.
+Run the shot portion of [`story-shot-critic.md`](references/story-shot-critic.md).
 
 Mandatory deletion test:
 

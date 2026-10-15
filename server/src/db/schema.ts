@@ -573,6 +573,44 @@ CREATE INDEX IF NOT EXISTS idx_ai_requests_status ON ai_requests(status, created
 `,
 });
 
+PROJECT_MIGRATIONS.push({
+  version: 22,
+  name: 'canvas-layouts',
+  sql: `
+CREATE TABLE IF NOT EXISTS canvas_node_layouts (
+  story_id    TEXT NOT NULL REFERENCES story(id) ON DELETE CASCADE,
+  node_id     TEXT NOT NULL,
+  x           REAL NOT NULL,
+  y           REAL NOT NULL,
+  width       REAL,
+  height      REAL,
+  collapsed   INTEGER NOT NULL DEFAULT 0,
+  pinned      INTEGER NOT NULL DEFAULT 0,
+  user_placed INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (story_id, node_id)
+);
+
+CREATE TABLE IF NOT EXISTS canvas_views (
+  story_id   TEXT PRIMARY KEY REFERENCES story(id) ON DELETE CASCADE,
+  view_json  TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS canvas_annotations (
+  id         TEXT PRIMARY KEY,
+  story_id   TEXT NOT NULL REFERENCES story(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK (kind IN ('note', 'frame')),
+  x REAL NOT NULL, y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL,
+  text       TEXT NOT NULL DEFAULT '',
+  color      TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_annotations_story ON canvas_annotations(story_id);
+`,
+});
+
 export const REGISTRY_MIGRATIONS: Migration[] = [
   {
     version: 1,

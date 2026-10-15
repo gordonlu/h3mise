@@ -1,7 +1,7 @@
 // Shot module — PRD §8-10. Shot is the first-class citizen; state machine with
 // limited rollback. Status advances only through allowed transitions.
 
-import type { H3Mode, Shot, ShotRenderReadiness, ShotStatus } from '@h3mise/shared';
+import type { H3Mode, ReferenceBinding, Shot, ShotRenderReadiness, ShotStatus } from '@h3mise/shared';
 import { SHOT_STATUS_ORDER } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
@@ -312,12 +312,34 @@ function previousShot(p: ProjectContext, shot: Shot): Shot | null {
   return row ? shotFromRow(row) : null;
 }
 
+function previousShotFromList(ordered: Shot[], shot: Shot): Shot | null {
+  let best: Shot | null = null;
+  for (const candidate of ordered) {
+    if (candidate.episodeId !== shot.episodeId) continue;
+    if (candidate.sequenceId !== shot.sequenceId) continue;
+    if (candidate.order >= shot.order) continue;
+    if (!best || candidate.order > best.order) best = candidate;
+  }
+  return best;
+}
+
+/** Precomputed inputs so callers (e.g. the Studio Canvas projection) can avoid
+ * an N+1 query per shot. Omitted fields fall back to per-shot queries. */
+export interface RenderReadinessContext {
+  bindingsByShot?: Map<string, ReferenceBinding[]>;
+  shotsById?: Map<string, Shot>;
+  orderedShots?: Shot[];
+  selectedTakeByShot?: Map<string, { id: string; lastFramePath: string | null }>;
+  mediaIdByFileName?: Map<string, string>;
+}
+
 /** Resolve whether a shot can enter the render scheduler. This deliberately
  * uses input provenance rather than shotFunction: a reaction may be either
  * independent or hard-bridged to an upstream selected Take. */
-export function renderReadiness(p: ProjectContext, shotOrId: Shot | string): ShotRenderReadiness {
-  const shot = typeof shotOrId === 'string' ? getShot(p, shotOrId) : shotOrId;
-  const hasFirstFrame = listBindings(p, shot.id).some((binding) => binding.roles.includes('first_frame'));
+export function renderReadiness(p: ProjectContext, shotOrId: Shot | string, context: RenderReadinessContext = {}): ShotRenderReadiness {
+  const shot = typeof shotOrId === 'string' ? context.shotsById?.get(shotOrId) ?? getShot(p, shotOrId) : shotOrId;
+  const bindings = context.bindingsByShot ? context.bindingsByShot.get(shot.id) ?? [] : listBindings(p, shot.id);
+  const hasFirstFrame = bindings.some((binding) => binding.roles.includes('first_frame'));
   let effective: ShotRenderReadiness['effectiveMode'];
   if (shot.renderDependencyMode === 'auto') {
     effective = shot.h3Mode === 'i2va' || shot.h3Mode === 'fl2va' ? 'manual_frame' : 'independent';
@@ -332,29 +354,40 @@ export function renderReadiness(p: ProjectContext, shotOrId: Shot | string): Sho
     return { configuredMode: shot.renderDependencyMode, effectiveMode: effective, dependsOnShotId: null, ready: hasFirstFrame, canResolveFrame: false, reason: hasFirstFrame ? '首帧已准备，可并行生成' : '等待上传或绑定首帧' };
   }
 
-  const upstream = shot.dependsOnShotId ? getShot(p, shot.dependsOnShotId) : previousShot(p, shot);
+  const upstream = shot.dependsOnShotId
+    ? context.shotsById?.get(shot.dependsOnShotId) ?? getShot(p, shot.dependsOnShotId)
+    : context.orderedShots
+      ? previousShotFromList(context.orderedShots, shot)
+      : previousShot(p, shot);
   if (!upstream) {
     return { configuredMode: shot.renderDependencyMode, effectiveMode: effective, dependsOnShotId: null, ready: false, canResolveFrame: false, reason: '没有可用的上游镜头' };
   }
-  const selected = p.db.get<{ id: string; last_frame_path: string | null }>(
-    "SELECT id, last_frame_path FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1",
-    [upstream.id],
-  );
-  const frame = selected?.last_frame_path
-    ? p.db.get<{ id: string }>('SELECT id FROM media_assets WHERE file_name = ?', [selected.last_frame_path])
+  const selectedRecord = context.selectedTakeByShot?.has(upstream.id)
+    ? context.selectedTakeByShot.get(upstream.id)!
+    : (() => {
+        const row = p.db.get<{ id: string; last_frame_path: string | null }>(
+          "SELECT id, last_frame_path FROM takes WHERE shot_id = ? AND status = 'selected' ORDER BY created_at DESC LIMIT 1",
+          [upstream.id],
+        );
+        return row ? { id: row.id, lastFramePath: row.last_frame_path } : null;
+      })();
+  const frameId = selectedRecord?.lastFramePath
+    ? context.mediaIdByFileName
+      ? context.mediaIdByFileName.get(selectedRecord.lastFramePath) ?? null
+      : p.db.get<{ id: string }>('SELECT id FROM media_assets WHERE file_name = ?', [selectedRecord.lastFramePath])?.id ?? null
     : null;
-  const matchingFrame = frame
-    ? listBindings(p, shot.id).some((binding) => binding.assetId === frame.id && binding.roles.includes('first_frame'))
+  const matchingFrame = frameId
+    ? bindings.some((binding) => binding.assetId === frameId && binding.roles.includes('first_frame'))
     : false;
   return {
     configuredMode: shot.renderDependencyMode,
     effectiveMode: effective,
     dependsOnShotId: upstream.id,
     ready: matchingFrame,
-    canResolveFrame: Boolean(frame),
+    canResolveFrame: Boolean(frameId),
     reason: matchingFrame
       ? `已继承 ${upstream.title || upstream.id} 的 Selected 尾帧`
-      : frame
+      : frameId
         ? `${upstream.title || upstream.id} 已选片，可绑定尾帧后生成`
         : `等待 ${upstream.title || upstream.id} 生成并选片`,
   };

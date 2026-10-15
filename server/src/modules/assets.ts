@@ -504,19 +504,29 @@ export interface AssetRequirement {
   detail: string;
 }
 
-export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequirement[] {
+/** Precomputed inputs so callers (e.g. the Studio Canvas projection) can avoid
+ * an N+1 query per shot. Omitted fields fall back to per-shot queries. */
+export interface ShotAssetContext {
+  bindings?: ReferenceBinding[];
+  entities?: Entity[];
+  states?: CharacterState[];
+}
+
+export function shotAssetRequirements(p: ProjectContext, shot: Shot, context: ShotAssetContext = {}): AssetRequirement[] {
   const out: AssetRequirement[] = [];
-  const bindings = listBindings(p, shot.id);
+  const bindings = context.bindings ?? listBindings(p, shot.id);
   const roles = new Set(bindings.flatMap((b) => b.roles));
-  const entities = listEntities(p);
-  const states = listCharacterStates(p);
+  const entities = context.entities ?? listEntities(p);
+  const states = context.states ?? listCharacterStates(p);
+  const findEntity = (id: string | null): Entity | null =>
+    id ? entities.find((entity) => entity.id === id) ?? null : null;
   const hasFirst = roles.has('first_frame');
   const hasLast = roles.has('last_frame');
   const hasRefImage = bindings.some((binding) => binding.type === 'image');
   const hasRefAudio = bindings.some((binding) => binding.type === 'audio' && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'));
 
   if (shot.primaryCharacterId) {
-    const character = tryGetEntity(p, shot.primaryCharacterId);
+    const character = findEntity(shot.primaryCharacterId);
     if (!character) {
       out.push({ level: 'optional', kind: 'character', label: 'Character', detail: 'referenced character no longer exists' });
     } else {
@@ -535,7 +545,7 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot): AssetRequi
   }
 
   if (shot.sceneId) {
-    const scene = tryGetEntity(p, shot.sceneId);
+    const scene = findEntity(shot.sceneId);
     out.push(
       scene
         ? { level: 'ok', kind: 'scene', label: 'Scene', detail: scene.name }

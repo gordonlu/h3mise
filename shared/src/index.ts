@@ -22,3 +22,6 @@ export * from './story-skeleton.js';
 export * from './director-style.js';
 export * from './ai.js';
 export * from './breakdown.js';
+export * from './canvas.js';
+export * from './canvas-rules.js';
+export * from './canvas-layout.js';

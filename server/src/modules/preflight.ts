@@ -8,12 +8,53 @@
 // submission via renderIntentHash.
 
 import { createHash } from 'node:crypto';
-import { cameraPlanWarnings, normalizeCameraPlan, SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightReport, type PreflightSection } from '@h3mise/shared';
+import { cameraPlanWarnings, normalizeCameraPlan, SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightReport, type PreflightSection, type ProviderCapabilities } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import { getShot, advanceShotStatus, advanceTo, renderReadiness } from './shots.js';
 import type { Shot } from '@h3mise/shared';
+
+export interface ReferenceCountViolation {
+  key: string;
+  message: string;
+}
+
+/** Single source of truth for provider reference-slot count limits. Shared by
+ * the render preflight and the Studio Canvas connection dispatcher so the two
+ * never drift apart. */
+export function referenceCountViolations(
+  mode: H3Mode,
+  references: Array<{ kind: 'image' | 'video' | 'audio' }>,
+  caps: ProviderCapabilities | null,
+): ReferenceCountViolation[] {
+  const out: ReferenceCountViolation[] = [];
+  const nImage = references.filter((reference) => reference.kind === 'image').length;
+  const nVideo = references.filter((reference) => reference.kind === 'video').length;
+  const nAudio = references.filter((reference) => reference.kind === 'audio').length;
+  if (mode === 'vref2va') {
+    if (nVideo !== 1) out.push({ key: 'ref.video.required', message: '视频参考模式必须绑定一个参考视频' });
+    if (caps && nImage > Math.min(3, caps.maxImageRefs ?? 3)) {
+      out.push({ key: 'ref.image.limit', message: '参考图片超过视频工作流可用槽位（最多三张，图片可不提供）' });
+    }
+  }
+  if (mode === 'ref2va') {
+    if (nImage === 0) out.push({ key: 'ref.image.required', message: 'Ref2VA 至少需要一张参考图' });
+    if (nVideo > 0 && caps && caps.maxVideoRefs === 0) {
+      out.push({ key: 'ref.video.unsupported', message: '当前 Ref2VA 工作流不支持视频参考素材' });
+    }
+    if (caps?.maxImageRefs != null && nImage > caps.maxImageRefs) {
+      out.push({ key: 'ref.count.image', message: `${nImage} 张参考图超过生成服务上限 ${caps.maxImageRefs} 张` });
+    }
+    if (caps?.maxVideoRefs != null && nVideo > caps.maxVideoRefs) {
+      out.push({ key: 'ref.count.video', message: `${nVideo} 个视频参考超过生成服务上限 ${caps.maxVideoRefs} 个` });
+    }
+    if (caps?.maxAudioRefs != null && nAudio > caps.maxAudioRefs) {
+      out.push({ key: 'ref.count.audio', message: `${nAudio} 个参考音频超过生成服务上限 ${caps.maxAudioRefs} 个` });
+    }
+  }
+  return out;
+}
 
 /** Previous shot by editorial order (same sequence when the shot has one). */
 function previousShot(p: ProjectContext, shot: Shot): Shot | null {
@@ -288,49 +329,26 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     });
   }
   if (caps) {
-    if (intent.mode === 'vref2va') {
-      if (bindings.filter(r => r.kind === 'video').length !== 1) sections[3]!.checks.push({ key: 'ref.video.required', severity: 'error', message: '视频参考模式必须绑定一个参考视频' });
-      if (bindings.filter(r => r.kind === 'image').length > Math.min(3, caps.maxImageRefs ?? 3)) sections[3]!.checks.push({ key: 'ref.image.limit', severity: 'error', message: '参考图片超过视频工作流可用槽位（最多三张，图片可不提供）' });
+    for (const violation of referenceCountViolations(intent.mode, bindings, caps)) {
+      sections[3]!.checks.push({ key: violation.key, severity: 'error', message: violation.message });
     }
-    if (intent.mode === 'ref2va') {
-      const nImage = bindings.filter((r) => r.kind === 'image').length;
-      const nVideo = bindings.filter((r) => r.kind === 'video').length;
-      const nAudio = bindings.filter((r) => r.kind === 'audio').length;
-      if (nImage === 0) {
-        sections[3]!.checks.push({ key: 'ref.image.required', severity: 'error', message: 'Ref2VA 至少需要一张参考图' });
-      }
-      // A video reference (e.g. a Camera-motion reference clip) is meaningful
-      // only when the workflow exposes video reference slots. Do not claim
-      // that it is unsupported when the capability is merely unknown or
-      // positive — the count check below enforces real caps.
-      if (nVideo > 0 && caps && caps.maxVideoRefs === 0) {
-        sections[3]!.checks.push({ key: 'ref.video.unsupported', severity: 'error', message: '当前 Ref2VA 工作流不支持视频参考素材' });
-      }
-      if (caps.maxImageRefs != null && nImage > caps.maxImageRefs) {
-        sections[3]!.checks.push({ key: 'ref.count.image', severity: 'error', message: `${nImage} 张参考图超过生成服务上限 ${caps.maxImageRefs} 张` });
-      }
-      if (caps.maxVideoRefs != null && nVideo > caps.maxVideoRefs) {
-        sections[3]!.checks.push({ key: 'ref.count.video', severity: 'error', message: `${nVideo} 个视频参考超过生成服务上限 ${caps.maxVideoRefs} 个` });
-      }
-      if (caps.maxAudioRefs != null && nAudio > caps.maxAudioRefs) {
-        sections[3]!.checks.push({ key: 'ref.count.audio', severity: 'error', message: `${nAudio} 个参考音频超过生成服务上限 ${caps.maxAudioRefs} 个` });
-      }
-      for (const binding of bindings.filter((item) => item.kind === 'audio')) {
-        try {
-          const audio = getMedia(p, binding.assetId);
-          if (audio.durationSeconds == null || audio.durationSeconds < 2 || audio.durationSeconds > 15) {
-            sections[3]!.checks.push({ key: `ref.audio.duration.${binding.bindingId}`, severity: 'error', message: `参考音频 ${audio.label || audio.id} 必须可读取且时长在 2–15 秒之间` });
-          }
-        } catch {
-          // The general asset-integrity pass below reports the missing asset.
+  }
+  if (caps && intent.mode === 'ref2va') {
+    for (const binding of bindings.filter((item) => item.kind === 'audio')) {
+      try {
+        const audio = getMedia(p, binding.assetId);
+        if (audio.durationSeconds == null || audio.durationSeconds < 2 || audio.durationSeconds > 15) {
+          sections[3]!.checks.push({ key: `ref.audio.duration.${binding.bindingId}`, severity: 'error', message: `参考音频 ${audio.label || audio.id} 必须可读取且时长在 2–15 秒之间` });
         }
+      } catch {
+        // The general asset-integrity pass below reports the missing asset.
       }
-      const totalAudioSeconds = bindings
-        .filter((item) => item.kind === 'audio')
-        .reduce((sum, item) => sum + (getMedia(p, item.assetId).durationSeconds ?? 0), 0);
-      if (totalAudioSeconds > 15) {
-        sections[3]!.checks.push({ key: 'ref.audio.duration.total', severity: 'error', message: `参考音频总时长 ${totalAudioSeconds.toFixed(1)} 秒，超过 15 秒上限` });
-      }
+    }
+    const totalAudioSeconds = bindings
+      .filter((item) => item.kind === 'audio')
+      .reduce((sum, item) => sum + (getMedia(p, item.assetId).durationSeconds ?? 0), 0);
+    if (totalAudioSeconds > 15) {
+      sections[3]!.checks.push({ key: 'ref.audio.duration.total', severity: 'error', message: `参考音频总时长 ${totalAudioSeconds.toFixed(1)} 秒，超过 15 秒上限` });
     }
   }
   for (const b of bindingRows) {

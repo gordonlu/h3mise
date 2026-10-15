@@ -7,7 +7,7 @@ import { createReadStream, statSync } from 'node:fs';
 import { stream, streamSSE } from 'hono/streaming';
 import { Readable } from 'node:stream';
 import { emptyDirectorPlan } from '@h3mise/shared';
-import type { AppEvent, H3Mode } from '@h3mise/shared';
+import type { AppEvent, H3Mode, CanvasConnectRequest } from '@h3mise/shared';
 import type { ProjectStore } from '../project-store.js';
 import type { EventBus } from '../events.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -40,6 +40,7 @@ import * as productionMod from '../modules/production.js';
 import * as videoAnalysisMod from '../modules/video-analysis.js';
 import * as breakdownMod from '../modules/reference-breakdown.js';
 import * as filmCheckMod from '../modules/film-check.js';
+import * as canvasMod from '../modules/canvas.js';
 import type { AutoProduceService } from '../modules/auto-produce.js';
 import { serveMedia } from './media-route.js';
 import { createKeyedMutex } from '../modules/mutex.js';
@@ -1277,6 +1278,129 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/jobs/:id', (c) => {
     const job = services.jobs.get(c.req.param('id')!);
     return job ? c.json(job) : c.json({ error: 'job not found' }, 404);
+  });
+
+  // --- Studio Canvas (projection + layout) --------------------------------
+
+  const canvasErrorStatus: Record<canvasMod.CanvasErrorCode, number> = {
+    invalid_connection: 422,
+    needs_replace: 409,
+    needs_mode_switch: 409,
+    cycle: 409,
+    reference_limit: 422,
+    locked: 409,
+    not_found: 404,
+    stale_episode: 409,
+    payload_too_large: 413,
+  };
+
+  const canvasFail = (c: Context, error: unknown): Response => {
+    if (error instanceof canvasMod.CanvasError) {
+      return c.json({ error: error.message, code: error.code, ...(error.detail ?? {}) }, canvasErrorStatus[error.code] as 400);
+    }
+    throw error;
+  };
+
+  app.get('/api/canvas/graph', (c) => {
+    const ctx = p(c);
+    try {
+      canvasMod.resolveActiveStory(ctx, c.req.query('storyId'));
+      const graph = canvasMod.buildCanvasGraph(ctx);
+      const etag = `"${graph.revision}"`;
+      const ifNoneMatch = c.req.header('if-none-match');
+      if (ifNoneMatch && ifNoneMatch.replace(/^W\//, '').replace(/"/g, '') === graph.revision) {
+        return c.body(null, 304, { ETag: etag });
+      }
+      c.header('ETag', etag);
+      return c.json(graph);
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.get('/api/canvas/layout', (c) => {
+    const ctx = p(c);
+    try {
+      return c.json(canvasMod.getLayout(ctx, c.req.query('storyId')));
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.put('/api/canvas/layout', async (c) => {
+    const ctx = p(c);
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as canvasMod.SaveLayoutInput;
+      return c.json(canvasMod.saveLayout(ctx, body));
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.post('/api/canvas/layout/reset', async (c) => {
+    const ctx = p(c);
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as { storyId?: string };
+      return c.json(canvasMod.resetLayout(ctx, body.storyId));
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.post('/api/canvas/annotations', async (c) => {
+    const ctx = p(c);
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as canvasMod.CreateAnnotationInput;
+      return c.json(canvasMod.createAnnotation(ctx, body), 201);
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.patch('/api/canvas/annotations/:id', async (c) => {
+    const ctx = p(c);
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as canvasMod.UpdateAnnotationInput;
+      return c.json(canvasMod.updateAnnotation(ctx, c.req.param('id')!, body));
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.delete('/api/canvas/annotations/:id', (c) => {
+    const ctx = p(c);
+    try {
+      canvasMod.deleteAnnotation(ctx, c.req.param('id')!);
+      return c.json({ ok: true });
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.post('/api/canvas/connections', async (c) => {
+    const ctx = p(c);
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as CanvasConnectRequest;
+      const result = await canvasMod.connectCanvas(ctx, body, {
+        capabilities: (id, mode) => services.providers.capabilities(id, mode),
+        providerId: ctx.config.default_provider,
+      });
+      services.bus.emit({ type: 'project.updated' });
+      return c.json(result, 201);
+    } catch (error) {
+      return canvasFail(c, error);
+    }
+  });
+
+  app.delete('/api/canvas/connections/:edgeId', (c) => {
+    const ctx = p(c);
+    try {
+      const result = canvasMod.disconnectCanvas(ctx, c.req.param('edgeId')!, c.req.query('storyId'));
+      services.bus.emit({ type: 'project.updated' });
+      return c.json(result);
+    } catch (error) {
+      return canvasFail(c, error);
+    }
   });
 
   // --- SSE ----------------------------------------------------------------

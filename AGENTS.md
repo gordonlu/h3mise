@@ -125,6 +125,15 @@ Rules:
 - Actions: `plan_shot`, `improve_camera`, `improve_performance`, `brief_to_plan`, `propose_project`, `reality_check`, `continuity_check`, `compile_prompt`, `diagnose_take`, `analyze_take_continuity`, `repair_prompt`, `story_to_beats`, `beats_to_shots`, `auto_director`.
 - Deterministic logic (skeleton matching, style resolution, prompt compilation, basic Preflight, camera geometry) is never delegated: rules stay in H3Mise, inference comes from you.
 
+## Studio Canvas
+
+- `/studio` is a projection of the domain model, not a second data store. `GET /api/canvas/graph` derives nodes/edges from the existing tables; only layout is persisted (`canvas_node_layouts` / `canvas_views` / `canvas_annotations`, project migration v22). Deleting layout loses no project data.
+- Nodes are domain objects (Story/Beat/Shot/Take/Timeline…); edges are existing relations (`storyBeatId`, `ReferenceBinding`, `dependsOnShotId`, `timeline_clips`). A node id is `${kind}:${domainId}`.
+- Edges are commands: `POST /api/canvas/connections` dispatches through existing module functions only (never bypassing Preflight, the active-job lock, reference limits, or provider capability checks). `DELETE /api/canvas/connections/:edgeId` reverses. Validate drags with the shared rule table (`shared/src/canvas-rules.ts`, R1–R13); resolve `409 needs_replace` / `409 needs_mode_switch` with the user before retrying.
+- Never start a render, storyboard generation, or auto-produce from a canvas event. Canvas edits (connect, move, collapse) are free; paid actions go through `usePaidAction` / `PaidActionDialog` only.
+- Canvas is episode-scoped (`activeEpisodeId`). A different `storyId` is `409 stale_episode`. Layout is per-node last-write-wins and is not synced over SSE.
+- The layout is deterministic (`shared/src/canvas-layout.ts`); pinned nodes are never auto-moved. New Work Packages live in `docs/studio-canvas/02-prd-tech.md` §16.
+
 ## Connect ComfyUI
 
 - Use a workflow exported in ComfyUI **API Format**, never a UI-only workflow JSON.
@@ -171,3 +180,7 @@ Rules:
 - `web/src/pages/SettingsPage.vue`: user-facing provider setup.
 - `web/src/pages/StoryboardPage.vue`: optional multi-page Storyboard planning and paid-generation confirmation UI.
 - `shared/src/provider.ts`: provider profile and capability contract.
+- `shared/src/canvas.ts` / `canvas-rules.ts` / `canvas-layout.ts`: Studio node/edge types, the R1–R13 connection rule table (`canConnect`), and the deterministic lane layout.
+- `server/src/modules/canvas.ts`: graph projection (`buildCanvasGraph`), layout/annotation persistence, and the connection command dispatcher.
+- `web/src/pages/StudioPage.vue` + `web/src/studio/`: Studio shell, Vue Flow canvas, node components, inspector, bottom dock, and overlays.
+- `web/src/composables/usePaidAction.ts` + `web/src/studio/overlays/PaidActionDialog.vue`: the single entry for paid actions.

@@ -9,6 +9,7 @@ export interface Toast {
   text: string;
   actionLabel?: string;
   actionTo?: string;
+  action?: () => void;
   timeout?: number;
   leaving?: boolean;
 }
@@ -27,8 +28,8 @@ export const useToastStore = defineStore('toast', () => {
     }, 180);
   }
 
-  function push(input: { kind?: Toast['kind']; text: string; actionLabel?: string; actionTo?: string; timeout?: number }) {
-    const t: Toast = { id: nextToastId++, kind: input.kind ?? 'info', text: input.text, actionLabel: input.actionLabel, actionTo: input.actionTo };
+  function push(input: { kind?: Toast['kind']; text: string; actionLabel?: string; actionTo?: string; action?: () => void; timeout?: number }) {
+    const t: Toast = { id: nextToastId++, kind: input.kind ?? 'info', text: input.text, actionLabel: input.actionLabel, actionTo: input.actionTo, action: input.action };
     toasts.value.push(t);
     // Errors persist until the user dismisses them (✕) — they often carry
     // actionable info (timeouts, job failures). Info/ok still auto-dismiss.

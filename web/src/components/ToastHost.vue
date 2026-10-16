@@ -7,8 +7,9 @@ const router = useRouter();
 
 const ICONS = { ok: '✓', err: '✕', info: 'ℹ' } as const;
 
-function act(t: { id: number; actionTo?: string }) {
-  if (t.actionTo) router.push(t.actionTo);
+function act(t: { id: number; actionTo?: string; action?: () => void }) {
+  if (t.action) t.action();
+  else if (t.actionTo) router.push(t.actionTo);
   store.dismiss(t.id);
 }
 </script>

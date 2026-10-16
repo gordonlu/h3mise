@@ -257,10 +257,11 @@ export const useStudioStore = defineStore('studio', () => {
     return result;
   }
 
-  async function disconnect(edgeId: string): Promise<void> {
+  async function disconnect(edgeId: string): Promise<{ undo: CanvasConnectResult['undo'] }> {
     const storyId = graph.value?.storyId;
-    await del(`/api/canvas/connections/${encodeURIComponent(edgeId)}${storyId ? `?storyId=${encodeURIComponent(storyId)}` : ''}`);
+    const result = await del<{ undo: CanvasConnectResult['undo'] }>(`/api/canvas/connections/${encodeURIComponent(edgeId)}${storyId ? `?storyId=${encodeURIComponent(storyId)}` : ''}`);
     await refreshGraph();
+    return result;
   }
 
   return {

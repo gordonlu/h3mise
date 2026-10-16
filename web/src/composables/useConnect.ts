@@ -32,8 +32,19 @@ export function useConnect() {
 
   async function attempt(base: CanvasConnectRequest, options: CanvasConnectRequest['options']): Promise<void> {
     try {
-      await store.connect({ ...base, options });
-      toasts.push({ kind: 'ok', text: t('studio.connect.connected') });
+      const result = await store.connect({ ...base, options });
+      toasts.push({
+        kind: 'ok',
+        text: t('studio.connect.connected'),
+        actionLabel: t('studio.undo'),
+        action: () => {
+          const undo = result.undo;
+          if (!undo) return;
+          if (undo.method === 'POST') void store.connect(undo.request);
+          else void store.disconnect(undo.edgeId);
+        },
+        timeout: 6000,
+      });
     } catch (error) {
       if (error instanceof ApiError) {
         const body = error.body as { code?: string; existing?: { label?: string }; suggestedMode?: H3Mode } | null;
@@ -97,8 +108,16 @@ export function useConnect() {
     });
     if (!ok) return;
     try {
-      await store.disconnect(edgeId);
-      toasts.push({ kind: 'ok', text: t('studio.disconnect.done') });
+      const result = await store.disconnect(edgeId);
+      toasts.push({
+        kind: 'ok',
+        text: t('studio.disconnect.done'),
+        actionLabel: t('studio.undo'),
+        action: () => {
+          if (result.undo && result.undo.method === 'POST') void store.connect(result.undo.request);
+        },
+        timeout: 6000,
+      });
     } catch (error) {
       toasts.push({ kind: 'err', text: t('studio.disconnect.failed', { msg: error instanceof Error ? error.message : String(error) }) });
     }

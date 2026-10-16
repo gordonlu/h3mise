@@ -1081,7 +1081,7 @@ export async function connectCanvas(
   request: CanvasConnectRequest,
   deps: CanvasConnectDeps = {},
 ): Promise<CanvasConnectResult> {
-  resolveActiveStory(p, request.storyId);
+  const storyId = resolveActiveStory(p, request.storyId);
   const graph = buildCanvasGraph(p);
   const source = graph.nodes.find((node) => node.id === request.source.nodeId);
   const target = graph.nodes.find((node) => node.id === request.target.nodeId);
@@ -1103,12 +1103,20 @@ export async function connectCanvas(
       const shotId = target.domainId;
       assertNotLocked(p, shotId);
       const shot = shotsMod.getShot(p, shotId);
-      if (shot.storyBeatId === source.domainId) {
+      const previous = shot.storyBeatId;
+      if (previous === source.domainId) {
         return { ok: true, edgeId: `beat_shot:${shotId}`, affectedNodeIds: affected, undo: { method: 'DELETE', edgeId: `beat_shot:${shotId}` } };
       }
-      if (shot.storyBeatId) requireReplace(options.replace, `beat_shot:${shotId}`, '已有归属节拍');
+      if (previous) requireReplace(options.replace, `beat_shot:${shotId}`, '已有归属节拍');
       shotsMod.updateShot(p, shotId, { storyBeatId: source.domainId });
-      return { ok: true, edgeId: `beat_shot:${shotId}`, affectedNodeIds: affected, undo: { method: 'DELETE', edgeId: `beat_shot:${shotId}` } };
+      return {
+        ok: true,
+        edgeId: `beat_shot:${shotId}`,
+        affectedNodeIds: affected,
+        undo: previous
+          ? { method: 'POST', request: { storyId, source: { nodeId: canvasNodeId('beat', previous), port: 'beat' }, target: { nodeId: canvasNodeId('shot', shotId), port: 'beat' }, options: { replace: true } } }
+          : { method: 'DELETE', edgeId: `beat_shot:${shotId}` },
+      };
     }
 
     case 'set_shot_primary_character':
@@ -1127,7 +1135,14 @@ export async function connectCanvas(
         shotsMod.updateShot(p, shotId, isScene ? { sceneId: source.domainId } : { primaryCharacterId: source.domainId });
         assetsMod.ensureShotEntityImageBindings(p, shotsMod.getShot(p, shotId));
       });
-      return { ok: true, edgeId, affectedNodeIds: affected, undo: { method: 'DELETE', edgeId } };
+      return {
+        ok: true,
+        edgeId,
+        affectedNodeIds: affected,
+        undo: current
+          ? { method: 'POST', request: { storyId, source: { nodeId: canvasNodeId('entity', current), port: 'entity' }, target: { nodeId: canvasNodeId('shot', shotId), port: 'cast' }, options: { replace: true } } }
+          : { method: 'DELETE', edgeId },
+      };
     }
 
     case 'create_binding':
@@ -1143,11 +1158,13 @@ export async function connectCanvas(
       const singleRole = rule.effect === 'create_first_frame_binding' ? 'first_frame' : rule.effect === 'create_last_frame_binding' ? 'last_frame' : null;
 
       let replaceBindingId: string | null = null;
+      let replacedBinding: import('@h3mise/shared').ReferenceBinding | null = null;
       if (singleRole) {
         const existing = assetsMod.listBindings(p, shotId).find((binding) => binding.roles.includes(singleRole));
         if (existing) {
           requireReplace(options.replace, `binding:${existing.id}`, singleRole === 'first_frame' ? '已有首帧绑定' : '已有尾帧绑定');
           replaceBindingId = existing.id;
+          replacedBinding = existing;
         }
       }
 
@@ -1179,7 +1196,25 @@ export async function connectCanvas(
         });
         bindingId = created.id;
       });
-      return { ok: true, edgeId: `binding:${bindingId}`, affectedNodeIds: affected, undo: { method: 'DELETE', edgeId: `binding:${bindingId}` } };
+      const prior = replacedBinding;
+      return {
+        ok: true,
+        edgeId: `binding:${bindingId}`,
+        affectedNodeIds: affected,
+        undo: prior
+          ? {
+              method: 'POST',
+              request: {
+                storyId,
+                source: prior.sourceEntityId
+                  ? { nodeId: canvasNodeId('entity', prior.sourceEntityId), port: 'entity' }
+                  : { nodeId: canvasNodeId('media', prior.assetId), port: prior.type },
+                target: { nodeId: canvasNodeId('shot', shotId), port: request.target.port },
+                options: { roles: prior.roles, replace: true },
+              },
+            }
+          : { method: 'DELETE', edgeId: `binding:${bindingId}` },
+      };
     }
 
     case 'set_frame_chain': {
@@ -1196,6 +1231,7 @@ export async function connectCanvas(
       if (frameBindings.length > 0 || (shot.renderDependencyMode !== 'auto' && shot.dependsOnShotId)) {
         requireReplace(options.replace, `frame_chain:${targetShotId}`, '目标已有首帧或依赖设置');
       }
+      const priorChain = shot.renderDependencyMode === 'previous_take' && shot.dependsOnShotId && shot.dependsOnShotId !== sourceShotId ? shot.dependsOnShotId : null;
       try {
         p.db.tx(() => {
           if (options.replace) for (const binding of frameBindings) assetsMod.deleteBinding(p, binding.id);
@@ -1205,7 +1241,14 @@ export async function connectCanvas(
         if (error instanceof Error && /cycle/i.test(error.message)) throw new CanvasError('cycle', '帧链不能成环');
         throw error;
       }
-      return { ok: true, edgeId: `frame_chain:${targetShotId}`, affectedNodeIds: affected, undo: { method: 'DELETE', edgeId: `frame_chain:${targetShotId}` } };
+      return {
+        ok: true,
+        edgeId: `frame_chain:${targetShotId}`,
+        affectedNodeIds: affected,
+        undo: priorChain
+          ? { method: 'POST', request: { storyId, source: { nodeId: canvasNodeId('shot', priorChain), port: 'tail_frame' }, target: { nodeId: canvasNodeId('shot', targetShotId), port: 'first_frame' } } }
+          : { method: 'DELETE', edgeId: `frame_chain:${targetShotId}` },
+      };
     }
 
     case 'add_timeline_clip': {
@@ -1218,16 +1261,23 @@ export async function connectCanvas(
   }
 }
 
-export function disconnectCanvas(p: ProjectContext, edgeId: string, requestedStoryId?: string): { ok: true; affectedNodeIds: CanvasNodeId[]; undo: null } {
-  resolveActiveStory(p, requestedStoryId);
+export function disconnectCanvas(p: ProjectContext, edgeId: string, requestedStoryId?: string): { ok: true; affectedNodeIds: CanvasNodeId[]; undo: CanvasConnectResult['undo'] } {
+  const storyId = resolveActiveStory(p, requestedStoryId);
   const separator = edgeId.indexOf(':');
   const prefix = separator < 0 ? edgeId : edgeId.slice(0, separator);
   const rest = separator < 0 ? '' : edgeId.slice(separator + 1);
 
   if (prefix === 'beat_shot') {
     assertNotLocked(p, rest);
+    const beatId = shotsMod.getShot(p, rest).storyBeatId;
     shotsMod.updateShot(p, rest, { storyBeatId: null });
-    return { ok: true, affectedNodeIds: [canvasNodeId('shot', rest)], undo: null };
+    return {
+      ok: true,
+      affectedNodeIds: [canvasNodeId('shot', rest)],
+      undo: beatId
+        ? { method: 'POST', request: { storyId, source: { nodeId: canvasNodeId('beat', beatId), port: 'beat' }, target: { nodeId: canvasNodeId('shot', rest), port: 'beat' } } }
+        : null,
+    };
   }
   if (prefix === 'cast') {
     const [shotId, entityId] = rest.split(':');
@@ -1238,23 +1288,67 @@ export function disconnectCanvas(p: ProjectContext, edgeId: string, requestedSto
       shotsMod.updateShot(p, shotId, shot.sceneId === entityId ? { sceneId: null } : { primaryCharacterId: null });
       assetsMod.ensureShotEntityImageBindings(p, shotsMod.getShot(p, shotId));
     });
-    return { ok: true, affectedNodeIds: [canvasNodeId('shot', shotId)], undo: null };
+    return {
+      ok: true,
+      affectedNodeIds: [canvasNodeId('shot', shotId)],
+      undo: { method: 'POST', request: { storyId, source: { nodeId: canvasNodeId('entity', entityId), port: 'entity' }, target: { nodeId: canvasNodeId('shot', shotId), port: 'cast' }, options: { replace: true } } },
+    };
   }
   if (prefix === 'binding') {
     const binding = assetsMod.listBindings(p).find((item) => item.id === rest);
     if (!binding) throw new CanvasError('not_found', '绑定不存在');
     if (binding.shotId) assertNotLocked(p, binding.shotId);
+    const targetPort: CanvasPortId = binding.roles.includes('first_frame')
+      ? 'first_frame'
+      : binding.roles.includes('last_frame')
+        ? 'last_frame'
+        : binding.type === 'video'
+          ? 'video_ref'
+          : binding.type === 'audio'
+            ? 'audio_ref'
+            : 'refs';
     assetsMod.deleteBinding(p, rest);
-    return { ok: true, affectedNodeIds: binding.shotId ? [canvasNodeId('shot', binding.shotId)] : [], undo: null };
+    return {
+      ok: true,
+      affectedNodeIds: binding.shotId ? [canvasNodeId('shot', binding.shotId)] : [],
+      undo: binding.shotId
+        ? {
+            method: 'POST',
+            request: {
+              storyId,
+              source: binding.sourceEntityId
+                ? { nodeId: canvasNodeId('entity', binding.sourceEntityId), port: 'entity' }
+                : { nodeId: canvasNodeId('media', binding.assetId), port: binding.type },
+              target: { nodeId: canvasNodeId('shot', binding.shotId), port: targetPort },
+              options: { roles: binding.roles, replace: true },
+            },
+          }
+        : null,
+    };
   }
   if (prefix === 'frame_chain') {
     assertNotLocked(p, rest);
+    const sourceShotId = shotsMod.getShot(p, rest).dependsOnShotId;
     shotsMod.updateShot(p, rest, { renderDependencyMode: 'auto', dependsOnShotId: null });
-    return { ok: true, affectedNodeIds: [canvasNodeId('shot', rest)], undo: null };
+    return {
+      ok: true,
+      affectedNodeIds: [canvasNodeId('shot', rest)],
+      undo: sourceShotId
+        ? { method: 'POST', request: { storyId, source: { nodeId: canvasNodeId('shot', sourceShotId), port: 'tail_frame' }, target: { nodeId: canvasNodeId('shot', rest), port: 'first_frame' } } }
+        : null,
+    };
   }
   if (prefix === 'take_clip') {
+    const clip = p.db.get<{ shot_id: string; take_id: string }>('SELECT shot_id, take_id FROM timeline_clips WHERE id = ?', [rest]);
+    const timeline = p.db.get<{ id: string }>('SELECT id FROM timeline LIMIT 1');
     timelineMod.removeClip(p, rest);
-    return { ok: true, affectedNodeIds: [], undo: null };
+    return {
+      ok: true,
+      affectedNodeIds: [],
+      undo: clip && timeline
+        ? { method: 'POST', request: { storyId, source: { nodeId: canvasNodeId('takes', clip.shot_id), port: 'selected' }, target: { nodeId: canvasNodeId('timeline', timeline.id), port: 'clips' } } }
+        : null,
+    };
   }
   throw new CanvasError('invalid_connection', '派生连线不可断开');
 }

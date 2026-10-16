@@ -29,6 +29,21 @@ function checkWidth(): void {
   narrow.value = window.innerWidth < 1280;
 }
 
+function onKeydown(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null;
+  const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+  if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key === '[') {
+    event.preventDefault();
+    dockOpen.value = !dockOpen.value;
+  } else if (event.key === ']') {
+    event.preventDefault();
+    inspectorOpen.value = !inspectorOpen.value;
+  } else if (event.key === 'Escape') {
+    store.clearSelection();
+  }
+}
+
 async function applyDeepLink(): Promise<void> {
   const node = typeof route.query.node === 'string' ? route.query.node : null;
   if (node) {
@@ -40,10 +55,14 @@ async function applyDeepLink(): Promise<void> {
 onMounted(async () => {
   checkWidth();
   window.addEventListener('resize', checkWidth);
+  window.addEventListener('keydown', onKeydown);
   await store.load();
   await applyDeepLink();
 });
-onUnmounted(() => window.removeEventListener('resize', checkWidth));
+onUnmounted(() => {
+  window.removeEventListener('resize', checkWidth);
+  window.removeEventListener('keydown', onKeydown);
+});
 </script>
 
 <template>

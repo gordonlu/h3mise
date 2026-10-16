@@ -5,12 +5,14 @@ import { H3_MODE_LABEL, SHOT_USER_STATUS_LABEL, type CanvasNode, type ShotNodeDa
 import { fileUrl } from '../../api/client';
 import { useStudioStore } from '../../stores/studio';
 import { useShotActions } from '../../composables/useShotActions';
+import { useRunPlanStore } from '../../stores/runPlan';
 import BaseNode from './BaseNode.vue';
 import { useNodeChrome } from './useNodeChrome';
 
 const props = defineProps<NodeProps<{ node: CanvasNode }>>();
 const { node, selected, lod } = useNodeChrome(props);
 const studio = useStudioStore();
+const runPlan = useRunPlanStore();
 const { mainAction } = useShotActions();
 const data = computed(() => node.value.data as ShotNodeData);
 const cover = computed(() => (data.value.coverPath ? fileUrl(data.value.coverPath) : null));
@@ -19,6 +21,7 @@ const live = computed(() => studio.liveJobs[node.value.domainId] ?? null);
 const status = computed(() => (live.value ? live.value.status : SHOT_USER_STATUS_LABEL[data.value.userStatus]));
 const statusClass = computed(() => (live.value ? 's-rendering' : `s-${data.value.userStatus}`));
 const action = computed(() => mainAction(node.value.domainId, data.value));
+const planOrder = computed(() => runPlan.orderByNode[node.value.id]);
 const busy = ref(false);
 
 async function runAction(): Promise<void> {
@@ -44,6 +47,7 @@ async function runAction(): Promise<void> {
     <img v-if="cover" class="hf-thumb" :src="cover" loading="lazy" decoding="async" :alt="node.title" />
     <div v-else class="hf-thumb" />
     <div class="hf-chips">
+      <span v-if="planOrder" class="hf-chip hf-chip-plan">#{{ planOrder }}</span>
       <span v-if="data.h3Mode" class="hf-chip">{{ H3_MODE_LABEL[data.h3Mode] }}</span>
       <span class="hf-chip">{{ data.durationSeconds }}s</span>
       <span class="hf-chip">{{ data.aspectRatio }}</span>

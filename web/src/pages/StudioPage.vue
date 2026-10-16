@@ -8,6 +8,8 @@ import StudioCanvas from '../studio/StudioCanvas.vue';
 import StudioInspector from '../studio/inspector/StudioInspector.vue';
 import BottomDock from '../studio/bottom/BottomDock.vue';
 import LeftDock from '../studio/dock/LeftDock.vue';
+import RunPlanCard from '../studio/overlays/RunPlanCard.vue';
+import ContextMenu from '../studio/overlays/ContextMenu.vue';
 
 const store = useStudioStore();
 const route = useRoute();
@@ -75,6 +77,7 @@ onUnmounted(() => window.removeEventListener('resize', checkWidth));
         <div v-else-if="isEmpty" class="hf-overlay">
           <div class="hf-overlay-card">{{ t('studio.empty') }}</div>
         </div>
+        <RunPlanCard />
       </div>
 
       <StudioInspector
@@ -84,6 +87,7 @@ onUnmounted(() => window.removeEventListener('resize', checkWidth));
     </div>
 
     <BottomDock v-if="!loading && !error && !isEmpty" />
+    <ContextMenu />
   </div>
 </template>
 

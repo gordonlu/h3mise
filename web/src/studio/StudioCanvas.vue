@@ -24,6 +24,7 @@ import { useLayoutPersist } from '../composables/useLayoutPersist';
 import { useGraphSync } from '../composables/useGraphSync';
 import { useConnect } from '../composables/useConnect';
 import { CREATE_MIME, useCanvasCreate, type CreateDescriptor } from '../composables/useCanvasCreate';
+import { useRunPlanStore } from '../stores/runPlan';
 import StoryNode from './nodes/StoryNode.vue';
 import BeatNode from './nodes/BeatNode.vue';
 import SequenceNode from './nodes/SequenceNode.vue';
@@ -44,6 +45,7 @@ const { viewport, project } = useVueFlow();
 const persist = useLayoutPersist();
 useGraphSync();
 const { create } = useCanvasCreate();
+const runPlan = useRunPlanStore();
 
 const nodeTypes = {
   story: markRaw(StoryNode),
@@ -74,6 +76,17 @@ watch(
 function onNodeClick(event: NodeMouseEvent): void {
   const additive = event.event instanceof MouseEvent && (event.event.metaKey || event.event.ctrlKey);
   store.select(event.node.id, additive);
+  runPlan.closeMenu();
+}
+
+function onNodeContext(event: NodeMouseEvent): void {
+  const point = event.event as MouseEvent;
+  runPlan.openMenu(point.clientX, point.clientY, event.node.id);
+}
+
+function onPaneClick(): void {
+  store.clearSelection();
+  runPlan.closeMenu();
 }
 
 function onDragStop(event: NodeDragEvent): void {
@@ -153,11 +166,12 @@ function onDrop(event: DragEvent): void {
     selection-key-code="Shift"
     :is-valid-connection="isValidConnection"
     @node-click="onNodeClick"
+    @node-context-menu="onNodeContext"
     @node-drag-stop="onDragStop"
     @connect="onConnect"
     @edge-click="onEdgeClick"
     @viewport-change-end="onViewport"
-    @pane-click="store.clearSelection()"
+    @pane-click="onPaneClick"
   >
     <Background :gap="24" :size="1.4" pattern-color="var(--line)" />
     <MiniMap pannable zoomable :node-color="() => 'var(--line-3)'" />

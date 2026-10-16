@@ -5,6 +5,7 @@ import { useStudioStore } from '../stores/studio';
 import { t } from '../stores/locale';
 import StudioCanvas from '../studio/StudioCanvas.vue';
 import StudioInspector from '../studio/inspector/StudioInspector.vue';
+import BottomDock from '../studio/bottom/BottomDock.vue';
 
 const store = useStudioStore();
 const { graph, loading, error } = storeToRefs(store);
@@ -61,6 +62,8 @@ onUnmounted(() => window.removeEventListener('resize', checkWidth));
         @collapse="inspectorOpen = false"
       />
     </div>
+
+    <BottomDock v-if="!loading && !error && !isEmpty" />
   </div>
 </template>
 

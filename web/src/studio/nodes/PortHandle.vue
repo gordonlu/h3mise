@@ -12,5 +12,7 @@ const props = defineProps<{ port: CanvasPort }>();
     :position="props.port.direction === 'in' ? Position.Left : Position.Right"
     :connectable="props.port.userConnectable"
     :class="`hf-h-${props.port.type}`"
+    :aria-label="props.port.label"
+    tabindex="0"
   />
 </template>

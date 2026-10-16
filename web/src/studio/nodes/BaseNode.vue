@@ -41,6 +41,7 @@ const aria = computed(() => `${t(`studio.node.${props.node.kind}`)} ${props.node
     :class="[`k-${props.node.kind}`, `lod-${props.lod}`, { 'is-selected': props.selected, 'is-dim': props.dim }]"
     role="group"
     :aria-label="aria"
+    tabindex="0"
   >
     <span class="hf-bar" />
     <header class="hf-head">

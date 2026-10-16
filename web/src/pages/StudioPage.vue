@@ -7,12 +7,19 @@ import { t } from '../stores/locale';
 import StudioCanvas from '../studio/StudioCanvas.vue';
 import StudioInspector from '../studio/inspector/StudioInspector.vue';
 import BottomDock from '../studio/bottom/BottomDock.vue';
+import LeftDock from '../studio/dock/LeftDock.vue';
 
 const store = useStudioStore();
 const route = useRoute();
 const { graph, loading, error } = storeToRefs(store);
 const narrow = ref(false);
 const inspectorOpen = ref(true);
+const dockOpen = ref(true);
+
+const showInspector = computed(() => inspectorOpen.value && !loading.value && !error.value);
+const gridColumns = computed(() =>
+  `${dockOpen.value ? '220px ' : ''}minmax(0, 1fr)${showInspector.value ? ' 400px' : ''}`,
+);
 
 const isEmpty = computed(() => !loading.value && !error.value && (graph.value?.nodes.length ?? 0) === 0);
 
@@ -43,6 +50,7 @@ onUnmounted(() => window.removeEventListener('resize', checkWidth));
       <span class="hf-crumb">{{ t('studio.title') }}</span>
       <span class="hf-sub">{{ t('studio.subtitle') }}</span>
       <span class="hf-spacer" />
+      <button class="hf-ghost" @click="dockOpen = !dockOpen">{{ t('studio.dock.nodes') }}</button>
       <button v-if="!inspectorOpen" class="hf-ghost" @click="inspectorOpen = true">
         {{ t('studio.inspector.title') }}
       </button>
@@ -51,7 +59,8 @@ onUnmounted(() => window.removeEventListener('resize', checkWidth));
 
     <div v-if="narrow" class="hf-narrow">{{ t('studio.tooNarrow') }}</div>
 
-    <div class="hf-body-row" :class="{ 'no-inspector': !inspectorOpen }">
+    <div class="hf-body-row" :style="{ gridTemplateColumns: gridColumns }">
+      <LeftDock v-if="dockOpen && !loading && !error" />
       <div class="hf-canvas">
         <StudioCanvas v-if="!loading && !error && !isEmpty" />
         <div v-if="loading" class="hf-overlay">
@@ -69,7 +78,7 @@ onUnmounted(() => window.removeEventListener('resize', checkWidth));
       </div>
 
       <StudioInspector
-        v-if="inspectorOpen && !loading && !error"
+        v-if="showInspector"
         @collapse="inspectorOpen = false"
       />
     </div>

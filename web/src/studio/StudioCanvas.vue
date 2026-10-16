@@ -23,6 +23,7 @@ import { useStudioStore } from '../stores/studio';
 import { useLayoutPersist } from '../composables/useLayoutPersist';
 import { useGraphSync } from '../composables/useGraphSync';
 import { useConnect } from '../composables/useConnect';
+import { CREATE_MIME, useCanvasCreate, type CreateDescriptor } from '../composables/useCanvasCreate';
 import StoryNode from './nodes/StoryNode.vue';
 import BeatNode from './nodes/BeatNode.vue';
 import SequenceNode from './nodes/SequenceNode.vue';
@@ -39,9 +40,10 @@ import FrameNode from './nodes/FrameNode.vue';
 import TypedEdge from './edges/TypedEdge.vue';
 
 const store = useStudioStore();
-const { viewport } = useVueFlow();
+const { viewport, project } = useVueFlow();
 const persist = useLayoutPersist();
 useGraphSync();
+const { create } = useCanvasCreate();
 
 const nodeTypes = {
   story: markRaw(StoryNode),
@@ -114,10 +116,25 @@ function onViewport(viewportTransform: ViewportTransform): void {
   store.setView(view);
   persist.queueView(view);
 }
+
+function onDrop(event: DragEvent): void {
+  const raw = event.dataTransfer?.getData(CREATE_MIME);
+  if (!raw) return;
+  event.preventDefault();
+  let descriptor: CreateDescriptor;
+  try {
+    descriptor = JSON.parse(raw) as CreateDescriptor;
+  } catch {
+    return;
+  }
+  const position = project({ x: event.clientX, y: event.clientY });
+  void create(descriptor, position);
+}
 </script>
 
 <template>
-  <VueFlow
+  <div class="hf-canvas-drop" @dragover.prevent @drop="onDrop">
+    <VueFlow
     class="hf-vueflow"
     :nodes="(store.flowNodes as unknown as Node[])"
     :edges="(store.flowEdges as unknown as Edge[])"
@@ -146,4 +163,5 @@ function onViewport(viewportTransform: ViewportTransform): void {
     <MiniMap pannable zoomable :node-color="() => 'var(--line-3)'" />
     <Controls />
   </VueFlow>
+  </div>
 </template>

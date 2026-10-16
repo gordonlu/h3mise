@@ -32,6 +32,7 @@ function go(path: string, query?: Record<string, string>): () => void {
 }
 
 const navItems: PaletteItem[] = [
+  { id: 'nav.studio', group: 'navigation', label: t('studio.title'), hint: '/studio', run: go('/studio') },
   { id: 'nav.story', group: 'navigation', label: t('nav.storyBeats'), hint: '/story', run: go('/story') },
   { id: 'nav.storyboard', group: 'navigation', label: t('nav.storyboard'), hint: '/storyboard', run: go('/storyboard') },
   { id: 'nav.assets', group: 'navigation', label: t('nav.assetLibrary'), hint: '/assets', run: go('/assets') },

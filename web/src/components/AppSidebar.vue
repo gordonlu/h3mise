@@ -53,6 +53,7 @@ const ICONS: Record<string, string[]> = {
   bolt: ['M13 2 4 14h6l-1 8 9-12h-6l1-8z'],
   board: ['M4 5h16v14H4z', 'M4 9h16'],
   film: ['M3 6h18v12H3z', 'M7 6v12', 'M17 6v12'],
+  studio: ['M4 6a2 2 0 0 1 2-2h4v16H6a2 2 0 0 1-2-2z', 'M10 4h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-8z', 'M13 9h4', 'M13 13h4'],
 };
 
 interface NavItem {
@@ -83,6 +84,7 @@ const sections = computed(() => [
     key: 'prepare',
     label: t('nav.prepare'),
     items: [
+      { to: '/studio', label: t('studio.title'), icon: 'studio' },
       { to: '/story', label: t('nav.storyBeats'), icon: 'story', attention: needsAttention('/story') },
       { to: '/shots', label: t('nav.shotWorkspace'), icon: 'shots', count: props.guide?.shotCount, attention: needsAttention('/shots') },
       { to: '/assets', label: t('nav.assetLibrary'), icon: 'assets' },

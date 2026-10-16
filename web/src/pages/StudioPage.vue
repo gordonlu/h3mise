@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useStudioStore } from '../stores/studio';
 import { t } from '../stores/locale';
@@ -8,6 +9,7 @@ import StudioInspector from '../studio/inspector/StudioInspector.vue';
 import BottomDock from '../studio/bottom/BottomDock.vue';
 
 const store = useStudioStore();
+const route = useRoute();
 const { graph, loading, error } = storeToRefs(store);
 const narrow = ref(false);
 const inspectorOpen = ref(true);
@@ -18,10 +20,19 @@ function checkWidth(): void {
   narrow.value = window.innerWidth < 1280;
 }
 
-onMounted(() => {
+async function applyDeepLink(): Promise<void> {
+  const node = typeof route.query.node === 'string' ? route.query.node : null;
+  if (node) {
+    store.select(node);
+    inspectorOpen.value = true;
+  }
+}
+
+onMounted(async () => {
   checkWidth();
   window.addEventListener('resize', checkWidth);
-  void store.load();
+  await store.load();
+  await applyDeepLink();
 });
 onUnmounted(() => window.removeEventListener('resize', checkWidth));
 </script>

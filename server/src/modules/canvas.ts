@@ -727,10 +727,10 @@ export function buildCanvasGraph(p: ProjectContext, options: BuildGraphOptions =
       edges.push(edge(`beat_shot:${shot.id}`, 'beat_shot', canvasNodeId('beat', shot.storyBeatId), 'beat', canvasNodeId('shot', shot.id), 'beat', false));
     }
     if (shot.primaryCharacterId) {
-      edges.push(edge(`cast:${shot.id}:${shot.primaryCharacterId}`, 'cast', canvasNodeId('entity', shot.primaryCharacterId), 'entity', canvasNodeId('shot', shot.id), 'cast', false));
+      edges.push(edge(`cast:${shot.id}:${shot.primaryCharacterId}`, 'cast', canvasNodeId('entity', shot.primaryCharacterId), 'entity', canvasNodeId('shot', shot.id), 'cast', false, true));
     }
     if (shot.sceneId) {
-      edges.push(edge(`cast:${shot.id}:${shot.sceneId}`, 'cast', canvasNodeId('entity', shot.sceneId), 'entity', canvasNodeId('shot', shot.id), 'cast', true));
+      edges.push(edge(`cast:${shot.id}:${shot.sceneId}`, 'cast', canvasNodeId('entity', shot.sceneId), 'entity', canvasNodeId('shot', shot.id), 'cast', false, true));
     }
     edges.push(edge(`shot_takes:${shot.id}`, 'shot_takes', canvasNodeId('shot', shot.id), 'takes', canvasNodeId('takes', shot.id), 'takes', true));
     if (shot.renderDependencyMode === 'previous_take' && shot.dependsOnShotId) {

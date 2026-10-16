@@ -11,6 +11,7 @@ export const router = createRouter({
     { path: '/storyboard', name: 'storyboard', component: () => import('./pages/StoryboardPage.vue') },
     { path: '/shots', name: 'shots', component: () => import('./pages/ShotsPage.vue') },
     { path: '/shots/:id', name: 'shot', component: () => import('./pages/ShotPage.vue') },
+    { path: '/studio', name: 'studio', component: () => import('./pages/StudioPage.vue') },
     { path: '/assets', name: 'assets', component: () => import('./pages/AssetsPage.vue') },
     { path: '/assets/:id/breakdown', name: 'reference-breakdown', component: () => import('./pages/ReferenceBreakdownPage.vue') },
     { path: '/timeline', name: 'timeline', component: () => import('./pages/TimelinePage.vue') },

@@ -1,0 +1,30 @@
+<script setup lang="ts">
+import { computed } from 'vue';
+import type { NodeProps } from '@vue-flow/core';
+import type { CanvasNode, MediaNodeData } from '@h3mise/shared';
+import { mediaUrl } from '../../api/client';
+import { t } from '../../stores/locale';
+import BaseNode from './BaseNode.vue';
+import { useNodeChrome } from './useNodeChrome';
+
+const props = defineProps<NodeProps<{ node: CanvasNode }>>();
+const { node, selected, lod } = useNodeChrome(props);
+const data = computed(() => node.value.data as MediaNodeData);
+const kindLabel = computed(() => t(`studio.kind.${data.value.mediaKind}`));
+const thumb = computed(() => (data.value.mediaKind === 'audio' ? null : mediaUrl(node.value.domainId)));
+</script>
+
+<template>
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="▧" :status="kindLabel">
+    <img v-if="thumb" class="hf-thumb-sm" :src="thumb" loading="lazy" decoding="async" :alt="node.title" />
+    <div v-else class="hf-thumb-sm hf-audio" />
+    <div class="hf-chips">
+      <span class="hf-chip">{{ kindLabel }}</span>
+      <span v-if="data.durationSeconds" class="hf-chip">{{ t('studio.media.duration', { n: Math.round(data.durationSeconds) }) }}</span>
+    </div>
+  </BaseNode>
+</template>
+
+<style scoped>
+.hf-audio { background: repeating-linear-gradient(90deg, var(--warn) 0 2px, transparent 2px 6px); opacity: 0.5; }
+</style>

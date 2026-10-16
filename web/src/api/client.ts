@@ -69,6 +69,25 @@ export const patch = <T>(path: string, body?: unknown) => api<T>('PATCH', path, 
 export const put = <T>(path: string, body?: unknown) => api<T>('PUT', path, body);
 export const del = <T>(path: string) => api<T>('DELETE', path);
 
+/** Conditional GET used by the Studio graph sync: a `304 Not Modified` is a
+ * success with no body, so it cannot go through the generic `api()` guard. */
+export async function getConditional<T>(
+  path: string,
+  etag?: string,
+): Promise<{ status: number; data: T | null; etag: string | null }> {
+  await ensureSession();
+  const res = await fetchWithGuard(
+    path,
+    { method: 'GET', credentials: 'same-origin', headers: etag ? { 'If-None-Match': etag } : undefined },
+    true,
+  );
+  if (res.status === 304) return { status: 304, data: null, etag: etag ?? null };
+  const text = await res.text();
+  const data = text ? (JSON.parse(text) as T) : null;
+  if (!res.ok) throw new ApiError((data as { error?: string } | null)?.error ?? `HTTP ${res.status}`, res.status, data);
+  return { status: res.status, data, etag: res.headers.get('etag') };
+}
+
 export function mediaUrl(id: string): string {
   return `/api/media/${id}`;
 }

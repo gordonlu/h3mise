@@ -9,6 +9,7 @@ import { confirmDialog } from '../stores/confirm';
 import { t } from '../stores/locale';
 import type { BeatApplyResult, SkeletonRecommendation, SkeletonRecommendationResult, SkeletonSegmentCount, StoryBeat, StoryEpisodeList, StorySkeleton } from '@h3mise/shared';
 import EmptyState from '../components/EmptyState.vue';
+import StoryFactsForm from '../components/story/StoryFactsForm.vue';
 
 const toasts = useToastStore();
 const ai = useAiStore();
@@ -459,42 +460,7 @@ onMounted(async () => {
     </section>
 
     <div class="grid story-grid">
-      <div class="panel facts-panel">
-        <div class="panel-title">{{ t('pages.story.subtitle') }}</div>
-        <div class="panel-body col facts-body">
-          <div class="spread">
-            <span class="muted">{{ t('workflow.story.clickSaveAfterMakingChanges') }}</span>
-            <button class="primary sm" :disabled="!storyDirty" @click="saveStoryDraft">{{ t('workflow.story.saveStory') }}</button>
-          </div>
-          <div class="grid two">
-          <label class="field">
-            {{ t('pages.story.titleField') }}
-            <input v-model="storyDraft.title" :disabled="aiBusy" :placeholder="t('workflow.story.storyTitle')" />
-          </label>
-          <label class="field">
-            {{ t('workflow.story.plannedTotalDurationS') }}
-            <input v-model="storyDraft.plannedDurationSeconds" :disabled="aiBusy" type="number" min="0" max="900" :placeholder="t('workflow.story.eG90AIUsesThisTo')" />
-          </label>
-        </div>
-          <label class="field">
-            {{ t('pages.story.synopsis') }}
-            <textarea v-model="storyDraft.synopsis" :disabled="aiBusy" class="field-synopsis" rows="6" :placeholder="t('workflow.story.synopsisProtagonistWhatHappensAndHowIt')"></textarea>
-          </label>
-          <div class="script-frame">
-            <div class="script-head">
-              <span>{{ t('workflow.story.scriptBody') }}</span>
-              <span class="script-count mono">{{ storyDraft.body.length }} {{ t('workflow.story.characters') }}</span>
-            </div>
-            <textarea
-              v-model="storyDraft.body"
-              class="script-body"
-              rows="16"
-              :disabled="aiBusy"
-              :placeholder="t('workflow.story.pasteAScriptOrStoryExcerptHere')"
-            ></textarea>
-          </div>
-        </div>
-      </div>
+      <StoryFactsForm :draft="storyDraft" :disabled="aiBusy" :dirty="storyDirty" @save="saveStoryDraft" />
 
       <div class="panel beats-panel">
         <div class="panel-title spread">
@@ -566,51 +532,7 @@ onMounted(async () => {
 h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.03em; }
 .story-grid { grid-template-columns: 1fr 1.15fr; align-items: start; }
 @media (max-width: 1000px) { .story-grid,.skeleton-grid { grid-template-columns: 1fr; }.skeleton-search { align-items: stretch; flex-direction: column; }.count-field { width: 100%; } }
-.facts-panel { align-self: start; }
-.facts-body { padding: 18px; gap: 14px; }
 .grid.two { grid-template-columns: 1fr 1fr; gap: 14px; }
-/* script sheet: serif body inside a bordered frame with an orange focus ring */
-.script-frame {
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  background: var(--bg-4);
-  padding: 12px 16px 14px;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.script-frame:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(255, 108, 55, 0.12);
-}
-.script-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--text-2);
-  padding-bottom: 9px;
-  border-bottom: 1px dashed var(--line);
-  margin-bottom: 10px;
-}
-.script-count { font-size: 11px; color: var(--text-3); font-weight: 400; }
-.script-body {
-  width: 100%;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-  border-radius: 0;
-  font-family: var(--serif);
-  font-size: 14.5px;
-  line-height: 1.9;
-  color: var(--text);
-  resize: vertical;
-  min-height: 240px;
-}
-.script-body:focus { border: none; box-shadow: none; }
-.script-body::placeholder { color: var(--text-3); font-family: var(--serif); }
-.field-synopsis { font-family: var(--serif); font-size: 14.5px; line-height: 1.9; min-height: 140px; }
 .beats-panel { align-self: start; }
 .beat-dur { width: 58px; }
 .plan-hint { font-size: 11px; margin-left: 6px; }

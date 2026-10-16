@@ -8,29 +8,14 @@ import { confirmDialog } from '../stores/confirm';
 import { usePaidAction } from '../composables/usePaidAction';
 import { toast } from '../stores/toast';
 import { t } from '../stores/locale';
-import { H3_MODE_LABEL } from '@h3mise/shared';
 import type { RenderJob } from '@h3mise/shared';
+import RenderJobList from './render/RenderJobList.vue';
+import { ACTIVE, CANCELLABLE, STAGES, costText, elapsedText, stageState, statusLabel } from './render/jobDisplay';
 
 const render = useRenderStore();
 const project = useProjectStore();
 const router = useRouter();
 
-const STATUS_KEY: Record<string, string> = {
-  LOCAL_QUEUED: 'localQueued', UPLOADING: 'uploading', SUBMITTING: 'submitting', QUEUED: 'queued', RUNNING: 'running',
-  SUCCEEDED: 'succeeded', DOWNLOADING: 'downloading', LOCAL_READY: 'localReady',
-  FAILED: 'failed', CANCELLED: 'cancelled', EXPIRED: 'expired',
-};
-
-function statusLabel(status: string): string {
-  return t(`queue.status.${STATUS_KEY[status] ?? 'unknown'}`, { status });
-}
-
-const STATUS_BADGE: Record<string, string> = {
-  LOCAL_QUEUED: 'muted', UPLOADING: 'warn', SUBMITTING: 'warn', QUEUED: 'warn', RUNNING: 'warn', SUCCEEDED: 'ok', DOWNLOADING: 'info', LOCAL_READY: 'ok',
-  FAILED: 'bad', CANCELLED: 'muted', EXPIRED: 'muted',
-};
-
-const ACTIVE = ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'];
 const active = computed(() => render.jobs.filter((j) => ACTIVE.includes(j.status)));
 const done = computed(() => render.jobs.filter((j) => !ACTIVE.includes(j.status)).slice(0, 30));
 const queueGroups = computed(() => [
@@ -67,35 +52,10 @@ onMounted(() => {
 });
 onUnmounted(() => window.clearInterval(ticker));
 
-function formatSeconds(sec: number): string {
-  const m = Math.floor(sec / 60);
-  return m > 0 ? t('queue.durationMinutes', { m, s: String(sec % 60).padStart(2, '0') }) : t('queue.durationSeconds', { s: sec });
-}
-
-function elapsedText(job: RenderJob): string {
-  const start = job.startedAt ?? job.submittedAt ?? job.createdAt;
-  const end = active.value.includes(job)
-    ? nowTick.value
-    : new Date(job.finishedAt ?? job.updatedAt).getTime();
-  const startMs = new Date(start).getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(end)) return '—';
-  return formatSeconds(Math.max(0, Math.floor((end - startMs) / 1000)));
-}
-
-const CANCELLABLE = ACTIVE;
-
 /** Theater mode — a full-screen cinematic view of one job. Stores the key
  * (not the object) so SSE-driven refreshes keep the view current. */
 const theaterKey = ref<string | null>(null);
 const theaterJob = computed(() => render.jobs.find((j) => `${j.projectId}/${j.id}` === theaterKey.value) ?? null);
-
-const STAGES = ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING', 'LOCAL_READY'] as const;
-function stageState(job: RenderJob, stage: (typeof STAGES)[number]): 'done' | 'current' | 'todo' {
-  const current = STAGES.indexOf(job.status as (typeof STAGES)[number]);
-  if (current < 0) return job.status === 'SUCCEEDED' ? 'done' : 'todo';
-  const target = STAGES.indexOf(stage);
-  return target < current ? 'done' : target === current ? 'current' : 'todo';
-}
 
 // P1: RunningHub has no remote cancel for AI App tasks — cancelling only
 // stops local polling; the remote task may still run and cost money.
@@ -150,15 +110,6 @@ async function retry(job: RenderJob) {
   );
 }
 
-function costText(job: RenderJob): string {
-  if (!job.cost) return '';
-  const c = job.cost as { credits?: number; coins?: number };
-  const parts: string[] = [];
-  if (c.credits) parts.push(`≈¥${Number(c.credits).toFixed(2)} CNY`);
-  if (c.coins) parts.push(t('queue.coins', { n: c.coins }));
-  return parts.join(' + ');
-}
-
 async function openShot(job: RenderJob) {
   if (job.projectId !== project.projectId) {
     if (!(await project.openProject(job.projectId))) return;
@@ -189,34 +140,14 @@ onMounted(() => render.refresh());
       <div class="drawer-body">
         <div v-if="!render.jobs.length" class="muted">{{ t('queue.empty') }}</div>
 
-        <section v-for="group in queueGroups" :key="group.key" class="queue-section">
-          <div class="section-label">{{ group.label }} <span>{{ group.jobs.length }}</span></div>
-          <article v-for="job in group.jobs" :key="`${job.projectId}/${job.id}`" class="job panel">
-            <div class="job-head">
-              <span :class="['badge', STATUS_BADGE[job.status]]">{{ statusLabel(job.status) }}</span>
-              <span class="mono muted job-id" :title="job.id">{{ job.id }}</span>
-            </div>
-            <div class="job-meta muted">
-              <button class="shot-link" @click="openShot(job)">{{ job.projectTitle || job.projectId }} · {{ job.shotTitle || job.shotId }}</button>
-              <span class="badge no-dot mode-badge">{{ H3_MODE_LABEL[job.requestSnapshot?.mode ?? 't2va'] }}</span>
-              <span v-if="job.status !== 'LOCAL_QUEUED'" class="badge no-dot elapsed">{{ active.includes(job) ? t('queue.elapsedRunning') : t('queue.elapsedTook') }} {{ elapsedText(job) }}</span>
-              <span v-if="costText(job)" class="cost-text">{{ costText(job) }}</span>
-            </div>
-            <div v-if="job.providerTaskId" class="task-ref">
-              <span>{{ t('queue.taskRef') }}</span>
-              <code :title="job.providerTaskId">{{ job.providerTaskId }}</code>
-            </div>
-            <div v-if="job.error" class="error mono">{{ job.error.slice(0, 400) }}</div>
-            <div v-if="['FAILED', 'CANCELLED'].includes(job.status)" class="job-actions">
-              <button v-if="job.providerTaskId" class="sm" :title="t('queue.syncHint')" @click="retry(job)">{{ t('queue.syncCloud') }}</button>
-              <button v-else class="sm" @click="retry(job)">{{ t('queue.resubmit') }}</button>
-            </div>
-            <div v-if="CANCELLABLE.includes(job.status)" class="job-actions">
-              <button class="sm" @click="theaterKey = `${job.projectId}/${job.id}`">{{ t('queue.theater') }}</button>
-              <button class="sm danger" @click="cancel(job)">{{ t('queue.cancel') }}</button>
-            </div>
-          </article>
-        </section>
+        <RenderJobList
+          :groups="queueGroups"
+          :now="nowTick"
+          @open-shot="openShot"
+          @retry="retry"
+          @cancel="cancel"
+          @theater="theaterKey = $event"
+        />
       </div>
     </div>
 
@@ -233,7 +164,7 @@ onMounted(() => render.refresh());
         <h2 class="theater-title">{{ theaterJob.shotTitle || theaterJob.shotId }}</h2>
         <p class="theater-project">{{ theaterJob.projectTitle || theaterJob.projectId }}</p>
         <div class="theater-elapsed">
-          <span class="counter">{{ elapsedText(theaterJob) }}</span>
+          <span class="counter">{{ elapsedText(theaterJob, nowTick) }}</span>
           <span class="label">{{ active.includes(theaterJob) ? t('queue.elapsedRunning') : t('queue.elapsedTotal') }}</span>
         </div>
         <div class="theater-stages">
@@ -282,20 +213,6 @@ onMounted(() => render.refresh());
 .cost-bar { padding: 8px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 .cost-bar > * { max-width: 100%; }
 .drawer-body { flex: 1; overflow: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
-.queue-section { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.section-label { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; font-weight: 650; }
-.section-label span { color: var(--text-3); font-weight: 500; }
-.job { min-width: 0; padding: 12px; display: flex; flex-direction: column; gap: 9px; overflow: hidden; }
-.job-head { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.job-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job-meta { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.shot-link { min-width: 0; max-width: 100%; padding: 3px 8px; border-radius: 999px; font-size: 11px; color: var(--info); background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 36%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mode-badge { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.cost-text { margin-left: auto; white-space: nowrap; }
-.task-ref { min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 9px; border-radius: 6px; background: var(--bg-subtle); color: var(--text-3); font-size: 11px; }
-.task-ref code { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
-.error { min-width: 0; max-width: 100%; color: var(--bad); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; background: rgba(217, 99, 92, 0.08); padding: 8px 9px; border-radius: 6px; }
-.job-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* --------------------------------------------------------------- theater */
 .theater {

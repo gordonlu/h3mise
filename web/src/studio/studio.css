@@ -220,3 +220,12 @@
 .hf-bottom-spacer { flex: 1; }
 .hf-bottom-body { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px 14px; }
 .hf-dock-panel { font-size: 12px; }
+
+.hf-action {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--radius-pill);
+  border: 1px solid var(--line-2); background: var(--bg-3); color: var(--text); font-size: 11px; cursor: pointer;
+}
+.hf-action:hover { border-color: var(--accent); color: var(--accent-text); }
+.hf-action.paid { border-color: var(--accent-line); color: var(--accent-text); background: var(--accent-soft); }
+.hf-action:disabled { opacity: 0.5; cursor: default; }
+.hf-action-cost { font-weight: 700; }

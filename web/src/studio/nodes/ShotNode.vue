@@ -1,21 +1,35 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { NodeProps } from '@vue-flow/core';
 import { H3_MODE_LABEL, SHOT_USER_STATUS_LABEL, type CanvasNode, type ShotNodeData } from '@h3mise/shared';
 import { fileUrl } from '../../api/client';
 import { useStudioStore } from '../../stores/studio';
+import { useShotActions } from '../../composables/useShotActions';
 import BaseNode from './BaseNode.vue';
 import { useNodeChrome } from './useNodeChrome';
 
 const props = defineProps<NodeProps<{ node: CanvasNode }>>();
 const { node, selected, lod } = useNodeChrome(props);
 const studio = useStudioStore();
+const { mainAction } = useShotActions();
 const data = computed(() => node.value.data as ShotNodeData);
 const cover = computed(() => (data.value.coverPath ? fileUrl(data.value.coverPath) : null));
 const missing = computed(() => data.value.missingRequired);
 const live = computed(() => studio.liveJobs[node.value.domainId] ?? null);
 const status = computed(() => (live.value ? live.value.status : SHOT_USER_STATUS_LABEL[data.value.userStatus]));
 const statusClass = computed(() => (live.value ? 's-rendering' : `s-${data.value.userStatus}`));
+const action = computed(() => mainAction(node.value.domainId, data.value));
+const busy = ref(false);
+
+async function runAction(): Promise<void> {
+  if (action.value.disabled || busy.value) return;
+  busy.value = true;
+  try {
+    await action.value.run();
+  } finally {
+    busy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -39,5 +53,16 @@ const statusClass = computed(() => (live.value ? 's-rendering' : `s-${data.value
       <span v-for="chip in data.castChips" :key="chip.entityId" class="hf-chip">{{ chip.name }}</span>
       <span v-for="item in missing" :key="item" class="hf-chip missing">{{ item }}</span>
     </div>
+    <template #foot>
+      <button
+        class="hf-action nodrag nopan"
+        :class="{ paid: action.paid }"
+        :disabled="action.disabled || busy"
+        @click.stop="runAction"
+        @mousedown.stop
+      >
+        {{ busy ? '…' : action.label }}<span v-if="action.paid" class="hf-action-cost">¥</span>
+      </button>
+    </template>
   </BaseNode>
 </template>

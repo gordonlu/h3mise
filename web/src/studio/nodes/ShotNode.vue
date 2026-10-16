@@ -2,11 +2,12 @@
 import { computed, ref } from 'vue';
 import type { NodeProps } from '@vue-flow/core';
 import { H3_MODE_LABEL, SHOT_USER_STATUS_LABEL, type CanvasNode, type ShotNodeData } from '@h3mise/shared';
-import { fileUrl } from '../../api/client';
+import { fileUrl, takeVideoUrl } from '../../api/client';
 import { useStudioStore } from '../../stores/studio';
 import { useShotActions } from '../../composables/useShotActions';
 import { useRunPlanStore } from '../../stores/runPlan';
 import BaseNode from './BaseNode.vue';
+import HoverPreview from './HoverPreview.vue';
 import { useNodeChrome } from './useNodeChrome';
 
 const props = defineProps<NodeProps<{ node: CanvasNode }>>();
@@ -16,6 +17,7 @@ const runPlan = useRunPlanStore();
 const { mainAction } = useShotActions();
 const data = computed(() => node.value.data as ShotNodeData);
 const cover = computed(() => (data.value.coverPath ? fileUrl(data.value.coverPath) : null));
+const previewVideo = computed(() => (data.value.previewTakeId ? takeVideoUrl(data.value.previewTakeId) : null));
 const missing = computed(() => data.value.missingRequired);
 const live = computed(() => studio.liveJobs[node.value.domainId] ?? null);
 const status = computed(() => (live.value ? live.value.status : SHOT_USER_STATUS_LABEL[data.value.userStatus]));
@@ -44,8 +46,7 @@ async function runAction(): Promise<void> {
     :status="status"
     :status-class="statusClass"
   >
-    <img v-if="cover" class="hf-thumb" :src="cover" loading="lazy" decoding="async" :alt="node.title" />
-    <div v-else class="hf-thumb" />
+    <HoverPreview :thumb="cover" :video="previewVideo" :enabled="lod !== 'overview'" media-class="hf-thumb" :alt="node.title" />
     <div class="hf-chips">
       <span v-if="planOrder" class="hf-chip hf-chip-plan">#{{ planOrder }}</span>
       <span v-if="data.h3Mode" class="hf-chip">{{ H3_MODE_LABEL[data.h3Mode] }}</span>

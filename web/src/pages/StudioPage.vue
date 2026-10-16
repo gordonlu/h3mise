@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useStudioStore } from '../stores/studio';
 import { useAutoProduce } from '../composables/useAutoProduce';
+import { post } from '../api/client';
 import { t } from '../stores/locale';
 import StudioCanvas from '../studio/StudioCanvas.vue';
 import StudioInspector from '../studio/inspector/StudioInspector.vue';
@@ -12,6 +13,7 @@ import LeftDock from '../studio/dock/LeftDock.vue';
 import RunPlanCard from '../studio/overlays/RunPlanCard.vue';
 import ContextMenu from '../studio/overlays/ContextMenu.vue';
 import NoteEditor from '../studio/overlays/NoteEditor.vue';
+import QuickCreateMenu from '../studio/overlays/QuickCreateMenu.vue';
 
 const store = useStudioStore();
 const route = useRoute();
@@ -26,7 +28,24 @@ const gridColumns = computed(() =>
   `${dockOpen.value ? '220px ' : ''}minmax(0, 1fr)${showInspector.value ? ' 400px' : ''}`,
 );
 
-const isEmpty = computed(() => !loading.value && !error.value && (graph.value?.nodes.length ?? 0) === 0);
+const isEmpty = computed(() => {
+  if (loading.value || error.value) return false;
+  const nodes = graph.value?.nodes ?? [];
+  return !nodes.some((node) => node.kind === 'shot' || node.kind === 'beat');
+});
+
+async function startFromStory(): Promise<void> {
+  for (const title of [t('studio.template.beatSetup'), t('studio.template.beatRising'), t('studio.template.beatPayoff')]) {
+    await post('/api/story/beats', { title, category: 'other' });
+  }
+  await store.load();
+}
+
+async function startFromShot(): Promise<void> {
+  const shot = await post<{ id: string }>('/api/shots', { h3Mode: 't2va' });
+  await store.refreshGraph();
+  store.select(`shot:${shot.id}`);
+}
 
 function checkWidth(): void {
   narrow.value = window.innerWidth < 1280;
@@ -87,7 +106,7 @@ onUnmounted(() => {
     <div class="hf-body-row" :style="{ gridTemplateColumns: gridColumns }">
       <LeftDock v-if="dockOpen && !loading && !error" />
       <div class="hf-canvas">
-        <StudioCanvas v-if="!loading && !error && !isEmpty" />
+        <StudioCanvas v-if="!loading && !error" />
         <div v-if="loading" class="hf-overlay">
           <div class="hf-overlay-card">{{ t('studio.loading') }}</div>
         </div>
@@ -98,7 +117,23 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-else-if="isEmpty" class="hf-overlay">
-          <div class="hf-overlay-card">{{ t('studio.empty') }}</div>
+          <div class="hf-overlay-card">
+            <p class="hf-template-title">{{ t('studio.empty') }}</p>
+            <div class="hf-templates">
+              <button class="hf-template" @click="startFromStory">
+                <strong>{{ t('studio.template.story') }}</strong>
+                <small>{{ t('studio.template.storyHint') }}</small>
+              </button>
+              <button class="hf-template" @click="startFromShot">
+                <strong>{{ t('studio.template.shot') }}</strong>
+                <small>{{ t('studio.template.shotHint') }}</small>
+              </button>
+              <button class="hf-template" disabled>
+                <strong>{{ t('studio.template.refVideo') }}</strong>
+                <small>{{ t('studio.template.soon') }}</small>
+              </button>
+            </div>
+          </div>
         </div>
         <RunPlanCard />
       </div>
@@ -112,6 +147,7 @@ onUnmounted(() => {
     <BottomDock v-if="!loading && !error && !isEmpty" />
     <ContextMenu />
     <NoteEditor />
+    <QuickCreateMenu />
   </div>
 </template>
 

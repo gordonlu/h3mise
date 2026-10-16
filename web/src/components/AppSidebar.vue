@@ -15,6 +15,7 @@ const props = defineProps<{
   guide: ProjectGuideSummary | null;
   ffmpegAvailable: boolean | null;
   onSwitch: (id: string) => Promise<void>;
+  collapsed?: boolean;
 }>();
 const emit = defineEmits<{ palette: [] }>();
 
@@ -131,7 +132,7 @@ async function pickProject(id: string): Promise<void> {
 </script>
 
 <template>
-  <aside ref="root" class="side" :aria-label="t('nav.workspaceAria')">
+  <aside ref="root" class="side" :class="{ collapsed: props.collapsed }" :aria-label="t('nav.workspaceAria')">
     <router-link to="/projects" class="side-brand">
       <img src="/h3mise-logo.png" alt="H3Mise" />
     </router-link>
@@ -263,6 +264,21 @@ async function pickProject(id: string): Promise<void> {
   scrollbar-width: none;
 }
 .side::-webkit-scrollbar { display: none; }
+/* Collapsed icon rail used on the Studio canvas route. */
+.side.collapsed { padding: 14px 6px; align-items: center; }
+.side.collapsed .side-project,
+.side.collapsed .side-next,
+.side.collapsed .side-section-label,
+.side.collapsed .side-brand img { display: none; }
+.side.collapsed .side-brand { padding: 2px 0 8px; }
+.side.collapsed .side-item,
+.side.collapsed .side-util,
+.side.collapsed .side-oneclick { justify-content: center; gap: 0; padding-left: 0; padding-right: 0; }
+.side.collapsed .side-label,
+.side.collapsed .side-count,
+.side.collapsed .side-util span,
+.side.collapsed .side-oneclick span { display: none; }
+.side.collapsed .side-toggles { flex-direction: column; }
 .side-brand { display: flex; align-items: center; padding: 2px 6px 8px; }
 .side-brand img { height: 34px; width: auto; display: block; }
 

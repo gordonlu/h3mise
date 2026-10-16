@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, watch, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useProjectStore } from './stores/project';
 import { useRenderStore } from './stores/render';
@@ -26,6 +26,8 @@ const theme = useThemeStore();
 const ai = useAiStore();
 const health = ref<{ ffmpeg: { available: boolean } } | null>(null);
 const paletteOpen = ref(false);
+const isStudio = computed(() => route.path.startsWith('/studio'));
+const shellColumns = computed(() => (isStudio.value ? '76px minmax(0, 1fr)' : '276px minmax(0, 1fr)'));
 const projectGuide = ref<ProjectGuideSummary | null>(null);
 let off: (() => void) | null = null;
 let aiTimer: number | undefined;
@@ -141,11 +143,12 @@ watch(() => route.path, () => {
 <template>
   <DotField />
 
-  <div class="shell">
+  <div class="shell" :style="{ gridTemplateColumns: shellColumns }">
     <AppSidebar
       :guide="projectGuide"
       :ffmpeg-available="health?.ffmpeg.available ?? null"
       :on-switch="switchProject"
+      :collapsed="isStudio"
       @palette="paletteOpen = true"
     />
 

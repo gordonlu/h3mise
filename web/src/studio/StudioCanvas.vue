@@ -28,6 +28,7 @@ import { useConnect } from '../composables/useConnect';
 import { CREATE_MIME, useCanvasCreate, type CreateDescriptor } from '../composables/useCanvasCreate';
 import { useRunPlanStore } from '../stores/runPlan';
 import { useNoteEditorStore } from '../stores/noteEditor';
+import { useQuickCreateStore } from '../stores/quickCreate';
 import StoryNode from './nodes/StoryNode.vue';
 import BeatNode from './nodes/BeatNode.vue';
 import SequenceNode from './nodes/SequenceNode.vue';
@@ -45,7 +46,7 @@ import GhostNode from './nodes/GhostNode.vue';
 import TypedEdge from './edges/TypedEdge.vue';
 
 const store = useStudioStore();
-const { viewport, project } = useVueFlow();
+const { viewport, project, connectionStartHandle } = useVueFlow();
 const persist = useLayoutPersist();
 const history = useLayoutHistory();
 useGraphSync();
@@ -139,13 +140,32 @@ function onDragStop(event: NodeDragEvent): void {
 }
 
 const connectApi = useConnect();
+const quickCreate = useQuickCreateStore();
+let connectedThisDrag = false;
 
 function isValidConnection(connection: Connection): boolean {
   return connectApi.isValid(connection.source, connection.sourceHandle, connection.target, connection.targetHandle);
 }
 
 function onConnect(connection: Connection): void {
+  connectedThisDrag = true;
   void connectApi.connect(connection.source, connection.sourceHandle, connection.target, connection.targetHandle);
+}
+
+function onConnectEnd(event: MouseEvent | TouchEvent | undefined): void {
+  if (connectedThisDrag) {
+    connectedThisDrag = false;
+    return;
+  }
+  const start = connectionStartHandle.value;
+  if (!start?.nodeId || !start.id) return;
+  const point = event as MouseEvent | undefined;
+  if (!point || typeof point.clientX !== 'number') return;
+  quickCreate.open(
+    { x: point.clientX, y: point.clientY },
+    project({ x: point.clientX, y: point.clientY }),
+    { nodeId: start.nodeId, port: String(start.id) },
+  );
 }
 
 function onEdgeClick(event: EdgeMouseEvent): void {
@@ -218,6 +238,7 @@ function onDrop(event: DragEvent): void {
     @node-context-menu="onNodeContext"
     @node-drag-stop="onDragStop"
     @connect="onConnect"
+    @connect-end="onConnectEnd"
     @edge-click="onEdgeClick"
     @viewport-change-end="onViewport"
     @pane-click="onPaneClick"

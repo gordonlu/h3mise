@@ -34,9 +34,10 @@ export function useCanvasCreate() {
     return best?.id ?? null;
   }
 
-  async function create(descriptor: CreateDescriptor, position: { x: number; y: number }): Promise<void> {
+  async function create(descriptor: CreateDescriptor, position: { x: number; y: number }): Promise<string | null> {
     const storyId = store.graph?.storyId;
-    if (!storyId) return;
+    if (!storyId) return null;
+    let createdId: string | null = null;
     if (descriptor.kind === 'shot') {
       const beatId = beatAt(position.y);
       const shot = await post<Shot>('/api/shots', {
@@ -49,22 +50,27 @@ export function useCanvasCreate() {
         nodes: [{ nodeId: `shot:${shot.id}`, x: position.x, y: position.y, collapsed: false, pinned: true, userPlaced: false }],
       });
       await store.refreshGraph();
-      store.select(`shot:${shot.id}`);
+      createdId = `shot:${shot.id}`;
+      store.select(createdId);
     } else if (descriptor.kind === 'beat') {
-      await post('/api/story/beats', { title: descriptor.label ?? t('studio.create.newBeat') });
+      const beat = await post<{ id: string }>('/api/story/beats', { title: descriptor.label ?? t('studio.create.newBeat') });
       await store.refreshGraph();
+      createdId = `beat:${beat.id}`;
     } else if (descriptor.kind === 'entity') {
       const entity = await post<{ id: string }>('/api/assets/entities', {
         kind: descriptor.entityKind ?? 'character',
         name: descriptor.label ?? t('studio.create.newEntity'),
       });
       await store.refreshGraph();
-      store.select(`entity:${entity.id}`);
+      createdId = `entity:${entity.id}`;
+      store.select(createdId);
     } else {
-      await post('/api/canvas/annotations', { storyId, kind: descriptor.kind, x: position.x, y: position.y, text: '' });
+      const note = await post<{ id: string }>('/api/canvas/annotations', { storyId, kind: descriptor.kind, x: position.x, y: position.y, text: '' });
       await store.load();
+      createdId = `${descriptor.kind}:${note.id}`;
     }
     toasts.push({ kind: 'ok', text: t('studio.create.done') });
+    return createdId;
   }
 
   return { create, beatAt };

@@ -273,3 +273,15 @@
 @media (prefers-reduced-motion: reduce) {
   .hf-board-regen { transition: none; }
 }
+
+/* ----------------------------------------------------- empty templates --- */
+.hf-template-title { margin: 0 0 12px; }
+.hf-templates { display: grid; gap: 8px; }
+.hf-template {
+  display: grid; gap: 2px; text-align: left; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-3);
+  color: var(--text); cursor: pointer; font-size: 13px;
+}
+.hf-template:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); }
+.hf-template small { color: var(--text-3); }
+.hf-template:disabled { opacity: 0.55; cursor: default; }

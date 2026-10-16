@@ -7,6 +7,7 @@ import { useToastStore } from '../stores/toast';
 import { useRenderStore } from '../stores/render';
 import { useAiStore } from '../stores/ai';
 import { confirmDialog } from '../stores/confirm';
+import { usePaidAction } from '../composables/usePaidAction';
 import { t } from '../stores/locale';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL } from '@h3mise/shared';
 import type { RenderBatchPlan, RenderBatchPrepareResult, RenderBatchShotStage, RenderJob, Shot, ShotRenderReadiness, ShotStatus } from '@h3mise/shared';
@@ -154,41 +155,40 @@ async function prepareBatch() {
 async function submitReadyBatch() {
   const ready = batchPlan.value?.shots.filter((item) => item.stage === 'ready' && item.promptVersionId) ?? [];
   if (!ready.length) return;
-  const paid = batchProviderId.value === 'runninghub';
-  const message = [
-    t('pages.shots.submitProvider', { provider: batchProviderId.value }),
-    t('pages.shots.submitConcurrency', { concurrency: batchPlan.value?.providerConcurrency ?? 1 }),
-    ...(batchMegapixels.value !== undefined ? [t('pages.shots.submitMegapixels', { mp: batchMegapixels.value })] : []),
-    '',
-    t('pages.shots.submitTasks', { n: ready.length }) + (paid ? t('pages.shots.submitPaidNote') : ''),
-  ].join('\n');
-  const ok = await confirmDialog({
-    title: t('pages.shots.submitTitle', { n: ready.length }),
-    message,
-    confirmLabel: paid ? t('pages.shots.confirmPaid', { n: ready.length }) : t('pages.shots.confirmQueue', { n: ready.length }),
-    danger: paid,
-  });
-  if (!ok) return;
-  batchBusy.value = true;
-  try {
-    const results = await Promise.allSettled(ready.map((item) => post<RenderJob>('/api/render', {
-      shotId: item.shotId,
-      promptVersionId: item.promptVersionId,
-      providerId: batchProviderId.value,
+  const provider = project.providers.find((item) => item.id === batchProviderId.value) ?? null;
+  const paid = usePaidAction();
+  await paid.confirm(
+    {
+      title: t('pages.shots.submitTitle', { n: ready.length }),
+      providerName: provider?.name ?? batchProviderId.value,
+      mock: batchProviderId.value === 'mock',
+      verification: provider?.verification?.status ?? null,
+      taskCount: ready.length,
       ...(batchMegapixels.value !== undefined ? { megapixels: batchMegapixels.value } : {}),
-    })));
-    const submitted = results.filter((result) => result.status === 'fulfilled').length;
-    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-    await Promise.all([load(), renderStore.refresh()]);
-    await analyzeBatch();
-    if (submitted) toasts.push({ kind: 'ok', text: t('pages.shots.submittedQueue', { n: submitted }) });
-    if (failures.length) {
-      const first = failures[0]?.reason;
-      toasts.push({ kind: 'err', text: t('pages.shots.submitFailed', { n: failures.length, msg: first instanceof Error ? first.message : String(first) }) });
-    }
-  } finally {
-    batchBusy.value = false;
-  }
+    },
+    async () => {
+      batchBusy.value = true;
+      try {
+        const results = await Promise.allSettled(ready.map((item) => post<RenderJob>('/api/render', {
+          shotId: item.shotId,
+          promptVersionId: item.promptVersionId,
+          providerId: batchProviderId.value,
+          ...(batchMegapixels.value !== undefined ? { megapixels: batchMegapixels.value } : {}),
+        })));
+        const submitted = results.filter((result) => result.status === 'fulfilled').length;
+        const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+        await Promise.all([load(), renderStore.refresh()]);
+        await analyzeBatch();
+        if (submitted) toasts.push({ kind: 'ok', text: t('pages.shots.submittedQueue', { n: submitted }) });
+        if (failures.length) {
+          const first = failures[0]?.reason;
+          toasts.push({ kind: 'err', text: t('pages.shots.submitFailed', { n: failures.length, msg: first instanceof Error ? first.message : String(first) }) });
+        }
+      } finally {
+        batchBusy.value = false;
+      }
+    },
+  );
 }
 
 async function createShot() {

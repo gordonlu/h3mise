@@ -5,6 +5,7 @@ import { useRenderStore } from '../stores/render';
 import { useProjectStore } from '../stores/project';
 import { post } from '../api/client';
 import { confirmDialog } from '../stores/confirm';
+import { usePaidAction } from '../composables/usePaidAction';
 import { toast } from '../stores/toast';
 import { t } from '../stores/locale';
 import { H3_MODE_LABEL } from '@h3mise/shared';
@@ -120,14 +121,33 @@ async function cancel(job: RenderJob) {
 }
 
 async function retry(job: RenderJob) {
-  try {
-    await post(`/api/render/${job.id}/retry?projectId=${encodeURIComponent(job.projectId)}`);
-  } catch (e) {
-    // e.g. "a render job for this exact intent is already active" (409)
-    toast(e instanceof Error ? e.message : String(e), 'err');
+  const run = async () => {
+    try {
+      await post(`/api/render/${job.id}/retry?projectId=${encodeURIComponent(job.projectId)}`);
+    } catch (e) {
+      // e.g. "a render job for this exact intent is already active" (409)
+      toast(e instanceof Error ? e.message : String(e), 'err');
+      return;
+    }
+    await render.refresh();
+  };
+  // A retry with no provider task ID creates a NEW paid task; reconcile
+  // (has providerTaskId) and mock stay direct.
+  if (job.providerTaskId || job.provider === 'mock') {
+    await run();
     return;
   }
-  await render.refresh();
+  const paid = usePaidAction();
+  await paid.confirm(
+    {
+      title: t('queue.resubmit'),
+      providerName: job.provider,
+      mock: false,
+      target: job.shotTitle || job.shotId,
+      taskCount: 1,
+    },
+    run,
+  );
 }
 
 function costText(job: RenderJob): string {

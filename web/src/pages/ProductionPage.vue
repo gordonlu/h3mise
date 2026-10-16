@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { AutoProducePlan, AutoProduceRun, ProductionIssueCategory, ProductionIssueSeverity, ProductionOverview, RenderBatchShotStage, VideoProviderId } from '@h3mise/shared';
 import { get, post, subscribeEvents } from '../api/client';
 import { t } from '../stores/locale';
+import { usePaidAction } from '../composables/usePaidAction';
 
 const overview = ref<ProductionOverview | null>(null);
 const loading = ref(true);
@@ -14,7 +15,6 @@ const autoBusy = ref(false);
 const autoError = ref('');
 const providerId = ref<VideoProviderId>('mock');
 const megapixels = ref(0.6);
-const realConfirmed = ref(false);
 let stopEvents: (() => void) | null = null;
 
 function stageLabel(stage: RenderBatchShotStage): string {
@@ -87,15 +87,31 @@ const progress = computed(() => autoRun.value?.totalShots ? Math.round(autoRun.v
 
 async function startAuto() {
   if (!autoPlan.value) return;
-  autoBusy.value = true; autoError.value = '';
-  try {
-    autoRun.value = await post<AutoProduceRun>('/api/auto-produce/start', {
-      providerId: providerId.value, aspectRatio: autoPlan.value.settings.aspectRatio,
-      megapixels: megapixels.value, skipCompleted: true,
-      confirmRealProvider: providerId.value !== 'mock' && realConfirmed.value,
-    });
-  } catch (cause) { autoError.value = cause instanceof Error ? cause.message : String(cause); }
-  finally { autoBusy.value = false; }
+  const run = async () => {
+    autoBusy.value = true; autoError.value = '';
+    try {
+      autoRun.value = await post<AutoProduceRun>('/api/auto-produce/start', {
+        providerId: providerId.value, aspectRatio: autoPlan.value!.settings.aspectRatio,
+        megapixels: megapixels.value, skipCompleted: true,
+        confirmRealProvider: providerId.value !== 'mock',
+      });
+    } catch (cause) { autoError.value = cause instanceof Error ? cause.message : String(cause); }
+    finally { autoBusy.value = false; }
+  };
+  if (providerId.value === 'mock') {
+    await run();
+    return;
+  }
+  const paid = usePaidAction();
+  await paid.confirm(
+    {
+      title: t('workflow.production.oneClickProduction'),
+      providerName: chosenProvider.value?.name ?? providerId.value,
+      mock: false,
+      taskCount: autoPlan.value.renderCount,
+    },
+    run,
+  );
 }
 
 async function cancelAuto() {
@@ -147,8 +163,7 @@ onUnmounted(() => stopEvents?.());
           <small v-if="chosenProvider" class="provider-note" :class="{ caution: chosenProvider.requiresConfirmation && !chosenProvider.note.startsWith('已通过') }">{{ localizeProviderNote(chosenProvider.note) }}</small>
           <label>{{ t('workflow.production.quality') }}<select v-model.number="megapixels"><option :value="0.6">0.6MP ({{ t('workflow.production.recommended') }})</option><option :value="0.8">0.8MP</option><option :value="1">1.0MP</option><option :value="1.2">1.2MP</option></select></label>
           <div class="estimate">{{ t('workflow.production.valueNewRendersValueFinalDuration', { v0: autoPlan?.renderCount ?? 0, v1: seconds(autoPlan?.estimatedDurationSeconds ?? 0) }) }}</div>
-          <label v-if="chosenProvider?.requiresConfirmation" class="paid-confirm"><input v-model="realConfirmed" type="checkbox"> {{ t('workflow.production.paidConfirm', { provider: chosenProvider.name, n: autoPlan?.renderCount ?? 0 }) }}</label>
-          <button class="primary" :disabled="autoBusy || Boolean(autoPlan?.blockers.length) || !chosenProvider?.usable || (chosenProvider?.requiresConfirmation && !realConfirmed)" @click="startAuto">{{ autoBusy ? t('workflow.production.starting') : t('workflow.production.confirmAndStartProduction') }}</button>
+          <button class="primary" :disabled="autoBusy || Boolean(autoPlan?.blockers.length) || !chosenProvider?.usable" @click="startAuto">{{ autoBusy ? t('workflow.production.starting') : t('workflow.production.confirmAndStartProduction') }}</button>
           <div v-if="autoPlan?.blockers.length" class="auto-blocker">{{ autoPlan.blockers.join('；') }}</div>
           <div v-if="autoRun?.status === 'succeeded'" class="auto-success">{{ t('workflow.production.lastProductionCompleted') }}<a v-if="autoRun.exportUrl" :href="autoRun.exportUrl" target="_blank">{{ t('workflow.production.previewVideo') }}</a></div>
           <div v-else-if="autoRun?.status === 'failed'" class="auto-blocker">{{ t('workflow.production.lastStoppedAt') }}{{ autoRun.currentStep }}。{{ autoRun.error }}</div>

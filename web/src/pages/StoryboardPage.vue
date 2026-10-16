@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { Storyboard, StoryboardPanelCount, StoryboardProviderProfile } from '@h3mise/shared';
 import { recommendedStoryboardPanelCount } from '@h3mise/shared';
 import { get, mediaUrl, patch, post } from '../api/client';
-import { confirmDialog } from '../stores/confirm';
+import { usePaidAction } from '../composables/usePaidAction';
 import { useToastStore } from '../stores/toast';
 import { t } from '../stores/locale';
 
@@ -107,41 +107,59 @@ function costText(): string {
 
 async function generateSheet() {
   if (!storyboard.value || busy.value || active.value) return;
-  const ok = await confirmDialog({
-    title: t('workflow.storyboard.generateAValuePanelStoryboard', { v0: storyboard.value.panelCount }),
-    message: t('workflow.storyboard.valueThisCreatesARealPaidRunningHub', { v0: costText() }),
-    confirmLabel: t('workflow.storyboard.confirmPaidGeneration'),
-  });
-  if (!ok) return;
-  busy.value = true;
-  try {
-    storyboard.value = await post<Storyboard>(`/api/storyboard/${storyboard.value.id}/generate`, { confirmed: true });
-    toasts.push({ kind: 'info', text: t('workflow.storyboard.storyboardGenerationSubmittedYouMayLeaveAnd') });
-    schedulePoll();
-  } catch (error) {
-    toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
-  } finally {
-    busy.value = false;
-  }
+  const paid = usePaidAction();
+  await paid.confirm(
+    {
+      title: t('workflow.storyboard.generateAValuePanelStoryboard', { v0: storyboard.value.panelCount }),
+      providerName: 'Storyboard 生图',
+      providerRegion: provider.value?.region ?? null,
+      mock: false,
+      verification: provider.value?.verification?.status ?? null,
+      target: `Page ${storyboard.value.pageNumber}/${storyboard.value.totalPages}`,
+      estimatedCost: costText(),
+      taskCount: 1,
+    },
+    async () => {
+      busy.value = true;
+      try {
+        storyboard.value = await post<Storyboard>(`/api/storyboard/${storyboard.value!.id}/generate`, { confirmed: true });
+        toasts.push({ kind: 'info', text: t('workflow.storyboard.storyboardGenerationSubmittedYouMayLeaveAnd') });
+        schedulePoll();
+      } catch (error) {
+        toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
+      } finally {
+        busy.value = false;
+      }
+    },
+  );
 }
 
 async function regeneratePanel(panelId: string, order: number) {
   if (!storyboard.value || busy.value || active.value) return;
-  const ok = await confirmDialog({
-    title: t('workflow.storyboard.regeneratePanelValue', { v0: order }),
-    message: t('workflow.storyboard.valueTheOldVersionIsKeptOnly', { v0: costText() }),
-    confirmLabel: t('workflow.storyboard.confirmPaidRegeneration'),
-  });
-  if (!ok) return;
-  busy.value = true;
-  try {
-    storyboard.value = await post<Storyboard>(`/api/storyboard/${storyboard.value.id}/panels/${panelId}/regenerate`, { confirmed: true });
-    schedulePoll();
-  } catch (error) {
-    toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
-  } finally {
-    busy.value = false;
-  }
+  const paid = usePaidAction();
+  await paid.confirm(
+    {
+      title: t('workflow.storyboard.regeneratePanelValue', { v0: order }),
+      providerName: 'Storyboard 生图',
+      providerRegion: provider.value?.region ?? null,
+      mock: false,
+      verification: provider.value?.verification?.status ?? null,
+      target: `Panel ${order}`,
+      estimatedCost: costText(),
+      taskCount: 1,
+    },
+    async () => {
+      busy.value = true;
+      try {
+        storyboard.value = await post<Storyboard>(`/api/storyboard/${storyboard.value!.id}/panels/${panelId}/regenerate`, { confirmed: true });
+        schedulePoll();
+      } catch (error) {
+        toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
+      } finally {
+        busy.value = false;
+      }
+    },
+  );
 }
 
 async function approve() {

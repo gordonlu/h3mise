@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { CanvasPortId } from '@h3mise/shared';
 import { cleanupTempRoot, makeStore } from './helpers.js';
 import { activeEpisodeId } from '../src/modules/story.js';
-import { createShot, getShot } from '../src/modules/shots.js';
+import { createShot, getShot, updateShot } from '../src/modules/shots.js';
 import * as assetsMod from '../src/modules/assets.js';
 import * as canvasMod from '../src/modules/canvas.js';
 
@@ -166,4 +166,97 @@ test('connection commands never create render or storyboard jobs', async () => {
     storyboard: ctx.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM storyboard_jobs')!.n,
   };
   assert.deepEqual(after, before);
+});
+
+function addMedia(
+  ctx: Awaited<ReturnType<typeof openDemo>>['ctx'],
+  kind: 'image' | 'video' | 'audio',
+  tag: string,
+) {
+  return assetsMod.insertMedia(ctx, {
+    kind,
+    fileName: `assets/${tag}.${kind === 'image' ? 'png' : kind === 'video' ? 'mp4' : 'wav'}`,
+    mimeType: kind === 'image' ? 'image/png' : kind === 'video' ? 'video/mp4' : 'audio/wav',
+    sizeBytes: 10,
+    label: tag,
+  });
+}
+
+function placeMedia(
+  ctx: Awaited<ReturnType<typeof openDemo>>['ctx'],
+  storyId: string,
+  mediaId: string,
+): void {
+  canvasMod.saveLayout(ctx, {
+    storyId,
+    nodes: [{ nodeId: `media:${mediaId}`, x: 0, y: 0, collapsed: false, pinned: false, userPlaced: true }],
+  });
+}
+
+test('R3 entity(scene)→shot.cast sets the scene', async () => {
+  const { ctx, storyId } = await openDemo();
+  const yard = assetsMod.createEntity(ctx, { kind: 'scene', name: 'Yard' });
+  await canvasMod.connectCanvas(ctx, request(storyId, `entity:${yard.id}`, 'entity', 'shot:shot-001', 'cast', { replace: true }));
+  assert.equal(getShot(ctx, 'shot-001').sceneId, yard.id);
+});
+
+test('R5/R6 character_state→refs / first_frame create bindings', async () => {
+  const { ctx, storyId } = await openDemo();
+  await canvasMod.connectCanvas(ctx, request(storyId, 'character_state:cstate-002', 'image', 'shot:shot-001', 'refs', { roles: ['identity'] }));
+  const refs = assetsMod.listBindings(ctx, 'shot-001');
+  assert.ok(refs.some((binding) => binding.sourceEntityId === null && binding.roles.includes('identity')));
+
+  await canvasMod.connectCanvas(ctx, request(storyId, 'character_state:cstate-002', 'image', 'shot:shot-002', 'first_frame'));
+  assert.ok(assetsMod.listBindings(ctx, 'shot-002').some((binding) => binding.roles.includes('first_frame')));
+});
+
+test('R8 media(image)→first_frame', async () => {
+  const { ctx, storyId } = await openDemo();
+  const media = addMedia(ctx, 'image', 'r8');
+  placeMedia(ctx, storyId, media.id);
+  await canvasMod.connectCanvas(ctx, request(storyId, `media:${media.id}`, 'image', 'shot:shot-001', 'first_frame'));
+  assert.ok(assetsMod.listBindings(ctx, 'shot-001').some((binding) => binding.assetId === media.id && binding.roles.includes('first_frame')));
+});
+
+test('R9 media(image)→last_frame on an l2va shot', async () => {
+  const { ctx, storyId } = await openDemo();
+  const shot = createShot(ctx, { title: 'L2VA', h3Mode: 'l2va' });
+  const media = addMedia(ctx, 'image', 'r9');
+  placeMedia(ctx, storyId, media.id);
+  await canvasMod.connectCanvas(ctx, request(storyId, `media:${media.id}`, 'image', `shot:${shot.id}`, 'last_frame'));
+  assert.ok(assetsMod.listBindings(ctx, shot.id).some((binding) => binding.roles.includes('last_frame')));
+});
+
+test('R10 media(video)→video_ref on a vref2va shot', async () => {
+  const { ctx, storyId } = await openDemo();
+  const shot = createShot(ctx, { title: 'VRef', h3Mode: 'vref2va' });
+  const media = addMedia(ctx, 'video', 'r10');
+  placeMedia(ctx, storyId, media.id);
+  await canvasMod.connectCanvas(ctx, request(storyId, `media:${media.id}`, 'video', `shot:${shot.id}`, 'video_ref'));
+  assert.ok(assetsMod.listBindings(ctx, shot.id).some((binding) => binding.assetId === media.id && binding.type === 'video'));
+});
+
+test('R11 media(audio)→audio_ref', async () => {
+  const { ctx, storyId } = await openDemo();
+  const media = addMedia(ctx, 'audio', 'r11');
+  placeMedia(ctx, storyId, media.id);
+  await canvasMod.connectCanvas(ctx, request(storyId, `media:${media.id}`, 'audio', 'shot:shot-001', 'audio_ref'));
+  assert.ok(assetsMod.listBindings(ctx, 'shot-001').some((binding) => binding.assetId === media.id && binding.type === 'audio'));
+});
+
+test('replace rolls back the old binding when the second step fails', async () => {
+  const { ctx, storyId } = await openDemo();
+  const media = addMedia(ctx, 'image', 'rollback');
+  const existing = assetsMod.createBinding(ctx, { assetId: media.id, roles: ['first_frame'], shotId: 'shot-003' });
+  // shot-002 already depends on shot-003 → connecting shot-002 -> shot-003 cycles.
+  updateShot(ctx, 'shot-002', { renderDependencyMode: 'previous_take', dependsOnShotId: 'shot-003' });
+
+  await assert.rejects(
+    () => canvasMod.connectCanvas(ctx, request(storyId, 'shot:shot-002', 'tail_frame', 'shot:shot-003', 'first_frame', { replace: true })),
+    (error: unknown) => error instanceof canvasMod.CanvasError && error.code === 'cycle',
+  );
+  assert.ok(
+    assetsMod.listBindings(ctx, 'shot-003').some((binding) => binding.id === existing.id),
+    'the deleted binding must be restored when the command rolls back',
+  );
 });

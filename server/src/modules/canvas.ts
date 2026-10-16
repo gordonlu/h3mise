@@ -1073,7 +1073,6 @@ function rolesForRule(ruleId: string, requested: ReferenceRole[] | undefined): R
 function suggestedModeForPort(port: CanvasPortId): H3Mode | null {
   if (port === 'refs') return 'ref2va';
   if (port === 'video_ref') return 'vref2va';
-  if (port === 'first_frame') return 'i2va';
   return null;
 }
 

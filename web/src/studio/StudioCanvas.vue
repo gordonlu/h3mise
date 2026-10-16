@@ -1,6 +1,16 @@
 <script setup lang="ts">
-import { markRaw, watch } from 'vue';
-import { VueFlow, useVueFlow, type Edge, type Node, type NodeDragEvent, type NodeMouseEvent, type ViewportTransform } from '@vue-flow/core';
+import { markRaw, onMounted, onUnmounted, watch } from 'vue';
+import {
+  VueFlow,
+  useVueFlow,
+  type Connection,
+  type Edge,
+  type EdgeMouseEvent,
+  type Node,
+  type NodeDragEvent,
+  type NodeMouseEvent,
+  type ViewportTransform,
+} from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { MiniMap } from '@vue-flow/minimap';
 import { Controls } from '@vue-flow/controls';
@@ -12,6 +22,7 @@ import './studio.css';
 import { useStudioStore } from '../stores/studio';
 import { useLayoutPersist } from '../composables/useLayoutPersist';
 import { useGraphSync } from '../composables/useGraphSync';
+import { useConnect } from '../composables/useConnect';
 import StoryNode from './nodes/StoryNode.vue';
 import BeatNode from './nodes/BeatNode.vue';
 import SequenceNode from './nodes/SequenceNode.vue';
@@ -70,6 +81,29 @@ function onDragStop(event: NodeDragEvent): void {
   }
 }
 
+const connectApi = useConnect();
+
+function isValidConnection(connection: Connection): boolean {
+  return connectApi.isValid(connection.source, connection.sourceHandle, connection.target, connection.targetHandle);
+}
+
+function onConnect(connection: Connection): void {
+  void connectApi.connect(connection.source, connection.sourceHandle, connection.target, connection.targetHandle);
+}
+
+function onEdgeClick(event: EdgeMouseEvent): void {
+  store.selectEdge(event.edge.id);
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if ((event.key === 'Delete' || event.key === 'Backspace') && store.selectedEdgeId) {
+    event.preventDefault();
+    void connectApi.disconnect(store.selectedEdgeId);
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onUnmounted(() => window.removeEventListener('keydown', onKeydown));
+
 function onViewport(viewportTransform: ViewportTransform): void {
   const base = store.layout?.view;
   if (!base) return;
@@ -93,15 +127,18 @@ function onViewport(viewportTransform: ViewportTransform): void {
     :min-zoom="0.15"
     :max-zoom="2"
     :nodes-draggable="true"
-    :nodes-connectable="false"
+    :nodes-connectable="true"
     :edges-updatable="false"
     :delete-key-code="null"
     :zoom-on-double-click="false"
     :fit-view-on-init="true"
     :pan-on-scroll="false"
     selection-key-code="Shift"
+    :is-valid-connection="isValidConnection"
     @node-click="onNodeClick"
     @node-drag-stop="onDragStop"
+    @connect="onConnect"
+    @edge-click="onEdgeClick"
     @viewport-change-end="onViewport"
     @pane-click="store.clearSelection()"
   >

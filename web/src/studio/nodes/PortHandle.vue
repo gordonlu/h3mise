@@ -10,7 +10,7 @@ const props = defineProps<{ port: CanvasPort }>();
     :id="props.port.id"
     :type="props.port.direction === 'in' ? 'target' : 'source'"
     :position="props.port.direction === 'in' ? Position.Left : Position.Right"
-    :connectable="false"
+    :connectable="props.port.userConnectable"
     :class="`hf-h-${props.port.type}`"
   />
 </template>

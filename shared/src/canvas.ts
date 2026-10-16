@@ -328,7 +328,7 @@ export function shotNodePorts(h3Mode: H3Mode | null): CanvasPort[] {
     port('video_ref', 'VIDEO', 'in', '视频参考', { visible: videoMode }),
     port('audio_ref', 'AUDIO', 'in', '音频参考'),
     port('takes', 'TAKE', 'out', '生成结果', { multiple: true, userConnectable: false }),
-    port('tail_frame', 'FRAME', 'out', '尾帧输出'),
+    port('tail_frame', 'FRAME', 'out', '尾帧输出', { userConnectable: true }),
   ];
 }
 
@@ -339,7 +339,7 @@ export function storyNodePorts(): CanvasPort[] {
 export function beatNodePorts(): CanvasPort[] {
   return [
     port('story', 'TEXT', 'in', '故事', { userConnectable: false }),
-    port('beat', 'BEAT', 'out', '节拍'),
+    port('beat', 'BEAT', 'out', '节拍', { userConnectable: true }),
   ];
 }
 
@@ -352,22 +352,22 @@ export function storyboardNodePorts(panelIds: string[]): CanvasPort[] {
 }
 
 export function entityNodePorts(): CanvasPort[] {
-  return [port('entity', 'ENTITY', 'out', '实体')];
+  return [port('entity', 'ENTITY', 'out', '实体', { userConnectable: true })];
 }
 
 export function characterStateNodePorts(): CanvasPort[] {
-  return [port('image', 'IMAGE', 'out', '状态图')];
+  return [port('image', 'IMAGE', 'out', '状态图', { userConnectable: true })];
 }
 
 export function mediaNodePorts(kind: MediaKind): CanvasPort[] {
   const type: CanvasPortType = kind === 'image' ? 'IMAGE' : kind === 'video' ? 'VIDEO' : 'AUDIO';
-  return [port(kind, type, 'out', kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频')];
+  return [port(kind, type, 'out', kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频', { userConnectable: true })];
 }
 
 export function takesNodePorts(): CanvasPort[] {
   return [
     port('takes', 'TAKE', 'in', '结果', { multiple: true, userConnectable: false }),
-    port('selected', 'TAKE', 'out', '入选'),
+    port('selected', 'TAKE', 'out', '入选', { userConnectable: true }),
   ];
 }
 

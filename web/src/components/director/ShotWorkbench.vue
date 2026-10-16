@@ -1128,3 +1128,17 @@ function localizeRequirement(value: string): string {
 .ai-note { margin-top: 10px; }
 .ai-text { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; padding: 10px; margin: 0; color: var(--text-2); }
 </style>
+
+<style scoped>
+/* Compact mode for the Studio inspector: single column, no page chrome. */
+.desk.compact { padding: 8px 12px 28px; max-width: none; gap: 10px; }
+.desk.compact .crumbs { display: none; }
+.desk.compact .desk-header h1 { font-size: 18px; }
+.desk.compact .shot-guide { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+.desk.compact .next-action { padding-left: 0; border-left: 0; }
+.desk.compact .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+.desk.compact .side-col { position: static; }
+.desk.compact .controls .ctl select { max-width: 140px; }
+.desk.compact .mode-ctl select { width: 160px; max-width: 160px; }
+.desk.compact .flow-section { padding: 12px; }
+</style>

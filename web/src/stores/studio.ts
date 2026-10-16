@@ -6,6 +6,8 @@ import { defineStore } from 'pinia';
 import { computed, ref, shallowRef } from 'vue';
 import type {
   CanvasAnnotation,
+  CanvasConnectRequest,
+  CanvasConnectResult,
   CanvasGraph,
   CanvasLayoutDoc,
   CanvasNode,
@@ -15,7 +17,7 @@ import type {
   CanvasViewState,
 } from '@h3mise/shared';
 import { defaultLaneLayoutOptions, laneLayout } from '@h3mise/shared';
-import { get, getConditional, post, put } from '../api/client';
+import { del, get, getConditional, post, put } from '../api/client';
 
 export type StudioLod = 'overview' | 'card' | 'detail';
 
@@ -43,6 +45,7 @@ export const useStudioStore = defineStore('studio', () => {
   const graph = shallowRef<CanvasGraph | null>(null);
   const layout = ref<CanvasLayoutDoc | null>(null);
   const selection = ref<CanvasNodeId[]>([]);
+  const selectedEdgeId = ref<string | null>(null);
   const lod = ref<StudioLod>('card');
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -173,6 +176,12 @@ export const useStudioStore = defineStore('studio', () => {
 
   function clearSelection(): void {
     selection.value = [];
+    selectedEdgeId.value = null;
+  }
+
+  function selectEdge(id: string | null): void {
+    selectedEdgeId.value = id;
+    if (id) selection.value = [];
   }
 
   function setLod(next: StudioLod): void {
@@ -240,10 +249,25 @@ export const useStudioStore = defineStore('studio', () => {
     }
   }
 
+  /** Drag-to-connect: the server validates + applies the domain change. The
+   * caller handles the 409 branches (replace / mode switch) and retries. */
+  async function connect(request: CanvasConnectRequest): Promise<CanvasConnectResult> {
+    const result = await post<CanvasConnectResult>('/api/canvas/connections', request);
+    await refreshGraph();
+    return result;
+  }
+
+  async function disconnect(edgeId: string): Promise<void> {
+    const storyId = graph.value?.storyId;
+    await del(`/api/canvas/connections/${encodeURIComponent(edgeId)}${storyId ? `?storyId=${encodeURIComponent(storyId)}` : ''}`);
+    await refreshGraph();
+  }
+
   return {
     graph,
     layout,
     selection,
+    selectedEdgeId,
     lod,
     loading,
     error,
@@ -258,6 +282,7 @@ export const useStudioStore = defineStore('studio', () => {
     refreshGraph,
     select,
     clearSelection,
+    selectEdge,
     setLod,
     setNodePosition,
     toggleCollapse,
@@ -265,6 +290,8 @@ export const useStudioStore = defineStore('studio', () => {
     saveLayout,
     resetLayout,
     setLiveJob,
+    connect,
+    disconnect,
   };
 });
 

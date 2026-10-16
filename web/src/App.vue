@@ -15,6 +15,7 @@ import ToastHost from './components/ToastHost.vue';
 import ConfirmHost from './components/ConfirmHost.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import PaidActionDialog from './studio/overlays/PaidActionDialog.vue';
+import RolePicker from './studio/overlays/RolePicker.vue';
 import type { AppEvent, ProjectGuideSummary } from '@h3mise/shared';
 
 const project = useProjectStore();
@@ -160,6 +161,7 @@ watch(() => route.path, () => {
     <ToastHost />
     <ConfirmHost />
     <PaidActionDialog />
+    <RolePicker />
   </div>
 </template>
 

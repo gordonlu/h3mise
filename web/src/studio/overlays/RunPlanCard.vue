@@ -2,10 +2,12 @@
 import { computed } from 'vue';
 import { useRunPlanStore, type RunStage } from '../../stores/runPlan';
 import { useRunPlan } from '../../composables/useRunPlan';
+import { useAutoProduce } from '../../composables/useAutoProduce';
 import { t } from '../../stores/locale';
 
 const plan = useRunPlanStore();
 const { prepareAll, renderAll, rebuild } = useRunPlan();
+const { start } = useAutoProduce();
 
 const STAGE_KEY: Record<RunStage, string> = {
   done: 'studio.runplan.stageDone',
@@ -19,10 +21,43 @@ const STAGE_KEY: Record<RunStage, string> = {
 };
 
 const renderableCount = computed(() => plan.renderable.length);
+const provider = computed(() => {
+  const auto = plan.autoPlan;
+  if (!auto) return null;
+  return auto.providers.find((item) => item.id === auto.settings.providerId) ?? null;
+});
 </script>
 
 <template>
-  <div v-if="plan.plan" class="hf-runplan">
+  <div v-if="plan.autoPlan" class="hf-runplan">
+    <header class="hf-runplan-head">
+      <span>{{ t('studio.auto.title') }}</span>
+      <button class="hf-runplan-close" @click="plan.setAutoPlan(null)">✕</button>
+    </header>
+    <div class="hf-runplan-auto">
+      <div class="hf-runplan-line">
+        <span class="hf-runplan-k">{{ t('studio.auto.provider') }}</span>
+        <span>{{ provider?.name ?? plan.autoPlan.settings.providerId }} · {{ plan.autoPlan.settings.megapixels }} MP</span>
+      </div>
+      <div class="hf-runplan-line">
+        <span class="hf-runplan-k">{{ t('studio.auto.createLabel') }}</span>
+        <span>{{ t('studio.auto.willCreate', { n: plan.autoPlan.storyPreparation.willCreateShots }) }}</span>
+      </div>
+      <div class="hf-runplan-line">
+        <span class="hf-runplan-k">{{ t('studio.auto.renderLabel') }}</span>
+        <span>{{ t('studio.auto.willRender', { n: plan.autoPlan.renderCount }) }} · {{ t('studio.auto.skip', { n: plan.autoPlan.skipCount }) }}</span>
+      </div>
+    </div>
+    <div v-if="plan.autoPlan.blockers.length" class="hf-runplan-blockers">
+      <div v-for="(blocker, index) in plan.autoPlan.blockers" :key="index" class="hf-runplan-blocker">{{ blocker }}</div>
+    </div>
+    <div class="hf-runplan-actions">
+      <button class="hf-ghost" @click="plan.setAutoPlan(null)">{{ t('common.cancel') }}</button>
+      <button class="primary" :disabled="plan.autoPlan.blockers.length > 0" @click="start">{{ t('studio.auto.confirm') }}</button>
+    </div>
+  </div>
+
+  <div v-else-if="plan.plan" class="hf-runplan">
     <header class="hf-runplan-head">
       <span>{{ t('studio.runplan.title') }}</span>
       <button class="hf-runplan-close" @click="plan.setPlan(null)">✕</button>
@@ -59,5 +94,10 @@ const renderableCount = computed(() => plan.renderable.length);
 .hf-chip.ready { background: var(--ok-soft); color: var(--ok); }
 .hf-chip.blocked, .hf-chip.waiting_dependency { background: var(--bad-soft); color: var(--bad); }
 .hf-chip.needs_selection { background: var(--warn-soft); color: var(--warn); }
+.hf-runplan-auto { padding: 10px 12px; display: grid; gap: 6px; font-size: 12px; }
+.hf-runplan-line { display: flex; gap: 10px; }
+.hf-runplan-k { flex: none; width: 64px; color: var(--text-3); }
+.hf-runplan-blockers { padding: 0 12px 8px; display: grid; gap: 4px; }
+.hf-runplan-blocker { font-size: 12px; color: var(--bad); background: var(--bad-soft); border-radius: var(--radius-sm); padding: 6px 8px; }
 .hf-runplan-actions { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
 </style>

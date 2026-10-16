@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useStudioStore } from '../stores/studio';
+import { useAutoProduce } from '../composables/useAutoProduce';
 import { t } from '../stores/locale';
 import StudioCanvas from '../studio/StudioCanvas.vue';
 import StudioInspector from '../studio/inspector/StudioInspector.vue';
@@ -18,6 +19,7 @@ const { graph, loading, error } = storeToRefs(store);
 const narrow = ref(false);
 const inspectorOpen = ref(true);
 const dockOpen = ref(true);
+const { open: openAutoProduce } = useAutoProduce();
 
 const showInspector = computed(() => inspectorOpen.value && !loading.value && !error.value);
 const gridColumns = computed(() =>
@@ -72,6 +74,7 @@ onUnmounted(() => {
       <span class="hf-crumb">{{ t('studio.title') }}</span>
       <span class="hf-sub">{{ t('studio.subtitle') }}</span>
       <span class="hf-spacer" />
+      <button class="hf-ghost" :disabled="loading || !!error" @click="openAutoProduce">{{ t('studio.auto.open') }}</button>
       <button class="hf-ghost" @click="dockOpen = !dockOpen">{{ t('studio.dock.nodes') }}</button>
       <button v-if="!inspectorOpen" class="hf-ghost" @click="inspectorOpen = true">
         {{ t('studio.inspector.title') }}

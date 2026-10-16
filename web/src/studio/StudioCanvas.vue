@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { markRaw, onMounted, onUnmounted, watch } from 'vue';
+import { computed, markRaw, onMounted, onUnmounted, watch } from 'vue';
 import {
   VueFlow,
   useVueFlow,
@@ -20,6 +20,7 @@ import '@vue-flow/controls/dist/style.css';
 import '@vue-flow/minimap/dist/style.css';
 import './studio.css';
 import { useStudioStore } from '../stores/studio';
+import { t } from '../stores/locale';
 import { useLayoutPersist } from '../composables/useLayoutPersist';
 import { useLayoutHistory } from '../composables/useLayoutHistory';
 import { useGraphSync } from '../composables/useGraphSync';
@@ -40,6 +41,7 @@ import TimelineNode from './nodes/TimelineNode.vue';
 import ExportNode from './nodes/ExportNode.vue';
 import NoteNode from './nodes/NoteNode.vue';
 import FrameNode from './nodes/FrameNode.vue';
+import GhostNode from './nodes/GhostNode.vue';
 import TypedEdge from './edges/TypedEdge.vue';
 
 const store = useStudioStore();
@@ -65,9 +67,25 @@ const nodeTypes = {
   export: markRaw(ExportNode),
   note: markRaw(NoteNode),
   frame: markRaw(FrameNode),
+  ghost: markRaw(GhostNode),
 };
 
 const edgeTypes = { typed: markRaw(TypedEdge) };
+
+const ghostNodes = computed(() =>
+  runPlan.ghostBeats.map((beatId) => {
+    const position = store.positions.get(`beat:${beatId}`) ?? { x: 0, y: 0 };
+    return {
+      id: `ghost:${beatId}`,
+      type: 'ghost',
+      position: { x: position.x + 320, y: position.y },
+      data: { label: t('studio.auto.ghostLabel') },
+      draggable: false,
+      selectable: false,
+    };
+  }),
+);
+const canvasNodes = computed(() => [...store.flowNodes, ...ghostNodes.value] as unknown as Node[]);
 
 watch(
   () => viewport.value.zoom,
@@ -179,7 +197,7 @@ function onDrop(event: DragEvent): void {
   <div class="hf-canvas-drop" @dragover.prevent @drop="onDrop">
     <VueFlow
     class="hf-vueflow"
-    :nodes="(store.flowNodes as unknown as Node[])"
+    :nodes="canvasNodes"
     :edges="(store.flowEdges as unknown as Edge[])"
     :node-types="nodeTypes"
     :edge-types="edgeTypes"

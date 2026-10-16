@@ -7,6 +7,7 @@ import { useToastStore } from '../../stores/toast';
 import { useRenderStore } from '../../stores/render';
 import { useAiStore } from '../../stores/ai';
 import { confirmDialog } from '../../stores/confirm';
+import { usePaidAction } from '../../composables/usePaidAction';
 import { get, post, del, takeVideoUrl, fileUrl, subscribeEvents } from '../../api/client';
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan, MediaAsset, NextAction, ReferenceBinding, ShotRenderDependencyMode, ShotRenderReadiness } from '@h3mise/shared';
@@ -428,17 +429,29 @@ async function doRender(promptId: string) {
       if (mode === 'fl2va') return first || last;
       return false;
     });
-    const referenceSummary = submittedBindings.length
-      ? `\n${tr('shot.render.submittedReferences')}${submittedBindings.map((binding) => binding.label || binding.id).join(tr('shot.common.listSeparator'))}`
-      : `\n${tr('shot.render.noReferencesSubmitted')}`;
-    const confirmed = await confirmDialog({
-      title: tr('shot.render.confirmTitle'),
-      message: `${activeProvider.value?.name ?? tr('shot.render.currentProvider')} · ${modeLabel(mode)} · ${sShot.value?.durationSeconds ?? 5}s · ${sShot.value?.aspectRatio ?? '16:9'} · ${megapixels.value} MP。${referenceSummary}\n${tr('shot.render.confirmMessage')}`,
-      confirmLabel: tr('shot.render.confirm'),
-    });
-    if (!confirmed) return;
-    const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds, megapixels.value);
-    toasts.push({ kind: 'ok', text: tr('shot.toast.renderSubmitted', { id: job.id }) });
+    const provider = activeProvider.value;
+    const preflightReport = (sDetail.value?.preflights ?? []).find((item) => item.promptVersionId === promptId) ?? null;
+    const paid = usePaidAction();
+    await paid.confirm(
+      {
+        title: tr('shot.render.confirmTitle'),
+        providerName: provider?.name ?? tr('shot.render.currentProvider'),
+        mock: provider?.kind === 'mock',
+        verification: provider?.verification?.status ?? null,
+        target: `${sShot.value?.id ?? ''} ${sShot.value?.title ?? ''}`.trim(),
+        mode: modeLabel(mode),
+        durationSeconds: sShot.value?.durationSeconds,
+        aspectRatio: sShot.value?.aspectRatio,
+        megapixels: megapixels.value,
+        references: submittedBindings.map((binding: ReferenceBinding) => binding.label || binding.id),
+        preflight: preflightReport ? { blocked: preflightReport.blocked, risk: preflightReport.risk } : null,
+        taskCount: 1,
+      },
+      async () => {
+        const job = await s.render(promptId, providerId.value, sShot.value?.durationSeconds, megapixels.value);
+        toasts.push({ kind: 'ok', text: tr('shot.toast.renderSubmitted', { id: job.id }) });
+      },
+    );
   });
 }
 

@@ -14,6 +14,7 @@ import RenderQueueDrawer from './components/RenderQueueDrawer.vue';
 import ToastHost from './components/ToastHost.vue';
 import ConfirmHost from './components/ConfirmHost.vue';
 import CommandPalette from './components/CommandPalette.vue';
+import PaidActionDialog from './studio/overlays/PaidActionDialog.vue';
 import type { AppEvent, ProjectGuideSummary } from '@h3mise/shared';
 
 const project = useProjectStore();
@@ -158,6 +159,7 @@ watch(() => route.path, () => {
     <CommandPalette v-if="paletteOpen" @close="paletteOpen = false" />
     <ToastHost />
     <ConfirmHost />
+    <PaidActionDialog />
   </div>
 </template>
 

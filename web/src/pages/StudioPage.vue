@@ -10,6 +10,7 @@ import BottomDock from '../studio/bottom/BottomDock.vue';
 import LeftDock from '../studio/dock/LeftDock.vue';
 import RunPlanCard from '../studio/overlays/RunPlanCard.vue';
 import ContextMenu from '../studio/overlays/ContextMenu.vue';
+import NoteEditor from '../studio/overlays/NoteEditor.vue';
 
 const store = useStudioStore();
 const route = useRoute();
@@ -107,6 +108,7 @@ onUnmounted(() => {
 
     <BottomDock v-if="!loading && !error && !isEmpty" />
     <ContextMenu />
+    <NoteEditor />
   </div>
 </template>
 

@@ -21,10 +21,12 @@ import '@vue-flow/minimap/dist/style.css';
 import './studio.css';
 import { useStudioStore } from '../stores/studio';
 import { useLayoutPersist } from '../composables/useLayoutPersist';
+import { useLayoutHistory } from '../composables/useLayoutHistory';
 import { useGraphSync } from '../composables/useGraphSync';
 import { useConnect } from '../composables/useConnect';
 import { CREATE_MIME, useCanvasCreate, type CreateDescriptor } from '../composables/useCanvasCreate';
 import { useRunPlanStore } from '../stores/runPlan';
+import { useNoteEditorStore } from '../stores/noteEditor';
 import StoryNode from './nodes/StoryNode.vue';
 import BeatNode from './nodes/BeatNode.vue';
 import SequenceNode from './nodes/SequenceNode.vue';
@@ -43,9 +45,11 @@ import TypedEdge from './edges/TypedEdge.vue';
 const store = useStudioStore();
 const { viewport, project } = useVueFlow();
 const persist = useLayoutPersist();
+const history = useLayoutHistory();
 useGraphSync();
 const { create } = useCanvasCreate();
 const runPlan = useRunPlanStore();
+const noteEditor = useNoteEditorStore();
 
 const nodeTypes = {
   story: markRaw(StoryNode),
@@ -89,11 +93,31 @@ function onPaneClick(): void {
   runPlan.closeMenu();
 }
 
+function onNodeDblClick(event: NodeMouseEvent): void {
+  const id = event.node.id;
+  if (!id.startsWith('note:') && !id.startsWith('frame:')) return;
+  const annotation = (store.layout?.annotations ?? []).find((item) => `${item.kind}:${item.id}` === id);
+  if (annotation) void noteEditor.ask(annotation);
+}
+
 function onDragStop(event: NodeDragEvent): void {
-  for (const node of event.nodes) {
-    const record = store.setNodePosition(node.id, node.position.x, node.position.y, true);
+  const before = event.nodes.map((node) => ({
+    id: node.id,
+    prev: { ...(store.positions.get(node.id) ?? { x: node.position.x, y: node.position.y }) },
+    next: { x: node.position.x, y: node.position.y },
+  }));
+  for (const entry of before) {
+    const record = store.setNodePosition(entry.id, entry.next.x, entry.next.y, true);
     persist.queueNode(record);
   }
+  history.record({
+    undo: async () => {
+      for (const entry of before) persist.queueNode(store.setNodePosition(entry.id, entry.prev.x, entry.prev.y, true));
+    },
+    redo: async () => {
+      for (const entry of before) persist.queueNode(store.setNodePosition(entry.id, entry.next.x, entry.next.y, true));
+    },
+  });
 }
 
 const connectApi = useConnect();
@@ -111,6 +135,12 @@ function onEdgeClick(event: EdgeMouseEvent): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    if (event.shiftKey) void history.redo();
+    else void history.undo();
+    return;
+  }
   if ((event.key === 'Delete' || event.key === 'Backspace') && store.selectedEdgeId) {
     event.preventDefault();
     void connectApi.disconnect(store.selectedEdgeId);
@@ -166,6 +196,7 @@ function onDrop(event: DragEvent): void {
     selection-key-code="Shift"
     :is-valid-connection="isValidConnection"
     @node-click="onNodeClick"
+    @node-double-click="onNodeDblClick"
     @node-context-menu="onNodeContext"
     @node-drag-stop="onDragStop"
     @connect="onConnect"

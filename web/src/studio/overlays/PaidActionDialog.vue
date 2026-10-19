@@ -22,7 +22,8 @@ watch(
 );
 
 const verificationBad = computed(() =>
-  store.pending?.verification === 'unconfigured' || store.pending?.verification === 'failed',
+  !store.pending?.mock &&
+  (store.pending?.verification === 'unconfigured' || store.pending?.verification === 'failed'),
 );
 const unverified = computed(() => store.pending?.verification === 'nodes_detected');
 const canConfirm = computed(

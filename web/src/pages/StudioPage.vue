@@ -22,6 +22,7 @@ import SelectionToolbar from '../studio/overlays/SelectionToolbar.vue';
 import ContextMenu from '../studio/overlays/ContextMenu.vue';
 import NoteEditor from '../studio/overlays/NoteEditor.vue';
 import QuickCreateMenu from '../studio/overlays/QuickCreateMenu.vue';
+import BreakdownPicker from '../studio/overlays/BreakdownPicker.vue';
 
 const store = useStudioStore();
 const ui = useStudioUiStore();
@@ -225,6 +226,7 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
     <ContextMenu />
     <NoteEditor />
     <QuickCreateMenu />
+    <BreakdownPicker />
   </div>
 </template>
 

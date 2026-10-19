@@ -86,7 +86,7 @@ MiniMax Design 的 Canvas Flow 与 ComfyUI 证明了**节点画布**适合表达
 
 ### P2
 
-- 已实现（2026-10）：复制镜头（⌘D）、键盘连线、Studio 默认首页、系列总览画布（`/studio/series`）、参考拆解节点（保存的拆解投影为 `reference` 泳道节点）、MCP 暴露画布图（`get_canvas_graph` 只读工具）。
+- 已实现（2026-10）：复制镜头（⌘D）、键盘连线、Studio 默认首页、系列总览画布（`/studio/series`）、参考拆解节点（保存的拆解投影为 `reference` 泳道节点；节点库可选视频并用本地 FFmpeg 创建）、MCP 暴露画布图（`get_canvas_graph` 只读工具）。
 - 仍待实现：无（P2 清单完成）。
 
 ## 5. 范围分期

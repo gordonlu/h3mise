@@ -2,8 +2,10 @@
 import { computed } from 'vue';
 import { t } from '../../stores/locale';
 import { CREATE_MIME, useCanvasCreate, type CreateDescriptor } from '../../composables/useCanvasCreate';
+import { useBreakdownPickerStore } from '../../stores/breakdownPicker';
 
 const { create } = useCanvasCreate();
+const breakdownPicker = useBreakdownPickerStore();
 
 const groups = computed<Array<{ key: string; items: CreateDescriptor[] }>>(() => [
   {
@@ -58,6 +60,9 @@ async function onClick(descriptor: CreateDescriptor): Promise<void> {
         @dragstart="onDragStart($event, item)"
         @click="onClick(item)"
       >{{ item.label }}</button>
+    </div>
+    <div class="hf-lib-group">
+      <button class="hf-lib-item" @click="breakdownPicker.show()">{{ t('studio.breakdown.create') }}</button>
     </div>
   </div>
 </template>

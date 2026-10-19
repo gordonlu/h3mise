@@ -64,6 +64,7 @@ interface NavItem {
   count?: number;
   attention?: boolean;
   warn?: boolean;
+  beta?: boolean;
 }
 
 function isActive(to: string): boolean {
@@ -85,7 +86,7 @@ const sections = computed(() => [
     key: 'prepare',
     label: t('nav.prepare'),
     items: [
-      { to: '/studio', label: t('studio.title'), icon: 'studio' },
+      { to: '/studio', label: t('studio.title'), icon: 'studio', beta: true },
       { to: '/story', label: t('nav.storyBeats'), icon: 'story', attention: needsAttention('/story') },
       { to: '/shots', label: t('nav.shotWorkspace'), icon: 'shots', count: props.guide?.shotCount, attention: needsAttention('/shots') },
       { to: '/assets', label: t('nav.assetLibrary'), icon: 'assets' },
@@ -176,6 +177,7 @@ async function pickProject(id: string): Promise<void> {
       >
         <svg class="side-icon" viewBox="0 0 24 24" aria-hidden="true"><path v-for="d in ICONS[item.icon]" :key="d" :d="d" /></svg>
         <span class="side-label">{{ item.label }}</span>
+        <span v-if="item.beta" class="side-beta" :title="t('studio.betaHint')">{{ t('studio.betaShort') }}</span>
         <span v-if="item.warn" class="side-warn" :title="t('shell.ffmpegUnavailable')" />
         <span v-else-if="item.attention" class="side-dot" />
         <span v-if="item.count !== undefined" class="side-count">{{ item.count }}</span>
@@ -274,6 +276,7 @@ async function pickProject(id: string): Promise<void> {
 .side.collapsed .side-item,
 .side.collapsed .side-util,
 .side.collapsed .side-oneclick { justify-content: center; gap: 0; padding-left: 0; padding-right: 0; }
+.side.collapsed .side-beta,
 .side.collapsed .side-label,
 .side.collapsed .side-count,
 .side.collapsed .side-util span,
@@ -341,6 +344,11 @@ async function pickProject(id: string): Promise<void> {
 }
 .side-icon { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
 .side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-beta {
+  flex: none; padding: 1px 5px; border: 1px solid var(--warn); border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn); font: 700 9px/1.4 var(--mono);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
 .side-count { flex: none; font-size: 10.5px; color: var(--text-3); background: var(--bg-subtle); border-radius: 999px; padding: 1px 7px; }
 .side-item.active .side-count { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-text); }
 .side-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }

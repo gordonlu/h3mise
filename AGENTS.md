@@ -127,7 +127,7 @@ Rules:
 
 ## Studio Canvas
 
-- Studio is the default home (`/` redirects to `/studio`). With no project open it shows a cold-start card; `/projects` remains the project list and classic pages stay available.
+- Studio (workflow mode) is the default home (`/` redirects to `/studio`) and is marked **beta** in the UI. With no project open it shows a cold-start card; `/projects` remains the project list and classic pages stay available and stable.
 - `/studio/series` is a series overview: one large node per episode, with current-episode switching and new-episode creation.
 - Saved reference breakdowns project into the `reference` lane as breakdown nodes; they are read-only projections of the classic reference-breakdown page.
 - `/studio` is a projection of the domain model, not a second data store. `GET /api/canvas/graph` derives nodes/edges from the existing tables; only layout is persisted (`canvas_node_layouts` / `canvas_views` / `canvas_annotations`, project migration v22). Deleting layout loses no project data.

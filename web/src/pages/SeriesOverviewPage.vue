@@ -59,6 +59,7 @@ onMounted(() => void load());
           <RouterLink to="/studio">{{ t('studio.series.back') }}</RouterLink>
           <span>/</span>
           <span>{{ t('studio.series.title') }}</span>
+          <span class="hf-beta" :title="t('studio.betaHint')" role="note">{{ t('studio.beta') }}</span>
         </p>
         <h1>{{ title }}</h1>
         <p class="hf-series-sub">{{ t('studio.series.subtitle') }}</p>
@@ -100,6 +101,11 @@ onMounted(() => void load());
 }
 .hf-series-crumb { display: flex; gap: 8px; margin: 0 0 10px; color: var(--text-3); font-size: 12px; }
 .hf-series-crumb a { color: var(--accent-text); text-decoration: none; }
+.hf-beta {
+  align-self: center; padding: 1px 7px; border: 1px solid var(--warn); border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn); font: 700 10px/1.5 var(--mono);
+  letter-spacing: 0.06em; text-transform: uppercase; cursor: help;
+}
 .hf-series-head h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.03em; }
 .hf-series-sub { margin: 0; color: var(--text-3); font-size: 13px; }
 .hf-series-canvas {

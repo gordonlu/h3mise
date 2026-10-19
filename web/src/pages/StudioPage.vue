@@ -137,6 +137,7 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
   <div class="hf-studio">
     <header class="hf-topbar">
       <span class="hf-crumb">{{ t('studio.title') }}</span>
+      <span class="hf-beta" :title="t('studio.betaHint')" role="note">{{ t('studio.beta') }}</span>
       <span class="hf-sub">{{ t('studio.subtitle') }}</span>
       <label v-if="episodes" class="hf-episode">
         <span class="hf-visually-hidden">{{ t('pages.story.episodeAria') }}</span>

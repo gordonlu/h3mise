@@ -5,6 +5,9 @@ import type { Locale } from './index';
 export const studioTranslations: Record<Locale, Record<string, string>> = {
   zh: {
     'studio.title': '制作台 Studio',
+    'studio.beta': '测试版',
+    'studio.betaShort': 'BETA',
+    'studio.betaHint': '工作流模式仍在内测，功能与交互可能调整；经典页面保持稳定可用。',
     'studio.subtitle': '一张画布看清整集生产链',
     'studio.loading': '加载画布…',
     'studio.empty': '当前集还没有节点。先创建镜头或套用故事骨架。',
@@ -374,6 +377,9 @@ export const studioTranslations: Record<Locale, Record<string, string>> = {
   },
   en: {
     'studio.title': 'Studio',
+    'studio.beta': 'Beta',
+    'studio.betaShort': 'BETA',
+    'studio.betaHint': 'Workflow mode is still in beta; features and interactions may change. Classic pages remain stable.',
     'studio.subtitle': 'One canvas for the whole episode',
     'studio.loading': 'Loading canvas…',
     'studio.empty': 'No nodes in this episode yet. Create a shot or apply a story skeleton.',
@@ -702,6 +708,9 @@ export const studioTranslations: Record<Locale, Record<string, string>> = {
   },
   ja: {
     'studio.title': 'スタジオ',
+    'studio.beta': 'ベータ',
+    'studio.betaShort': 'BETA',
+    'studio.betaHint': 'ワークフローモードはベータ版です。機能や操作が変わる場合があります。従来のページは安定して利用できます。',
     'studio.subtitle': '1 枚のキャンバスでエピソード全体を',
     'studio.loading': 'キャンバスを読み込み中…',
     'studio.empty': 'このエピソードにはまだノードがありません。',

@@ -18,6 +18,11 @@
 }
 .hf-topbar .hf-crumb { font-weight: 600; font-size: 14px; color: var(--text); }
 .hf-topbar .hf-sub { font-size: 12px; color: var(--text-3); }
+.hf-beta {
+  align-self: center; padding: 1px 7px; border: 1px solid var(--warn); border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn); font: 700 10px/1.5 var(--mono);
+  letter-spacing: 0.06em; text-transform: uppercase; cursor: help;
+}
 .hf-topbar .hf-spacer { flex: 1; }
 .hf-episode select {
   max-width: 240px; padding: 5px 26px 5px 10px; border-radius: var(--radius-pill);

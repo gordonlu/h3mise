@@ -33,6 +33,7 @@ import type {
   ShotNodeData,
   StoryNodeData,
   StoryboardNodeData,
+  TakeNodeData,
   TakeStatus,
   TakesNodeData,
   TimelineNodeData,
@@ -52,6 +53,7 @@ import {
   shotNodePorts,
   storyNodePorts,
   storyboardNodePorts,
+  takeNodePorts,
   takesNodePorts,
   timelineNodePorts,
 } from '@h3mise/shared';
@@ -468,6 +470,7 @@ export function buildCanvasGraph(p: ProjectContext, options: BuildGraphOptions =
   const activeJobByShot = new Map<string, JobRow>();
   const latestPromptByShot = new Map<string, PromptRow>();
   const latestPreflightByShot = new Map<string, PreflightRow>();
+  const takeNodeIds = new Set<string>();
   const planShots = new Set<string>();
   const bindingRows: BindingRow[] = [];
   const continuityShots = new Set<string>();
@@ -761,6 +764,41 @@ export function buildCanvasGraph(p: ProjectContext, options: BuildGraphOptions =
         })),
       } satisfies TakesNodeData,
     });
+
+    if (selected) {
+      const takeRow = takeRows.find((row) => row.id === selected.id);
+      if (takeRow) {
+        takeNodeIds.add(takeRow.id);
+        nodes.push({
+          id: canvasNodeId('take', takeRow.id),
+          kind: 'take',
+          domainId: takeRow.id,
+          title: `${shot.title || shot.id} · Take`,
+          lane: 'take',
+          rowKey,
+          ports: takeNodePorts(),
+          badges: [],
+          groupId: null,
+          data: {
+            takeId: takeRow.id,
+            shotId: shot.id,
+            posterPath: takeRow.poster_path,
+            duration: takeRow.duration,
+            rating: takeRow.rating,
+            failureTags: jget<string[]>(takeRow.failure_tags_json, []),
+          } satisfies TakeNodeData,
+        });
+        edges.push(edge(
+          `take_selected:${takeRow.id}`,
+          'take_selected',
+          canvasNodeId('takes', shot.id),
+          'selected',
+          canvasNodeId('take', takeRow.id),
+          'take',
+          true,
+        ));
+      }
+    }
   }
 
   const orderedEntities = [...entities].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
@@ -962,11 +1000,19 @@ export function buildCanvasGraph(p: ProjectContext, options: BuildGraphOptions =
   }
 
   for (const clip of timeline.clips) {
+    const fromTake = takeNodeIds.has(clip.takeId);
     edges.push(
-      edge(`take_clip:${clip.id}`, 'take_clip', canvasNodeId('takes', clip.shotId), 'selected', canvasNodeId('timeline', timeline.id), 'clips', false, false, {
-        clipId: clip.id,
-        order: clip.order,
-      }),
+      edge(
+        `take_clip:${clip.id}`,
+        'take_clip',
+        fromTake ? canvasNodeId('take', clip.takeId) : canvasNodeId('takes', clip.shotId),
+        fromTake ? 'clip' : 'selected',
+        canvasNodeId('timeline', timeline.id),
+        'clips',
+        false,
+        false,
+        { clipId: clip.id, order: clip.order },
+      ),
     );
   }
 
@@ -1294,10 +1340,17 @@ export async function connectCanvas(
     }
 
     case 'add_timeline_clip': {
-      if (source.kind !== 'takes' || target.kind !== 'timeline') throw new CanvasError('invalid_connection', '片段只能从 Takes 连到时间线');
-      const selected = source.data.takes.find((take) => take.status === 'selected');
-      if (!selected) throw new CanvasError('invalid_connection', '尚未选片');
-      const clip = timelineMod.addClip(p, { shotId: source.data.shotId, takeId: selected.id });
+      if (target.kind !== 'timeline') throw new CanvasError('invalid_connection', '片段只能连到时间线');
+      let clip: { id: string };
+      if (source.kind === 'take') {
+        clip = timelineMod.addClip(p, { shotId: source.data.shotId, takeId: source.data.takeId });
+      } else if (source.kind === 'takes') {
+        const selected = source.data.takes.find((take) => take.status === 'selected');
+        if (!selected) throw new CanvasError('invalid_connection', '尚未选片');
+        clip = timelineMod.addClip(p, { shotId: source.data.shotId, takeId: selected.id });
+      } else {
+        throw new CanvasError('invalid_connection', '片段只能从 Take 或 Takes 连到时间线');
+      }
       return { ok: true, edgeId: `take_clip:${clip.id}`, affectedNodeIds: affected, undo: { method: 'DELETE', edgeId: `take_clip:${clip.id}` } };
     }
   }

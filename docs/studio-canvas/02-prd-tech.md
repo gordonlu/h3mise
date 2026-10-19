@@ -396,6 +396,7 @@ export function canConnect(source: CanvasNode, sourcePort: CanvasPortId, target:
 | R11 | media.audio | shot.audio_ref | mediaKind=audio | create_binding | `createBinding({ roles: ['audio'] })` | — |
 | R12 | shot.tail_frame | shot.first_frame | source ≠ target；不成环 | set_frame_chain | `updateShot(target, { renderDependencyMode: 'previous_take', dependsOnShotId: source })` | 目标已有首帧绑定或其他依赖 → `needs_replace` |
 | R13 | takes.selected | timeline.clips | take.status = selected | add_timeline_clip | `timelineMod.addClip({ shotId, takeId })`（该函数已拒绝非 selected Take） | — |
+| R14 | take.clip | timeline.clips | Take 节点为 selected | add_timeline_clip | `timelineMod.addClip({ shotId, takeId })` | — |
 
 服务端在规则表之后必须做的深度校验：
 
@@ -555,7 +556,7 @@ CREATE INDEX IF NOT EXISTS idx_canvas_annotations_story ON canvas_annotations(st
    - `latestPreflight.stale`：最新 prompt 版本晚于最新 preflight。
    - 端口可见性：`last_frame` 仅 fl2va/l2va；`video_ref` 仅 vref2va；`refs` 对 t2va 也可见（落线时触发 `needs_mode_switch`）。
    - badges：`paid`（当前 Provider 非 mock 时）、`blocker`（missingRequired + preflight blocked + 依赖未就绪）、`agent`（pending ai_requests 中 shotId 匹配）、`waiting`、`locked`、`stale`。
-5. Takes 节点：每个 Shot 一个 `takes:<shotId>`，包含该 Shot 全部 Take 摘要（按 createdAt 降序）。
+5. Takes 节点：每个 Shot 一个 `takes:<shotId>`，包含该 Shot 全部 Take 摘要（按 createdAt 降序）。存在 selected Take 时额外投影一个 `take:<takeId>` 节点（`take` 泳道），并生成 `takes.selected → take.take` 派生边。
 6. Entities：`assetsMod.listEntities(ctx)` 全部（项目级）；`usageShotIds` 只统计本集 Shot。CharacterState 作为 `character_state` 节点，`groupId` = 所属 entity 节点（前端渲染为可展开子卡）。
 7. Media：仅包括 (a) 被本集 Shot 的 binding 引用、且该 binding **不是**实体主图自动绑定（`sourceEntityId` 为空）的媒体；(b) 布局表中 `user_placed=1` 的媒体。
 8. Reference breakdowns：`reference_breakdowns` 中已保存拆解的媒体 → `breakdown:<assetId>` 节点（`reference` 泳道），数据含段数、帧数、是否已 AI 分析与 revision；未分析时带 warning 角标。
@@ -572,7 +573,8 @@ CREATE INDEX IF NOT EXISTS idx_canvas_annotations_story ON canvas_annotations(st
 | storyboard_panel | 绑定的 assetId 属于某 storyboard panel 当前版本 → derived 虚线 |
 | frame_chain | renderDependencyMode=previous_take 且 dependsOnShotId 非空 |
 | shot_takes | 每个 Shot 一根 derived |
-| take_clip | 每个 timeline clip 一根 |
+| take_selected | selected Take 一根 derived（Takes → Take） |
+| take_clip | 每个 timeline clip 一根（Take → Timeline；无 Take 节点时回退 Takes） |
 | timeline_export | 1 根 derived |
 | continuity | 相邻 Shot 且前者有 `continuity_entries(scope=visual, kind=actual)` → derived |
 
@@ -931,6 +933,7 @@ actions: load(), refreshGraph() (ETag), moveNodes(), toggleCollapse(), select(),
 | Media | `media:<mediaId>` | |
 | Shot | `shot:<shotId>` | |
 | Takes | `takes:<shotId>` | 每 Shot 一个 |
+| Take | `take:<takeId>` | 仅 selected Take |
 | Timeline | `timeline:<timelineId>` | |
 | Export | `export:<timelineId>` | |
 | Note / Frame | `note:<id>` / `frame:<id>` | 仅存在于 layout 文档 |
@@ -944,6 +947,7 @@ actions: load(), refreshGraph() (ETag), moveNodes(), toggleCollapse(), select(),
 | storyboard_panel | `storyboard_panel:<bindingId>` |
 | frame_chain | `frame_chain:<shotId>` |
 | shot_takes | `shot_takes:<shotId>` |
+| take_selected | `take_selected:<takeId>` |
 | take_clip | `take_clip:<clipId>` |
 | timeline_export | `timeline_export:<timelineId>` |
 | continuity | `continuity:<fromShotId>:<toShotId>` |

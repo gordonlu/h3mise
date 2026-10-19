@@ -187,6 +187,15 @@ export const CANVAS_CONNECTION_RULES: CanvasConnectionRule[] = [
     },
     effect: 'add_timeline_clip',
   },
+  {
+    id: 'R14',
+    sourceKind: 'take',
+    sourcePort: 'clip',
+    targetKind: 'timeline',
+    targetPort: 'clips',
+    when: (source) => (source.kind === 'take' ? true : '无可用 Take'),
+    effect: 'add_timeline_clip',
+  },
 ];
 
 export function canConnect(

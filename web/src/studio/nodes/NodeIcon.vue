@@ -14,6 +14,7 @@ const ICONS: Record<string, string[]> = {
   breakdown: ['M3 5h18v14H3z', 'M10 9.5l5 2.5-5 2.5z'],
   shot: ['M4 7h16v12H4z', 'M8 7l2-3h4l2 3', 'M12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z'],
   takes: ['M4 5h7v7H4z', 'M13 5h7v7h-7z', 'M4 14h7v7H4z', 'M13 14h7v7h-7z'],
+  take: ['M4 5h16v14H4z', 'M8 5v14', 'M16 5v14', 'M10 9l4 3-4 3z'],
   timeline: ['M3 7h16', 'M3 12h20', 'M3 17h11'],
   export: ['M12 3v12', 'm7 10 5 5 5-5', 'M4 21h16'],
   note: ['M5 4h14v16H5z', 'M8 8h8', 'M8 12h8', 'M8 16h5'],

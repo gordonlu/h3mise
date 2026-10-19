@@ -12,6 +12,7 @@ import { createShot } from '../src/modules/shots.js';
 import { activeEpisodeId } from '../src/modules/story.js';
 import * as canvasMod from '../src/modules/canvas.js';
 import { listMedia } from '../src/modules/assets.js';
+import { addClip } from '../src/modules/timeline.js';
 import type { BreakdownNodeData, MediaNodeData } from '@h3mise/shared';
 
 const roots: string[] = [];
@@ -147,6 +148,31 @@ test('saved reference breakdowns project as reference-lane nodes', async () => {
   assert.equal(data.hasAnalysis, false);
   assert.equal(data.revision, 3);
   assert.ok(node.badges.some((badge) => badge.kind === 'warning'));
+});
+
+test('a selected Take projects between Takes and Timeline', async () => {
+  const { ctx } = await openDemo();
+  const shot = createShot(ctx, { title: 'Take chain' });
+  const now = new Date().toISOString();
+  ctx.db.run(
+    `INSERT INTO takes (id, shot_id, render_job_id, prompt_version_id, local_video_path, duration, status, created_at)
+     VALUES ('take-test', ?, 'job-test-take', 'prompt-test', 'shots/test/take.mp4', 3, 'selected', ?)`,
+    [shot.id, now],
+  );
+  const clip = addClip(ctx, { shotId: shot.id, takeId: 'take-test' });
+  const graph = canvasMod.buildCanvasGraph(ctx);
+  const takeNode = graph.nodes.find((node) => node.id === 'take:take-test');
+  assert.ok(takeNode);
+  assert.equal(takeNode.kind, 'take');
+  assert.equal(takeNode.lane, 'take');
+  const selectedEdge = graph.edges.find((edge) => edge.id === 'take_selected:take-test');
+  assert.ok(selectedEdge);
+  assert.equal(selectedEdge.source, `takes:${shot.id}`);
+  assert.equal(selectedEdge.target, 'take:take-test');
+  const clipEdge = graph.edges.find((edge) => edge.id === `take_clip:${clip.id}`);
+  assert.ok(clipEdge);
+  assert.equal(clipEdge.source, 'take:take-test');
+  assert.equal(clipEdge.sourcePort, 'clip');
 });
 
 test('query count does not grow linearly with the number of shots', async () => {

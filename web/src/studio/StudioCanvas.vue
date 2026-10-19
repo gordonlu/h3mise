@@ -49,6 +49,7 @@ import MediaNode from './nodes/MediaNode.vue';
 import BreakdownNode from './nodes/BreakdownNode.vue';
 import ShotNode from './nodes/ShotNode.vue';
 import TakesNode from './nodes/TakesNode.vue';
+import TakeNode from './nodes/TakeNode.vue';
 import TimelineNode from './nodes/TimelineNode.vue';
 import ExportNode from './nodes/ExportNode.vue';
 import NoteNode from './nodes/NoteNode.vue';
@@ -83,6 +84,7 @@ const nodeTypes = {
   breakdown: markRaw(BreakdownNode),
   shot: markRaw(ShotNode),
   takes: markRaw(TakesNode),
+  take: markRaw(TakeNode),
   timeline: markRaw(TimelineNode),
   export: markRaw(ExportNode),
   note: markRaw(NoteNode),
@@ -329,7 +331,7 @@ async function applyInitialView(): Promise<void> {
   const core = store.flowNodes
     .filter((item) => {
       const node = (item.data as { node?: CanvasNode }).node;
-      return node && !item.hidden && ['beat', 'shot', 'takes', 'timeline', 'export'].includes(node.kind);
+      return node && !item.hidden && ['beat', 'shot', 'takes', 'take', 'timeline', 'export'].includes(node.kind);
     })
     .map((item) => item.id);
   if (core.length > 0) {

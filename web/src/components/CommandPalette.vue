@@ -68,7 +68,7 @@ const shotItems = computed<PaletteItem[]>(() =>
   })),
 );
 
-const STUDIO_KINDS = new Set(['story', 'beat', 'sequence', 'storyboard', 'entity', 'media', 'breakdown', 'shot', 'timeline', 'export']);
+const STUDIO_KINDS = new Set(['story', 'beat', 'sequence', 'storyboard', 'entity', 'media', 'breakdown', 'shot', 'take', 'timeline', 'export']);
 
 function studioLabel(node: CanvasNode): string {
   const order = 'order' in node.data && typeof node.data.order === 'number' ? node.data.order : null;

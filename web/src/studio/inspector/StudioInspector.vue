@@ -10,6 +10,7 @@ import StoryInspector from './StoryInspector.vue';
 import BeatInspector from './BeatInspector.vue';
 import ShotInspector from './ShotInspector.vue';
 import TakesInspector from './TakesInspector.vue';
+import TakeInspector from './TakeInspector.vue';
 import EntityInspector from './EntityInspector.vue';
 import MediaInspector from './MediaInspector.vue';
 import BreakdownInspector from './BreakdownInspector.vue';
@@ -26,6 +27,7 @@ const bodies: Record<string, unknown> = {
   beat: markRaw(BeatInspector),
   shot: markRaw(ShotInspector),
   takes: markRaw(TakesInspector),
+  take: markRaw(TakeInspector),
   entity: markRaw(EntityInspector),
   character_state: markRaw(EntityInspector),
   media: markRaw(MediaInspector),
@@ -40,7 +42,7 @@ const bodies: Record<string, unknown> = {
 
 const ICONS: Record<string, string> = {
   story: '▤', beat: '❖', sequence: '▦', storyboard: '▥', entity: '✦',
-  character_state: '✦', media: '▧', breakdown: '◫', shot: '◎', takes: '▣', timeline: '▬', export: '⤓', note: '✎', frame: '⬚',
+  character_state: '✦', media: '▧', breakdown: '◫', shot: '◎', takes: '▣', take: '◧', timeline: '▬', export: '⤓', note: '✎', frame: '⬚',
 };
 
 const node = computed<CanvasNode | null>(() => store.selectedNode);
@@ -70,6 +72,10 @@ const fullRoute = computed(() => {
     case 'shot':
       return `/shots/${current.domainId}`;
     case 'takes': {
+      const shotId = (current.data as { shotId: string }).shotId;
+      return `/shots/${shotId}#takes`;
+    }
+    case 'take': {
       const shotId = (current.data as { shotId: string }).shotId;
       return `/shots/${shotId}#takes`;
     }

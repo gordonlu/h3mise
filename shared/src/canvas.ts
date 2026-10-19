@@ -13,7 +13,7 @@ import type { TakeStatus } from './render.js';
 export type CanvasNodeKind =
   | 'story' | 'beat' | 'sequence' | 'storyboard'
   | 'entity' | 'character_state' | 'media' | 'breakdown'
-  | 'shot' | 'takes' | 'timeline' | 'export'
+  | 'shot' | 'takes' | 'take' | 'timeline' | 'export'
   | 'note' | 'frame';
 
 export type CanvasPortType =
@@ -26,7 +26,7 @@ export type CanvasPortId =
   | 'beats' | 'story' | 'beat'
   | 'entity' | 'image' | 'video' | 'audio'
   | 'cast' | 'first_frame' | 'last_frame' | 'refs' | 'video_ref' | 'audio_ref'
-  | 'takes' | 'tail_frame' | 'selected' | 'clips' | 'timeline'
+  | 'takes' | 'take' | 'tail_frame' | 'selected' | 'clip' | 'clips' | 'timeline'
   | `panel:${string}`;
 
 export interface CanvasPort {
@@ -45,7 +45,7 @@ export interface CanvasBadge {
   text?: string;
 }
 
-export type CanvasLane = 'cast' | 'media' | 'reference' | 'story' | 'beats' | 'storyboard' | 'shots' | 'takes' | 'edit' | 'free';
+export type CanvasLane = 'cast' | 'media' | 'reference' | 'story' | 'beats' | 'storyboard' | 'shots' | 'takes' | 'take' | 'edit' | 'free';
 
 export interface CanvasNodeBase<K extends CanvasNodeKind, D> {
   id: CanvasNodeId;
@@ -90,6 +90,7 @@ export interface ShotNodeData {
   pendingAiRequestIds: string[];
 }
 
+export interface TakeNodeData { takeId: string; shotId: string; posterPath: string | null; duration: number; rating: number | null; failureTags: string[] }
 export interface TakesNodeData {
   shotId: string;
   takes: Array<{
@@ -191,6 +192,7 @@ export type CanvasNode =
   | CanvasNodeBase<'breakdown', BreakdownNodeData>
   | CanvasNodeBase<'shot', ShotNodeData>
   | CanvasNodeBase<'takes', TakesNodeData>
+  | CanvasNodeBase<'take', TakeNodeData>
   | CanvasNodeBase<'timeline', TimelineNodeData>
   | CanvasNodeBase<'export', ExportNodeData>
   | CanvasNodeBase<'note' | 'frame', AnnotationNodeData>;
@@ -203,6 +205,7 @@ export type CanvasEdgeKind =
   | 'frame_chain'
   | 'storyboard_panel'
   | 'shot_takes'
+  | 'take_selected'
   | 'take_clip'
   | 'timeline_export'
   | 'continuity';
@@ -380,6 +383,13 @@ export function takesNodePorts(): CanvasPort[] {
   return [
     port('takes', 'TAKE', 'in', '结果', { multiple: true, userConnectable: false }),
     port('selected', 'TAKE', 'out', '入选', { userConnectable: true }),
+  ];
+}
+
+export function takeNodePorts(): CanvasPort[] {
+  return [
+    port('take', 'TAKE', 'in', 'Take', { userConnectable: false }),
+    port('clip', 'CLIP', 'out', '片段', { userConnectable: true }),
   ];
 }
 

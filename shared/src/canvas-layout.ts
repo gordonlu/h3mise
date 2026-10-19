@@ -29,6 +29,7 @@ export const DEFAULT_LANE_ORDER: CanvasLane[] = [
   'storyboard',
   'shots',
   'takes',
+  'take',
   'edit',
   'free',
 ];
@@ -42,6 +43,7 @@ export const DEFAULT_LANE_WIDTH: Record<CanvasLane, number> = {
   storyboard: 300,
   shots: 340,
   takes: 240,
+  take: 200,
   edit: 320,
   free: 0,
 };
@@ -181,6 +183,13 @@ export function laneLayout(
     const sourceId = canvasNodeId('shot', shotId);
     const y = shotY.get(sourceId) ?? pinned.get(sourceId)?.y;
     if (y !== undefined) place(takes, y);
+  }
+
+  for (const take of active.filter((node) => node.kind === 'take')) {
+    const shotId = take.kind === 'take' ? take.data.shotId : '';
+    const sourceId = canvasNodeId('shot', shotId);
+    const y = shotY.get(sourceId) ?? pinned.get(sourceId)?.y;
+    if (y !== undefined) place(take, y);
   }
 
   // Cast lane: entities sorted by kind then title, each entity followed by its

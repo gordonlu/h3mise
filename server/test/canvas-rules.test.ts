@@ -1,4 +1,4 @@
-// Studio Canvas connection rules (spec §8 R1–R13) + shot port visibility.
+// Studio Canvas connection rules (spec §8 R1–R14) + shot port visibility.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,6 +9,7 @@ import type {
   EntityNodeData,
   MediaNodeData,
   ShotNodeData,
+  TakeNodeData,
   TakesNodeData,
   TimelineNodeData,
 } from '@h3mise/shared';
@@ -17,6 +18,7 @@ import {
   canConnect,
   canvasNodeId,
   shotNodePorts,
+  takeNodePorts,
 } from '@h3mise/shared';
 import type { EntityKind, H3Mode, MediaKind, TakeStatus } from '@h3mise/shared';
 
@@ -94,6 +96,11 @@ function takes(id: string, statuses: TakeStatus[]): CanvasNode {
   return { id: canvasNodeId('takes', id), kind: 'takes', domainId: id, title: id, lane: 'takes', rowKey: 0, ports: [], badges: [], groupId: null, data };
 }
 
+function selectedTake(id: string, shotId: string): CanvasNode {
+  const data: TakeNodeData = { takeId: id, shotId, posterPath: null, duration: 3, rating: 5, failureTags: [] };
+  return { id: canvasNodeId('take', id), kind: 'take', domainId: id, title: id, lane: 'take', rowKey: 0, ports: takeNodePorts(), badges: [], groupId: null, data };
+}
+
 function timeline(id: string): CanvasNode {
   const data: TimelineNodeData = { clipCount: 0, durationSeconds: 0, clips: [] };
   return { id: canvasNodeId('timeline', id), kind: 'timeline', domainId: id, title: id, lane: 'edit', rowKey: 0, ports: [], badges: [], groupId: null, data };
@@ -165,14 +172,19 @@ test('R13 takes.selected → timeline.clips needs a selected take', () => {
   rejected(takes('s1', []), 'selected', timeline('tl-1'), 'clips');
 });
 
+test('R14 selected Take clip → timeline.clips', () => {
+  ok(selectedTake('take-1', 's1'), 'clip', timeline('tl-1'), 'clips');
+  rejected(selectedTake('take-1', 's1'), 'clip', shot('s1'), 'refs');
+});
+
 test('unknown connections are rejected', () => {
   rejected(beat('beat-1'), 'beat', timeline('tl-1'), 'clips');
   rejected(shot('s1'), 'takes', timeline('tl-1'), 'clips');
 });
 
-test('rule table covers R1–R13 exactly once each', () => {
+test('rule table covers R1–R14 exactly once each', () => {
   const ids = CANVAS_CONNECTION_RULES.map((rule) => rule.id);
-  for (let index = 1; index <= 13; index++) assert.ok(ids.includes(`R${index}`), `missing R${index}`);
+  for (let index = 1; index <= 14; index++) assert.ok(ids.includes(`R${index}`), `missing R${index}`);
 });
 
 test('shot port visibility follows h3 mode', () => {

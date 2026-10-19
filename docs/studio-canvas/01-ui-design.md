@@ -249,8 +249,9 @@ row3                          Beat 03   Panel 4-6   Shot 03    Takes(03)   Expor
 - 自动跟随 Shot（同行），不可单独删除。
 - 尺寸：260×160；横向排列 Take 缩略（最多 4 个，更多显示 `+N`）
 - 每个缩略：状态环（candidate 灰 / selected 绿 / rejected 删除线）、评分星、失败标签点
-- 输出：`selected`（CLIP）→ 时间线（只有 Selected Take 有输出）
+- 输出：`selected` → 独立的「入选 Take」节点；该 Take 节点再输出 `clip` → 时间线（只有 Selected Take 有输出）
 - 悬停缩略：0.5s 后自动静音预览视频
+- 选中后画布出现一个独立的「入选 Take」节点，连接 `Takes → Take → Timeline`
 - 操作：`选择`、`拒绝`、`选择并提交连续性`、`导入外部视频为 Take`、`分析`、`AI 诊断`
 
 ### 6.8 剪辑节点 Timeline（L6）与导出节点 Export
@@ -296,7 +297,8 @@ row3                          Beat 03   Panel 4-6   Shot 03    Takes(03)   Expor
 | Media(video) | Shot.`video_ref` | 创建视频参考绑定 | 否 |
 | Media(audio) | Shot.`audio_ref` | 创建音频参考绑定 | 否 |
 | Shot.`tail_frame` | Shot.`first_frame` | 下一镜设为 `previous_take` 依赖上一镜 | 若目标已绑定首帧：询问替换 |
-| Takes.`selected` | Timeline.`clips` | 加入时间线末尾 | 否 |
+| Takes.`selected` | Take（派生） | 展示当前入选 Take | 否 |
+| Take.`clip` | Timeline.`clips` | 加入时间线末尾 | 否 |
 
 **角色选择浮层**（连到 `refs` 时出现在落点旁）：
 

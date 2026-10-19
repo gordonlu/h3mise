@@ -332,8 +332,8 @@ row3                          Beat 03   Panel 4-6   Shot 03    Takes(03)   Expor
 
 | 模式 | 显示 |
 | --- | --- |
-| 默认 | Beat→Shot、Cast→Shot、帧链、Shot→Takes、Takes→Timeline。其他资产绑定以**芯片**形式显示在 Shot 上，不画线 |
-| 选中一个节点 | 额外画出与它相关的全部连线（含资产绑定），其余连线淡出 30% |
+| 默认 | Beat→Shot、Cast→Shot、参考/首帧/尾帧绑定、帧链、Shot→Takes→Take→Timeline。其他派生绑定按需显示 |
+| 选中一个节点 | 与它相关的连线加粗高亮，其余连线淡出 |
 | 视图菜单「显示全部连线」 | 全画 |
 | 悬停资产芯片 | 临时画出到该实体节点的连线，并让画布轻微平移确保可见 |
 

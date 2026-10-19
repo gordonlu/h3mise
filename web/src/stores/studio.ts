@@ -208,7 +208,7 @@ export const useStudioStore = defineStore('studio', () => {
   const flowEdges = computed(() => {
     const kinds = new Map((graph.value?.nodes ?? []).map((node) => [node.id, node.kind]));
     const assetEdge = (source: string, target: string, kind: string): boolean =>
-      kind === 'cast' ||
+      kind === 'cast' || kind === 'binding' ||
       kinds.get(source) === 'entity' || kinds.get(target) === 'entity' ||
       kinds.get(source) === 'character_state' || kinds.get(target) === 'character_state';
     return (graph.value?.edges ?? [])

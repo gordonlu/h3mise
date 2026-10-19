@@ -40,7 +40,7 @@ async function regen(panelId: string, order: number): Promise<void> {
     :node="node"
     :selected="selected"
     :lod="lod"
-    icon="▥"
+    icon="storyboard"
     :status="t('studio.storyboard.meta', { n: data.panelCount, status: data.status })"
   >
     <div class="hf-board-grid" :style="{ gridTemplateColumns: `repeat(${Math.min(3, data.panelCount)}, 1fr)` }">

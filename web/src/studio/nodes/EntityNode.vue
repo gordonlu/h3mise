@@ -6,15 +6,18 @@ import { mediaUrl } from '../../api/client';
 import { t } from '../../stores/locale';
 import BaseNode from './BaseNode.vue';
 import { useNodeChrome } from './useNodeChrome';
+import { useStudioStore } from '../../stores/studio';
 
 const props = defineProps<NodeProps<{ node: CanvasNode }>>();
 const { node, selected, lod } = useNodeChrome(props);
+const studio = useStudioStore();
 const data = computed(() => node.value.data as EntityNodeData);
 const kindLabel = computed(() => t(`studio.kind.${data.value.entityKind}`));
+const expanded = computed(() => studio.expandedEntities.includes(node.value.id));
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="✦" :status="kindLabel">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="entity" status="">
     <img
       v-if="data.imageAssetId"
       class="hf-thumb"
@@ -26,8 +29,17 @@ const kindLabel = computed(() => t(`studio.kind.${data.value.entityKind}`));
     <div v-else class="hf-thumb hf-thumb-empty">{{ t('studio.entity.noImage') }}</div>
     <div class="hf-chips">
       <span class="hf-chip">{{ kindLabel }}</span>
-      <span v-if="data.stateCount" class="hf-chip">{{ t('studio.entity.states', { n: data.stateCount }) }}</span>
     </div>
+    <template v-if="data.stateCount" #foot>
+      <button
+        class="hf-action nodrag nopan"
+        :title="t('studio.entity.toggleStates')"
+        @click.stop="studio.toggleEntity(node.id)"
+        @mousedown.stop
+      >
+        {{ expanded ? '▾' : '▸' }} {{ t('studio.entity.states', { n: data.stateCount }) }}
+      </button>
+    </template>
   </BaseNode>
 </template>
 

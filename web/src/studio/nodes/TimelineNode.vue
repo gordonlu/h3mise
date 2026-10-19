@@ -12,7 +12,7 @@ const data = computed(() => node.value.data as TimelineNodeData);
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="▬" :status="t('studio.timeline.clips', { n: data.clipCount })">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="timeline" :status="t('studio.timeline.clips', { n: data.clipCount })">
     <div class="hf-strip">
       <span v-for="clip in data.clips" :key="clip.id" class="hf-strip-clip" :title="clip.shotId">{{ clip.order }}</span>
       <span v-if="data.clips.length === 0" class="hf-strip-empty" />

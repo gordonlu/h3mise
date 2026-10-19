@@ -45,7 +45,7 @@ export interface CanvasBadge {
   text?: string;
 }
 
-export type CanvasLane = 'cast' | 'reference' | 'story' | 'beats' | 'storyboard' | 'shots' | 'takes' | 'edit' | 'free';
+export type CanvasLane = 'cast' | 'media' | 'reference' | 'story' | 'beats' | 'storyboard' | 'shots' | 'takes' | 'edit' | 'free';
 
 export interface CanvasNodeBase<K extends CanvasNodeKind, D> {
   id: CanvasNodeId;

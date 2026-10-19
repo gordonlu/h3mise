@@ -22,6 +22,7 @@ export interface CanvasPoint {
 
 export const DEFAULT_LANE_ORDER: CanvasLane[] = [
   'cast',
+  'media',
   'reference',
   'story',
   'beats',
@@ -34,6 +35,7 @@ export const DEFAULT_LANE_ORDER: CanvasLane[] = [
 
 export const DEFAULT_LANE_WIDTH: Record<CanvasLane, number> = {
   cast: 240,
+  media: 220,
   reference: 240,
   story: 260,
   beats: 300,
@@ -102,8 +104,8 @@ export function laneLayout(
 
   const result = new Map<CanvasNodeId, CanvasPoint>();
   const active = nodes.filter((node) => !pinned.has(node.id) && !hidden.has(node.lane));
-  const place = (node: CanvasNode, y: number): void => {
-    result.set(node.id, { x: laneX.get(node.lane) ?? 0, y });
+  const place = (node: CanvasNode, y: number, xOffset = 0): void => {
+    result.set(node.id, { x: (laneX.get(node.lane) ?? 0) + xOffset, y });
   };
 
   const beats = active.filter((node) => node.kind === 'beat').sort(compareNodes);
@@ -199,13 +201,21 @@ export function laneLayout(
       .filter((state) => state.groupId === entity.id)
       .sort(compareNodes);
     for (const child of children) {
-      place(child, castY);
+      place(child, castY, 20);
       castY += opts.nodeSize(child).height + opts.rowGap;
     }
   }
   for (const orphan of states.filter((state) => !state.groupId)) {
     place(orphan, castY);
     castY += opts.nodeSize(orphan).height + opts.rowGap;
+  }
+
+  // Media references: stacked separately from entities so unpinned media
+  // can never collide with the cast lane.
+  let mediaY = 0;
+  for (const media of active.filter((node) => node.kind === 'media').sort(compareNodes)) {
+    place(media, mediaY);
+    mediaY += opts.nodeSize(media).height + opts.rowGap;
   }
 
   // Reference breakdowns: one stacked card per analyzed media asset.

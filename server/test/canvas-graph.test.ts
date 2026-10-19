@@ -50,6 +50,9 @@ test('projects the Good Boy demo into story/beat/shot/takes/timeline nodes', asy
   const shotTakes = graph.edges.filter((edge) => edge.kind === 'shot_takes');
   assert.equal(shotTakes.length, 3);
   assert.ok(graph.edges.some((edge) => edge.kind === 'timeline_export'));
+  const castEdges = graph.edges.filter((edge) => edge.kind === 'cast');
+  assert.ok(castEdges.length > 0);
+  assert.ok(castEdges.every((edge) => !edge.focusOnly));
 });
 
 test('revision is stable, ETag matches, and content changes move it', async () => {
@@ -111,6 +114,7 @@ test('user-placed media appears and reports userPlaced=true', async () => {
   const graph = canvasMod.buildCanvasGraph(ctx);
   const node = graph.nodes.find((candidate) => candidate.id === `media:${media.id}`);
   assert.ok(node);
+  assert.equal(node.lane, 'media');
   assert.equal((node.data as MediaNodeData).userPlaced, true);
 });
 

@@ -4,6 +4,7 @@ import type { CanvasBadge, CanvasNode, CanvasPort } from '@h3mise/shared';
 import { t } from '../../stores/locale';
 import type { StudioLod } from '../../stores/studio';
 import PortHandle from './PortHandle.vue';
+import NodeIcon from './NodeIcon.vue';
 
 const props = defineProps<{
   node: CanvasNode;
@@ -45,7 +46,7 @@ const aria = computed(() => `${t(`studio.node.${props.node.kind}`)} ${props.node
   >
     <span class="hf-bar" />
     <header class="hf-head">
-      <span class="hf-icon" aria-hidden="true">{{ props.icon ?? '◆' }}</span>
+      <span class="hf-icon" aria-hidden="true"><NodeIcon :name="props.icon" /></span>
       <span class="hf-title" :title="props.node.title">{{ props.node.title }}</span>
       <span class="hf-badges">
         <span
@@ -73,7 +74,7 @@ const aria = computed(() => `${t(`studio.node.${props.node.kind}`)} ${props.node
       </div>
     </div>
 
-    <footer class="hf-foot">
+    <footer v-if="props.status || $slots.foot" class="hf-foot">
       <span v-if="props.statusClass" class="hf-dot" :class="props.statusClass" />
       <span class="hf-status">{{ props.status }}</span>
       <slot name="foot" />

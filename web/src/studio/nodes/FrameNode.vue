@@ -11,7 +11,7 @@ const data = computed(() => node.value.data as AnnotationNodeData);
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="⬚" status="">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="frame" status="">
     <div class="hf-frame-text">{{ data.text || '框' }}</div>
   </BaseNode>
 </template>

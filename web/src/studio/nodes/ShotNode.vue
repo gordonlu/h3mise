@@ -42,7 +42,7 @@ async function runAction(): Promise<void> {
     :node="node"
     :selected="selected"
     :lod="lod"
-    icon="◎"
+    icon="shot"
     :status="status"
     :status-class="statusClass"
   >

@@ -604,7 +604,7 @@ export function laneLayout(nodes: CanvasNode[], pinned: Map<CanvasNodeId, { x: n
 1. 每条泳道 x = 前面所有可见泳道宽度 + gap 之和。
 2. 行对齐：以 Beat 为行锚。Beat 的 y 由累计高度决定；挂在 Beat 下的 Shot 从该 Beat 的 y 开始向下堆叠；该行高度 = max(beat 高, 该 beat 下 shots 总高, 对应 storyboard 占用高)。Takes 节点 y 与其 Shot 相同。
 3. 未归属 Shot 放在所有行之后。
-4. `cast` 泳道独立纵向堆叠（实体按 kind、name 排序；CharacterState 子卡跟随实体，折叠时不占高度）。
+4. `cast` 泳道独立纵向堆叠（实体按 kind、name 排序）；CharacterState 子卡默认折叠、不参与布局，展开后向右缩进 20px 并跟随实体。`media` 泳道在 cast 之后独立堆叠媒体节点，避免与实体重叠；`reference` 泳道再放参考拆解。
 5. `story` 节点 y = 0；`timeline` 节点 y = 0，`export` 在其下方。
 6. 已 pinned 的节点保持原位，不参与避让（P1 可加简单的重叠检测提示，不自动推开）。
 7. 输出必须确定性：相同输入同一结果（测试断言）。

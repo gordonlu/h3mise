@@ -79,10 +79,19 @@
 .hf-node.k-frame .hf-bar { background: var(--line-3); }
 
 .hf-node.k-note { background: var(--hf-note); color: #4a3b10; border-color: #e3c04f; }
+.hf-node.hf-state-child { border-left-style: dashed; border-left-color: var(--info); }
+.vue-flow__node[data-id^="character_state:"]::before {
+  content: ''; position: absolute; left: -16px; top: 22px; width: 16px;
+  border-top: 1px solid var(--info); opacity: 0.55;
+}
 .hf-node.k-frame { background: transparent; border: 1px dashed var(--line-2); box-shadow: none; }
 
-.hf-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 6px 14px; min-height: 30px; }
-.hf-icon { flex: none; font-size: 12px; opacity: 0.75; width: 16px; text-align: center; }
+.hf-head { display: flex; align-items: center; gap: 7px; padding: 9px 10px 7px 14px; min-height: 34px; }
+.hf-icon {
+  flex: none; width: 20px; height: 20px; display: grid; place-items: center;
+  border-radius: 6px; background: var(--bg-muted); color: var(--text-2);
+}
+.hf-icon svg { width: 13px; height: 13px; }
 .hf-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hf-badges { display: flex; align-items: center; gap: 4px; flex: none; }
 .hf-badge {
@@ -149,19 +158,21 @@
 }
 
 /* ---------------------------------------------------------------- edges --- */
-.hf-edge-typed .vue-flow__edge-path { stroke-width: 1.6; }
-.hf-edge-typed.e-derived .vue-flow__edge-path { stroke-dasharray: 5 4; }
+.hf-edge-typed { stroke-width: 1.6; }
+.hf-edge-typed.e-derived { stroke-dasharray: 5 4; }
 .hf-edge-typed.e-focus { opacity: 0.28; }
-.hf-edge-typed.e-k-story_beat .vue-flow__edge-path { stroke: var(--line-3); }
-.hf-edge-typed.e-k-beat_shot .vue-flow__edge-path { stroke: var(--violet); }
-.hf-edge-typed.e-k-cast .vue-flow__edge-path { stroke: var(--info); }
-.hf-edge-typed.e-k-binding .vue-flow__edge-path { stroke: var(--ok); }
-.hf-edge-typed.e-k-storyboard_panel .vue-flow__edge-path { stroke: var(--ok); stroke-dasharray: 5 4; }
-.hf-edge-typed.e-k-frame_chain .vue-flow__edge-path { stroke: var(--accent); stroke-width: 2; }
-.hf-edge-typed.e-k-shot_takes .vue-flow__edge-path { stroke: var(--line-3); }
-.hf-edge-typed.e-k-take_clip .vue-flow__edge-path { stroke: var(--hf-clip-type); }
-.hf-edge-typed.e-k-timeline_export .vue-flow__edge-path { stroke: var(--text-2); stroke-dasharray: 5 4; }
-.hf-edge-typed.e-k-continuity .vue-flow__edge-path { stroke: var(--accent); stroke-dasharray: 2 3; }
+.hf-edge-typed.e-k-story_beat { stroke: var(--violet); opacity: 0.75; }
+.hf-edge-typed.e-k-beat_shot { stroke: var(--violet); }
+.hf-edge-typed.e-k-cast { stroke: var(--info); }
+.hf-edge-typed.e-k-binding { stroke: var(--ok); }
+.hf-edge-typed.e-k-storyboard_panel { stroke: var(--ok); stroke-dasharray: 5 4; }
+.hf-edge-typed.e-k-frame_chain { stroke: var(--accent); stroke-width: 2; }
+.hf-edge-typed.e-k-shot_takes { stroke: var(--warn); }
+.hf-edge-typed.e-k-take_clip { stroke: var(--hf-clip-type); }
+.hf-edge-typed.e-k-timeline_export { stroke: var(--info); stroke-dasharray: 5 4; }
+.hf-edge-typed.e-k-continuity { stroke: var(--accent); stroke-dasharray: 2 3; }
+.hf-edge-typed.e-related { stroke-width: 2.8; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 55%, transparent)); }
+.hf-edge-typed.e-dim { opacity: 0.16; }
 
 /* ----------------------------------------------------------- inspector --- */
 .hf-inspector {
@@ -251,7 +262,9 @@
 }
 .hf-dock-tabs { flex: none; display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--line); }
 .hf-dock-body { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
-.hf-lib { display: flex; flex-direction: column; gap: 6px; }
+.hf-lib { display: flex; flex-direction: column; gap: 10px; }
+.hf-lib-title { padding: 2px 2px 1px; color: var(--text-3); font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.hf-lib-icon { flex: none; color: var(--accent-text); }
 .hf-lib-hint { margin: 0 0 6px; }
 .hf-lib-group { display: flex; flex-direction: column; gap: 4px; }
 .hf-lib-item {

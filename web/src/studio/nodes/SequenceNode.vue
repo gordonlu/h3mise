@@ -11,7 +11,7 @@ const order = computed(() => (node.value.data as { order: number }).order);
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="▦" :status="order ? `#${order}` : ''">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="sequence" :status="order ? `#${order}` : ''">
     <div />
   </BaseNode>
 </template>

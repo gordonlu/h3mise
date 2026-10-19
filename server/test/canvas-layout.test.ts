@@ -70,6 +70,21 @@ function breakdown(id: string): CanvasNode {
   return { id: canvasNodeId('breakdown', id), kind: 'breakdown', domainId: id, title: id, lane: 'reference', rowKey: 0, ports: [], badges: [], groupId: null, data };
 }
 
+function media(id: string): CanvasNode {
+  return {
+    id: canvasNodeId('media', id),
+    kind: 'media',
+    domainId: id,
+    title: id,
+    lane: 'media',
+    rowKey: 0,
+    ports: [],
+    badges: [],
+    groupId: null,
+    data: { mediaKind: 'image', posterPath: null, userPlaced: false },
+  };
+}
+
 function ids(map: Map<CanvasNodeId, { x: number; y: number }>): Record<string, { x: number; y: number }> {
   return Object.fromEntries([...map.entries()].map(([key, value]) => [key, { x: value.x, y: value.y }]));
 }
@@ -99,9 +114,17 @@ test('hiding a lane tightens the x coordinates of later lanes', () => {
   assert.equal(visible.get(canvasNodeId('shot', 's1'))!.x - hidden.get(canvasNodeId('shot', 's1'))!.x, expectedShift);
 });
 
+test('media references stack in their own lane', () => {
+  const result = laneLayout([media('m1'), media('m2')], new Map(), opts());
+  const x = DEFAULT_LANE_WIDTH.cast + opts().laneGap;
+  assert.equal(result.get(canvasNodeId('media', 'm1'))!.x, x);
+  assert.equal(result.get(canvasNodeId('media', 'm2'))!.x, x);
+  assert.equal(result.get(canvasNodeId('media', 'm2'))!.y, 100 + opts().rowGap);
+});
+
 test('reference breakdowns stack in the reference lane', () => {
   const result = laneLayout([breakdown('r1'), breakdown('r2')], new Map(), opts());
-  const x = DEFAULT_LANE_WIDTH.cast + opts().laneGap;
+  const x = DEFAULT_LANE_WIDTH.cast + opts().laneGap + DEFAULT_LANE_WIDTH.media + opts().laneGap;
   assert.equal(result.get(canvasNodeId('breakdown', 'r1'))!.x, x);
   assert.equal(result.get(canvasNodeId('breakdown', 'r2'))!.x, x);
   assert.equal(result.get(canvasNodeId('breakdown', 'r2'))!.y, 100 + opts().rowGap);

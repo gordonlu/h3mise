@@ -53,7 +53,7 @@ const NODE_SIZE: Record<string, { width: number; height: number }> = {
   sequence: { width: 240, height: 96 },
   storyboard: { width: 320, height: 200 },
   entity: { width: 170, height: 178 },
-  character_state: { width: 170, height: 110 },
+  character_state: { width: 150, height: 100 },
   media: { width: 190, height: 150 },
   breakdown: { width: 208, height: 178 },
   shot: { width: 300, height: 220 },
@@ -81,9 +81,25 @@ export const useStudioStore = defineStore('studio', () => {
   /** One-shot request for the canvas to fit a node, lane, or the whole graph. */
   const focusRequest = ref<StudioFocusRequest | null>(null);
   const keyboardConnect = ref<KeyboardConnectState | null>(null);
+  const expandedEntities = ref<CanvasNodeId[]>([]);
   let focusNonce = 0;
+  let loadSeq = 0;
+
+  function reset(): void {
+    loadSeq += 1;
+    graph.value = null;
+    layout.value = null;
+    selection.value = [];
+    selectedEdgeId.value = null;
+    liveJobs.value = {};
+    keyboardConnect.value = null;
+    expandedEntities.value = [];
+    loading.value = true;
+    error.value = null;
+  }
 
   async function load(): Promise<void> {
+    const seq = ++loadSeq;
     loading.value = true;
     error.value = null;
     try {
@@ -91,25 +107,28 @@ export const useStudioStore = defineStore('studio', () => {
         get<CanvasGraph>('/api/canvas/graph'),
         get<CanvasLayoutDoc>('/api/canvas/layout'),
       ]);
+      if (seq !== loadSeq) return;
       graph.value = nextGraph;
       layout.value = nextLayout;
     } catch (e) {
+      if (seq !== loadSeq) return;
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
-      loading.value = false;
+      if (seq === loadSeq) loading.value = false;
     }
   }
 
   /** Re-fetch the projection using the current revision as an ETag. A 304 is a
    * no-op, so untouched projects do not churn the store. */
   async function refreshGraph(): Promise<void> {
+    const seq = loadSeq;
     const current = graph.value;
     try {
       const { status, data } = await getConditional<CanvasGraph>(
         '/api/canvas/graph',
         current ? `"${current.revision}"` : undefined,
       );
-      if (status === 304 || !data) return;
+      if (status === 304 || !data || seq !== loadSeq) return;
       graph.value = data;
     } catch {
       /* a dropped refresh is retried by the next SSE milestone */
@@ -128,7 +147,10 @@ export const useStudioStore = defineStore('studio', () => {
         result.set(stored.nodeId, { x: stored.x, y: stored.y });
       }
     }
-    const auto = laneLayout(graph.value.nodes, pinned, {
+    const visible = graph.value.nodes.filter(
+      (node) => node.kind !== 'character_state' || !node.groupId || expandedEntities.value.includes(node.groupId),
+    );
+    const auto = laneLayout(visible, pinned, {
       ...defaultLaneLayoutOptions(studioNodeSize),
       hiddenLanes: hiddenLanes.value,
     });
@@ -165,9 +187,15 @@ export const useStudioStore = defineStore('studio', () => {
         position,
         data: { node },
         style: { width: `${width}px` },
-        hidden: hiddenLanes.value.includes(node.lane) && node.kind !== 'note' && node.kind !== 'frame',
+        hidden:
+          (hiddenLanes.value.includes(node.lane) && node.kind !== 'note' && node.kind !== 'frame') ||
+          (node.kind === 'character_state' && Boolean(node.groupId) && !expandedEntities.value.includes(node.groupId!)),
       };
     }),
+  );
+
+  const hiddenNodeIds = computed(() =>
+    new Set(flowNodes.value.filter((node) => node.hidden).map((node) => node.id)),
   );
 
   const flowEdges = computed(() =>
@@ -175,6 +203,7 @@ export const useStudioStore = defineStore('studio', () => {
       // Asset bindings are focusOnly: hidden by default, shown when one of
       // their endpoints is selected (design §7.5 — avoids spaghetti). The view
       // menu can reveal every edge.
+      .filter((edge) => !hiddenNodeIds.value.has(edge.source) && !hiddenNodeIds.value.has(edge.target))
       .filter((edge) => layout.value?.view.edgeVisibility === 'all' || !edge.focusOnly || selection.value.includes(edge.source) || selection.value.includes(edge.target))
       .map((edge) => ({
         id: edge.id,
@@ -209,6 +238,12 @@ export const useStudioStore = defineStore('studio', () => {
   function clearSelection(): void {
     selection.value = [];
     selectedEdgeId.value = null;
+  }
+
+  function toggleEntity(nodeId: CanvasNodeId): void {
+    expandedEntities.value = expandedEntities.value.includes(nodeId)
+      ? expandedEntities.value.filter((id) => id !== nodeId)
+      : [...expandedEntities.value, nodeId];
   }
 
   function selectEdge(id: string | null): void {
@@ -386,10 +421,13 @@ export const useStudioStore = defineStore('studio', () => {
     flowEdges,
     nodeById,
     selectedNode,
+    expandedEntities,
+    reset,
     load,
     refreshGraph,
     select,
     clearSelection,
+    toggleEntity,
     selectEdge,
     setLod,
     focusNode,

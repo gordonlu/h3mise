@@ -27,7 +27,7 @@ function open(): void {
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="◫" :status="status">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="breakdown" :status="status">
     <img v-if="thumb" class="hf-thumb-sm" :src="thumb" loading="lazy" decoding="async" :alt="node.title" />
     <div v-else class="hf-thumb-sm hf-audio" />
     <div class="hf-chips">

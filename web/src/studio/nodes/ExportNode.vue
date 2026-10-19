@@ -16,7 +16,7 @@ const status = computed(() =>
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="⤓" :status="status">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="export" :status="status">
     <div v-if="data.latest" class="hf-export">
       <div class="hf-export-name" :title="data.latest.relPath">{{ base }}</div>
       <div class="hf-chips">

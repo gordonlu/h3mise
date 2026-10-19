@@ -62,7 +62,7 @@ const paid = usePaidActionStore();
 const toasts = useToastStore();
 const confirm = useConfirmStore();
 const rolePicker = useRolePickerStore();
-const { viewport, project, connectionStartHandle, fitView, zoomIn, zoomOut } = useVueFlow();
+const { viewport, project, connectionStartHandle, fitView, zoomIn, zoomOut, setViewport, onNodesInitialized } = useVueFlow();
 const persist = useLayoutPersist();
 const history = useLayoutHistory();
 useGraphSync();
@@ -311,6 +311,35 @@ function onKeydown(event: KeyboardEvent): void {
     void connectApi.disconnect(store.selectedEdgeId);
   }
 }
+let initialViewApplied = false;
+async function applyInitialView(): Promise<void> {
+  if (initialViewApplied || store.focusRequest) return;
+  initialViewApplied = true;
+  const stored = store.layout?.view.viewport;
+  if (stored && (stored.x !== 0 || stored.y !== 0 || stored.zoom !== 1)) {
+    await setViewport(stored, { duration: 0 });
+    return;
+  }
+  // Fit the narrative core (beats/shots/takes/timeline) rather than every
+  // asset lane; fitting all lanes would force the default into overview LOD.
+  const core = store.flowNodes
+    .filter((item) => {
+      const node = (item.data as { node?: CanvasNode }).node;
+      return node && !item.hidden && ['beat', 'shot', 'takes', 'timeline', 'export'].includes(node.kind);
+    })
+    .map((item) => item.id);
+  if (core.length > 0) {
+    await fitView({ nodes: core, padding: 0.12, minZoom: 0.55, maxZoom: 0.8, duration: 0 });
+  } else {
+    await fitView({ padding: 0.15, minZoom: 0.3, maxZoom: 0.8, duration: 0 });
+  }
+}
+
+onNodesInitialized(() => {
+  if (store.focusRequest) void applyFocus(store.focusRequest);
+  else void applyInitialView();
+});
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown);
   await nextTick();
@@ -414,7 +443,7 @@ function onDrop(event: DragEvent): void {
     :edges-updatable="false"
     :delete-key-code="null"
     :zoom-on-double-click="false"
-    :fit-view-on-init="true"
+    :fit-view-on-init="false"
     :pan-on-scroll="false"
     selection-key-code="Shift"
     :is-valid-connection="isValidConnection"

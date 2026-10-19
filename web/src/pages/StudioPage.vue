@@ -35,6 +35,7 @@ const narrow = ref(false);
 const noProject = ref(false);
 const installingDemo = ref(false);
 const episodes = ref<StoryEpisodeList | null>(null);
+let episodeSeq = 0;
 const { open: openAutoProduce } = useAutoProduce();
 const navigate = useStudioNavigate();
 
@@ -67,10 +68,12 @@ function checkWidth(): void {
 }
 
 async function loadEpisodes(): Promise<void> {
+  const seq = ++episodeSeq;
   try {
-    episodes.value = await get<StoryEpisodeList>('/api/story/episodes');
+    const next = await get<StoryEpisodeList>('/api/story/episodes');
+    if (seq === episodeSeq) episodes.value = next;
   } catch {
-    episodes.value = null;
+    if (seq === episodeSeq) episodes.value = null;
   }
 }
 
@@ -118,9 +121,11 @@ async function installGoodBoy(): Promise<void> {
 onMounted(async () => {
   checkWidth();
   window.addEventListener('resize', checkWidth);
+  store.reset();
   await project.bootstrap();
   if (!project.current) {
     noProject.value = true;
+    store.loading = false;
     return;
   }
   await Promise.all([store.load(), loadEpisodes()]);

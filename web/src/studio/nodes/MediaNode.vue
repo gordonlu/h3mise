@@ -21,7 +21,7 @@ function openBreakdown(): void {
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="▧" :status="kindLabel">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="media" status="">
     <img v-if="thumb" class="hf-thumb-sm" :src="thumb" loading="lazy" decoding="async" :alt="node.title" />
     <div v-else class="hf-thumb-sm hf-audio" />
     <div class="hf-chips">

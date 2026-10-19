@@ -5,6 +5,7 @@ import type { CanvasNode, CharacterStateNodeData } from '@h3mise/shared';
 import { mediaUrl } from '../../api/client';
 import BaseNode from './BaseNode.vue';
 import { useNodeChrome } from './useNodeChrome';
+import { t } from '../../stores/locale';
 
 const props = defineProps<NodeProps<{ node: CanvasNode }>>();
 const { node, selected, lod } = useNodeChrome(props);
@@ -12,7 +13,7 @@ const data = computed(() => node.value.data as CharacterStateNodeData);
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="✦" status="">
+  <BaseNode class="hf-state-child" :node="node" :selected="selected" :lod="lod" icon="state" :status="t('studio.node.character_state')">
     <img
       v-if="data.effectiveImageAssetId"
       class="hf-thumb-sm"

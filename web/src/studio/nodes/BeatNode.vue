@@ -16,7 +16,7 @@ const data = computed(() => node.value.data as BeatNodeData);
     :node="node"
     :selected="selected"
     :lod="lod"
-    icon="❖"
+    icon="beat"
     :status="t('studio.beat.shots', { n: data.shotIds.length })"
   >
     <div class="hf-beat-meta">

@@ -23,7 +23,7 @@ const status = computed(() =>
 </script>
 
 <template>
-  <BaseNode :node="node" :selected="selected" :lod="lod" icon="▣" :status="status">
+  <BaseNode :node="node" :selected="selected" :lod="lod" icon="takes" :status="status">
     <div class="hf-take-row">
       <div v-for="take in shown" :key="take.id" class="hf-take" :class="`t-${take.status}`">
         <HoverPreview

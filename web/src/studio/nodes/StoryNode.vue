@@ -22,7 +22,7 @@ const progress = computed(() =>
     :node="node"
     :selected="selected"
     :lod="lod"
-    icon="▤"
+    icon="story"
     :status="t('studio.story.beats', { n: data.beatCount })"
   >
     <div class="hf-story-line">{{ data.synopsis || t('studio.unnamed') }}</div>

@@ -5,6 +5,7 @@ import { post } from '../api/client';
 import { useStudioStore } from '../stores/studio';
 import { useRunPlanStore, type RunPlanItem, type RunStage } from '../stores/runPlan';
 import { useProjectStore } from '../stores/project';
+import { useStudioUiStore } from '../stores/studioUi';
 import { useToastStore } from '../stores/toast';
 import { usePaidAction } from './usePaidAction';
 import { t } from '../stores/locale';
@@ -14,6 +15,7 @@ export function useRunPlan() {
   const store = useStudioStore();
   const plan = useRunPlanStore();
   const project = useProjectStore();
+  const ui = useStudioUiStore();
   const toasts = useToastStore();
   const paid = usePaidAction();
 
@@ -64,7 +66,7 @@ export function useRunPlan() {
 
   async function prepareAll(): Promise<void> {
     const providerId = project.current?.config.default_provider ?? 'runninghub';
-    await post('/api/render/batch/prepare', { providerId });
+    await post('/api/render/batch/prepare', { providerId, megapixels: ui.megapixels });
     await store.refreshGraph();
     rebuild();
     toasts.push({ kind: 'ok', text: t('studio.runplan.prepared') });
@@ -81,13 +83,15 @@ export function useRunPlan() {
         providerName: provider?.name ?? providerId,
         mock: providerId === 'mock',
         verification: provider?.verification?.status ?? null,
+        target: ready.map((item) => item.title || item.shotId).join('、'),
+        megapixels: ui.megapixels,
         taskCount: ready.length,
       },
       async () => {
         let submitted = 0;
         for (const item of ready) {
           if (!item.promptVersionId) continue;
-          await post('/api/render', { shotId: item.shotId, promptVersionId: item.promptVersionId, providerId, megapixels: 0.6 });
+          await post('/api/render', { shotId: item.shotId, promptVersionId: item.promptVersionId, providerId, megapixels: ui.megapixels });
           submitted++;
         }
         await store.refreshGraph();

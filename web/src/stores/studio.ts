@@ -1,6 +1,6 @@
 // Studio Canvas store — merges the server graph projection with the persisted
-// layout and the deterministic lane layout. Read-only in WP-05: positions come
-// from laneLayout (unpinned) plus stored pinned positions; no writes yet.
+// layout, deterministic lane positions, and transient UI state (selection,
+// live jobs, focus requests). Domain mutations always go through the server.
 
 import { defineStore } from 'pinia';
 import { computed, ref, shallowRef } from 'vue';
@@ -9,6 +9,7 @@ import type {
   CanvasConnectRequest,
   CanvasConnectResult,
   CanvasGraph,
+  CanvasLane,
   CanvasLayoutDoc,
   CanvasNode,
   CanvasNodeId,
@@ -20,6 +21,18 @@ import { defaultLaneLayoutOptions, laneLayout } from '@h3mise/shared';
 import { del, get, getConditional, post, put } from '../api/client';
 
 export type StudioLod = 'overview' | 'card' | 'detail';
+
+export type StudioFocusRequest =
+  | { kind: 'node'; value: CanvasNodeId; nonce: number }
+  | { kind: 'lane'; value: CanvasLane; nonce: number }
+  | { kind: 'all'; value: null; nonce: number }
+  | { kind: 'selection'; value: null; nonce: number };
+
+type StudioFocusInput =
+  | { kind: 'node'; value: CanvasNodeId }
+  | { kind: 'lane'; value: CanvasLane }
+  | { kind: 'all'; value: null }
+  | { kind: 'selection'; value: null };
 
 const NODE_SIZE: Record<string, { width: number; height: number }> = {
   story: { width: 280, height: 200 },
@@ -51,6 +64,9 @@ export const useStudioStore = defineStore('studio', () => {
   const error = ref<string | null>(null);
   /** SSE live patch: shotId → in-flight render job (before the graph refresh). */
   const liveJobs = ref<Record<string, { jobId: string; status: string }>>({});
+  /** One-shot request for the canvas to fit a node, lane, or the whole graph. */
+  const focusRequest = ref<StudioFocusRequest | null>(null);
+  let focusNonce = 0;
 
   async function load(): Promise<void> {
     loading.value = true;
@@ -142,8 +158,9 @@ export const useStudioStore = defineStore('studio', () => {
   const flowEdges = computed(() =>
     (graph.value?.edges ?? [])
       // Asset bindings are focusOnly: hidden by default, shown when one of
-      // their endpoints is selected (design §7.5 — avoids spaghetti).
-      .filter((edge) => !edge.focusOnly || selection.value.includes(edge.source) || selection.value.includes(edge.target))
+      // their endpoints is selected (design §7.5 — avoids spaghetti). The view
+      // menu can reveal every edge.
+      .filter((edge) => layout.value?.view.edgeVisibility === 'all' || !edge.focusOnly || selection.value.includes(edge.source) || selection.value.includes(edge.target))
       .map((edge) => ({
         id: edge.id,
         type: 'typed',
@@ -188,6 +205,26 @@ export const useStudioStore = defineStore('studio', () => {
     lod.value = next;
   }
 
+  function requestFocus(request: StudioFocusInput): void {
+    focusRequest.value = { ...request, nonce: ++focusNonce };
+  }
+
+  function focusNode(id: CanvasNodeId): void {
+    requestFocus({ kind: 'node', value: id });
+  }
+
+  function focusLane(lane: CanvasLane): void {
+    requestFocus({ kind: 'lane', value: lane });
+  }
+
+  function fitAll(): void {
+    requestFocus({ kind: 'all', value: null });
+  }
+
+  function fitSelection(): void {
+    requestFocus({ kind: 'selection', value: null });
+  }
+
   function upsertLocalLayout(node: CanvasNodeLayout): void {
     if (!layout.value) return;
     const index = layout.value.nodes.findIndex((item) => item.nodeId === node.nodeId);
@@ -223,6 +260,28 @@ export const useStudioStore = defineStore('studio', () => {
   function setView(view: CanvasViewState): void {
     if (!layout.value) return;
     layout.value.view = view;
+  }
+
+  function setEdgeVisibility(mode: CanvasViewState['edgeVisibility']): CanvasViewState | null {
+    if (!layout.value) return null;
+    layout.value.view = { ...layout.value.view, edgeVisibility: mode };
+    return layout.value.view;
+  }
+
+  function setHiddenLanes(lanes: CanvasLane[]): CanvasViewState | null {
+    if (!layout.value) return null;
+    layout.value.view = { ...layout.value.view, hiddenLanes: [...lanes] };
+    return layout.value.view;
+  }
+
+  /** Persist view-only changes immediately (lanes / edge visibility / reset). */
+  async function saveView(): Promise<void> {
+    if (!graph.value || !layout.value) return;
+    try {
+      await saveLayout({ storyId: graph.value.storyId, nodes: [], view: layout.value.view });
+    } catch {
+      /* layout is a local view; a dropped write is not fatal */
+    }
   }
 
   async function saveLayout(input: {
@@ -273,6 +332,7 @@ export const useStudioStore = defineStore('studio', () => {
     loading,
     error,
     liveJobs,
+    focusRequest,
     hiddenLanes,
     positions,
     flowNodes,
@@ -285,10 +345,17 @@ export const useStudioStore = defineStore('studio', () => {
     clearSelection,
     selectEdge,
     setLod,
+    focusNode,
+    focusLane,
+    fitAll,
+    fitSelection,
     setNodePosition,
     toggleCollapse,
     setView,
+    setEdgeVisibility,
+    setHiddenLanes,
     saveLayout,
+    saveView,
     resetLayout,
     setLiveJob,
     connect,

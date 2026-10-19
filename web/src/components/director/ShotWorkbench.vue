@@ -22,7 +22,12 @@ import { t as tr } from '../../stores/locale';
 
 const route = useRoute();
 const router = useRouter();
-const props = defineProps<{ shotId: string; compact?: boolean }>();
+const props = defineProps<{
+  shotId: string;
+  compact?: boolean;
+  /** Studio Inspector asks for a workflow section after locating a node. */
+  focusSection?: { section: string; nonce: number } | null;
+}>();
 const shotId = props.shotId;
 const project = useProjectStore();
 const toasts = useToastStore();
@@ -230,6 +235,13 @@ function applyGuideQuery() {
   const tabTarget = typeof route.query.tab === 'string' ? SECTION_FOR_QUERY[route.query.tab] : undefined;
   const guideTarget = typeof route.query.guide === 'string' ? SECTION_FOR_QUERY[route.query.guide] : undefined;
   const target = hashTarget ?? guideTarget ?? tabTarget;
+  if (target) scrollToSection(target);
+}
+
+function applyFocusRequest() {
+  const section = props.focusSection?.section;
+  if (!section) return;
+  const target = SECTION_FOR_QUERY[section];
   if (target) scrollToSection(target);
 }
 
@@ -621,6 +633,7 @@ function refreshShotAndRepairExpiredDuplicateGate(): Promise<void> {
 onMounted(async () => {
   await refreshShotAndRepairExpiredDuplicateGate();
   applyGuideQuery();
+  applyFocusRequest();
   await loadMedia();
   await project.refreshProviders();
   await refreshAiStatus();
@@ -635,6 +648,7 @@ onMounted(async () => {
 // Deep links (?guide=…, ?tab=…, #takes) scroll the matching workflow section.
 watch(() => route.query.guide, applyGuideQuery);
 watch(() => route.hash, (hash) => { if (hash) applyGuideQuery(); });
+watch(() => props.focusSection?.nonce, applyFocusRequest);
 
 onUnmounted(() => {
   off?.();

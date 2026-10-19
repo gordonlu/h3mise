@@ -2,20 +2,26 @@
 // Cmd/Ctrl+K command palette — keyboard-first navigation and quick actions.
 // Shot search is lazy: the list is fetched once on open and filtered locally.
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { get } from '../api/client';
 import { t } from '../stores/locale';
 import { useThemeStore } from '../stores/theme';
 import { useRenderStore } from '../stores/render';
+import { useStudioStore } from '../stores/studio';
+import { useStudioNavigate } from '../composables/useStudioNavigate';
+import type { CanvasGraph, CanvasNode } from '@h3mise/shared';
 
 const emit = defineEmits<{ close: [] }>();
+const route = useRoute();
 const router = useRouter();
 const theme = useThemeStore();
 const render = useRenderStore();
+const studio = useStudioStore();
+const studioNav = useStudioNavigate();
 
 interface PaletteItem {
   id: string;
-  group: 'navigation' | 'actions' | 'shots';
+  group: 'navigation' | 'actions' | 'shots' | 'studio';
   label: string;
   hint?: string;
   keywords?: string;
@@ -26,6 +32,7 @@ const query = ref('');
 const cursor = ref(0);
 const inputEl = ref<HTMLInputElement | null>(null);
 const shots = ref<Array<{ id: string; title: string }>>([]);
+const studioNodes = ref<CanvasNode[]>([]);
 
 function go(path: string, query?: Record<string, string>): () => void {
   return () => void router.push(query ? { path, query } : path);
@@ -54,9 +61,57 @@ const shotItems = computed<PaletteItem[]>(() =>
     id: `shot.${s.id}`,
     group: 'shots' as const,
     label: `${s.id} · ${s.title || s.id}`,
-    run: go(`/shots/${s.id}`),
+    run: () => {
+      if (route.path.startsWith('/studio')) locateNode(`shot:${s.id}`);
+      else go(`/shots/${s.id}`)();
+    },
   })),
 );
+
+const STUDIO_KINDS = new Set(['story', 'beat', 'sequence', 'storyboard', 'entity', 'media', 'shot', 'timeline', 'export']);
+
+function studioLabel(node: CanvasNode): string {
+  const order = 'order' in node.data && typeof node.data.order === 'number' ? node.data.order : null;
+  if (node.kind === 'shot' && order !== null) return `S${String(order).padStart(2, '0')} · ${node.title}`;
+  if (node.kind === 'beat' && order !== null) return `B${String(order).padStart(2, '0')} · ${node.title}`;
+  if (node.kind === 'entity') return `${node.title} · ${t('studio.node.entity')}`;
+  return node.title || node.id;
+}
+
+function locateNode(id: string): void {
+  if (route.path.startsWith('/studio')) {
+    studioNav.go({ node: id });
+  } else {
+    void router.push({ path: '/studio', query: { node: id } });
+  }
+}
+
+const studioItems = computed<PaletteItem[]>(() =>
+  studioNodes.value
+    .filter((node) => STUDIO_KINDS.has(node.kind))
+    .map((node) => ({
+      id: `studio.${node.id}`,
+      group: 'studio' as const,
+      label: studioLabel(node),
+      hint: node.id,
+      keywords: `${node.domainId} ${node.kind} ${node.title}`,
+      run: () => locateNode(node.id),
+    })),
+);
+
+async function loadStudioNodes(): Promise<void> {
+  if (!route.path.startsWith('/studio')) return;
+  if (studio.graph) {
+    studioNodes.value = studio.graph.nodes;
+    return;
+  }
+  try {
+    const graph = await get<CanvasGraph>('/api/canvas/graph');
+    studioNodes.value = graph.nodes;
+  } catch {
+    studioNodes.value = [];
+  }
+}
 
 function matches(item: PaletteItem, q: string): boolean {
   if (!q) return true;
@@ -66,6 +121,7 @@ function matches(item: PaletteItem, q: string): boolean {
 const groups = computed(() => {
   const q = query.value.trim().toLowerCase();
   return [
+    { key: 'studio', label: t('palette.studio'), items: q ? studioItems.value.filter((i) => matches(i, q)) : [] },
     { key: 'navigation', label: t('palette.navigation'), items: navItems.filter((i) => matches(i, q)) },
     { key: 'actions', label: t('palette.actions'), items: actionItems.filter((i) => matches(i, q)) },
     { key: 'shots', label: t('palette.shots'), items: q ? shotItems.value.filter((i) => matches(i, q)) : [] },
@@ -110,6 +166,7 @@ function onGlobalEscape(e: KeyboardEvent): void {
 onMounted(async () => {
   inputEl.value?.focus();
   document.addEventListener('keydown', onGlobalEscape);
+  await loadStudioNodes();
   try {
     shots.value = await get<Array<{ id: string; title: string }>>('/api/shots');
   } catch {

@@ -40,19 +40,25 @@ function meta(shot: ShotRow): string {
 }
 
 const unassigned = computed(() => shots.value.filter((shot) => !shot.storyBeatId));
+
+function locate(id: string): void {
+  store.select(id);
+  store.focusNode(id);
+}
 </script>
 
 <template>
   <div class="hf-outline">
     <div v-for="beat in beats" :key="beat.id" class="hf-outline-group">
-      <button class="hf-outline-row beat" @click="store.select(beat.id)">
+      <button class="hf-outline-row beat" :class="{ active: store.selection.includes(beat.id) }" @click="locate(beat.id)">
         <span class="hf-outline-dot" />{{ beat.title }}
       </button>
       <button
         v-for="shot in shotsFor(beat.domainId)"
         :key="shot.id"
         class="hf-outline-row shot"
-        @click="store.select(shot.id)"
+        :class="{ active: store.selection.includes(shot.id) }"
+        @click="locate(shot.id)"
       >
         <span class="hf-outline-dot" />{{ shot.title }}
         <span class="hf-outline-meta">{{ meta(shot) }}</span>
@@ -60,7 +66,13 @@ const unassigned = computed(() => shots.value.filter((shot) => !shot.storyBeatId
     </div>
     <div v-if="unassigned.length" class="hf-outline-group">
       <div class="hf-outline-row group">{{ t('studio.outline.unassigned') }}</div>
-      <button v-for="shot in unassigned" :key="shot.id" class="hf-outline-row shot" @click="store.select(shot.id)">
+      <button
+        v-for="shot in unassigned"
+        :key="shot.id"
+        class="hf-outline-row shot"
+        :class="{ active: store.selection.includes(shot.id) }"
+        @click="locate(shot.id)"
+      >
         <span class="hf-outline-dot" />{{ shot.title }}
         <span class="hf-outline-meta">{{ meta(shot) }}</span>
       </button>

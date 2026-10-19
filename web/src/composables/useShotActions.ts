@@ -9,6 +9,7 @@ import { useStudioStore } from '../stores/studio';
 import { useProjectStore } from '../stores/project';
 import { useAiStore } from '../stores/ai';
 import { useRenderStore } from '../stores/render';
+import { useStudioUiStore } from '../stores/studioUi';
 import { useToastStore } from '../stores/toast';
 import { usePaidAction } from './usePaidAction';
 import { t } from '../stores/locale';
@@ -25,6 +26,7 @@ export function useShotActions() {
   const project = useProjectStore();
   const ai = useAiStore();
   const render = useRenderStore();
+  const ui = useStudioUiStore();
   const toasts = useToastStore();
   const router = useRouter();
   const paid = usePaidAction();
@@ -68,7 +70,7 @@ export function useShotActions() {
           await post(`/api/shots/${shotId}/preflight`, {
             promptVersionId: data.latestPromptVersionId,
             providerId,
-            megapixels: 0.6,
+            megapixels: ui.megapixels,
           });
           await store.refreshGraph();
         },
@@ -99,7 +101,7 @@ export function useShotActions() {
             mode: H3_MODE_LABEL[mode],
             durationSeconds: data.durationSeconds,
             aspectRatio: data.aspectRatio,
-            megapixels: 0.6,
+            megapixels: ui.megapixels,
             preflight: data.latestPreflight ? { blocked: data.latestPreflight.blocked, risk: data.latestPreflight.risk } : null,
             taskCount: 1,
           },
@@ -109,7 +111,7 @@ export function useShotActions() {
               promptVersionId,
               providerId,
               durationSeconds: data.durationSeconds,
-              megapixels: 0.6,
+              megapixels: ui.megapixels,
             });
             toasts.push({ kind: 'ok', text: t('studio.action.renderSubmitted', { id: job.id }) });
             await store.refreshGraph();

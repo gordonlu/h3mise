@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
+import { DEFAULT_LANE_ORDER, type CanvasLane, type StoryEpisodeList } from '@h3mise/shared';
 import { useStudioStore } from '../stores/studio';
+import { useStudioUiStore, isBottomDockTab, isLeftDockTab, MEGAPIXEL_OPTIONS } from '../stores/studioUi';
+import { useRunPlanStore } from '../stores/runPlan';
+import { useToastStore } from '../stores/toast';
 import { useAutoProduce } from '../composables/useAutoProduce';
-import { post } from '../api/client';
+import { useStudioNavigate } from '../composables/useStudioNavigate';
+import { get, post } from '../api/client';
 import { t } from '../stores/locale';
 import StudioCanvas from '../studio/StudioCanvas.vue';
 import StudioInspector from '../studio/inspector/StudioInspector.vue';
+import StudioViewMenu from '../studio/StudioViewMenu.vue';
 import BottomDock from '../studio/bottom/BottomDock.vue';
 import LeftDock from '../studio/dock/LeftDock.vue';
 import RunPlanCard from '../studio/overlays/RunPlanCard.vue';
@@ -16,16 +22,19 @@ import NoteEditor from '../studio/overlays/NoteEditor.vue';
 import QuickCreateMenu from '../studio/overlays/QuickCreateMenu.vue';
 
 const store = useStudioStore();
+const ui = useStudioUiStore();
+const runPlan = useRunPlanStore();
+const toasts = useToastStore();
 const route = useRoute();
 const { graph, loading, error } = storeToRefs(store);
 const narrow = ref(false);
-const inspectorOpen = ref(true);
-const dockOpen = ref(true);
+const episodes = ref<StoryEpisodeList | null>(null);
 const { open: openAutoProduce } = useAutoProduce();
+const navigate = useStudioNavigate();
 
-const showInspector = computed(() => inspectorOpen.value && !loading.value && !error.value);
+const showInspector = computed(() => ui.inspectorOpen && !loading.value && !error.value);
 const gridColumns = computed(() =>
-  `${dockOpen.value ? '220px ' : ''}minmax(0, 1fr)${showInspector.value ? ' 400px' : ''}`,
+  `${ui.leftOpen ? '220px ' : ''}minmax(0, 1fr)${showInspector.value ? ' 400px' : ''}`,
 );
 
 const isEmpty = computed(() => {
@@ -51,40 +60,51 @@ function checkWidth(): void {
   narrow.value = window.innerWidth < 1280;
 }
 
-function onKeydown(event: KeyboardEvent): void {
-  const target = event.target as HTMLElement | null;
-  const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-  if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.key === '[') {
-    event.preventDefault();
-    dockOpen.value = !dockOpen.value;
-  } else if (event.key === ']') {
-    event.preventDefault();
-    inspectorOpen.value = !inspectorOpen.value;
-  } else if (event.key === 'Escape') {
-    store.clearSelection();
+async function loadEpisodes(): Promise<void> {
+  try {
+    episodes.value = await get<StoryEpisodeList>('/api/story/episodes');
+  } catch {
+    episodes.value = null;
   }
 }
 
-async function applyDeepLink(): Promise<void> {
-  const node = typeof route.query.node === 'string' ? route.query.node : null;
-  if (node) {
-    store.select(node);
-    inspectorOpen.value = true;
+async function switchEpisode(event: Event): Promise<void> {
+  const id = (event.target as HTMLSelectElement).value;
+  if (!id || id === episodes.value?.activeEpisodeId) return;
+  try {
+    episodes.value = await post<StoryEpisodeList>(`/api/story/episodes/${encodeURIComponent(id)}/activate`, {});
+    store.clearSelection();
+    runPlan.setPlan(null);
+    runPlan.setAutoPlan(null);
+    await store.load();
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+function applyDeepLink(): void {
+  const { node, lane, dock, bottom, tab } = route.query;
+  if (typeof dock === 'string' && isLeftDockTab(dock)) navigate.go({ dock });
+  if (typeof bottom === 'string' && isBottomDockTab(bottom)) navigate.go({ bottom });
+  if (typeof lane === 'string' && (DEFAULT_LANE_ORDER as string[]).includes(lane)) {
+    navigate.go({ lane: lane as CanvasLane });
+  }
+  if (typeof node === 'string') {
+    navigate.go({ node, ...(typeof tab === 'string' ? { tab } : {}) });
   }
 }
 
 onMounted(async () => {
   checkWidth();
   window.addEventListener('resize', checkWidth);
-  window.addEventListener('keydown', onKeydown);
-  await store.load();
-  await applyDeepLink();
+  await Promise.all([store.load(), loadEpisodes()]);
+  applyDeepLink();
 });
 onUnmounted(() => {
   window.removeEventListener('resize', checkWidth);
-  window.removeEventListener('keydown', onKeydown);
 });
+
+watch(() => route.query, () => applyDeepLink(), { deep: true });
 </script>
 
 <template>
@@ -92,10 +112,25 @@ onUnmounted(() => {
     <header class="hf-topbar">
       <span class="hf-crumb">{{ t('studio.title') }}</span>
       <span class="hf-sub">{{ t('studio.subtitle') }}</span>
+      <label v-if="episodes" class="hf-episode">
+        <span class="hf-visually-hidden">{{ t('pages.story.episodeAria') }}</span>
+        <select :value="episodes.activeEpisodeId" @change="switchEpisode">
+          <option v-for="episode in episodes.episodes" :key="episode.id" :value="episode.id">
+            EP {{ String(episode.order).padStart(2, '0') }} · {{ episode.title }}
+          </option>
+        </select>
+      </label>
+      <label class="hf-episode">
+        <span class="hf-visually-hidden">{{ t('studio.mp') }}</span>
+        <select v-model.number="ui.megapixels">
+          <option v-for="mp in MEGAPIXEL_OPTIONS" :key="mp" :value="mp">{{ mp }} MP</option>
+        </select>
+      </label>
       <span class="hf-spacer" />
       <button class="hf-ghost" :disabled="loading || !!error" @click="openAutoProduce">{{ t('studio.auto.open') }}</button>
-      <button class="hf-ghost" @click="dockOpen = !dockOpen">{{ t('studio.dock.nodes') }}</button>
-      <button v-if="!inspectorOpen" class="hf-ghost" @click="inspectorOpen = true">
+      <StudioViewMenu />
+      <button class="hf-ghost" @click="ui.toggleLeft()">{{ t('studio.dock.nodes') }}</button>
+      <button v-if="!ui.inspectorOpen" class="hf-ghost" @click="ui.inspectorOpen = true">
         {{ t('studio.inspector.title') }}
       </button>
       <button class="hf-ghost" @click="store.load()">{{ t('studio.reload') }}</button>
@@ -104,7 +139,7 @@ onUnmounted(() => {
     <div v-if="narrow" class="hf-narrow">{{ t('studio.tooNarrow') }}</div>
 
     <div class="hf-body-row" :style="{ gridTemplateColumns: gridColumns }">
-      <LeftDock v-if="dockOpen && !loading && !error" />
+      <LeftDock v-if="ui.leftOpen && !loading && !error" />
       <div class="hf-canvas">
         <StudioCanvas v-if="!loading && !error" />
         <div v-if="loading" class="hf-overlay">
@@ -140,7 +175,7 @@ onUnmounted(() => {
 
       <StudioInspector
         v-if="showInspector"
-        @collapse="inspectorOpen = false"
+        @collapse="ui.inspectorOpen = false"
       />
     </div>
 

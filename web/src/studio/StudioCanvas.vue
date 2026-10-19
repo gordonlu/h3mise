@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, onMounted, onUnmounted, watch } from 'vue';
+import { computed, markRaw, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import {
   VueFlow,
   useVueFlow,
@@ -19,12 +19,21 @@ import '@vue-flow/core/dist/theme-default.css';
 import '@vue-flow/controls/dist/style.css';
 import '@vue-flow/minimap/dist/style.css';
 import './studio.css';
-import { useStudioStore } from '../stores/studio';
+import type { CanvasLane, CanvasNode, MediaAsset, ShotNodeData } from '@h3mise/shared';
+import { post } from '../api/client';
+import { useStudioStore, type StudioFocusRequest } from '../stores/studio';
+import { useStudioUiStore } from '../stores/studioUi';
+import { usePaidActionStore } from '../stores/paidAction';
+import { useToastStore } from '../stores/toast';
+import { useConfirmStore } from '../stores/confirm';
+import { useRolePickerStore } from '../stores/rolePicker';
 import { t } from '../stores/locale';
 import { useLayoutPersist } from '../composables/useLayoutPersist';
 import { useLayoutHistory } from '../composables/useLayoutHistory';
 import { useGraphSync } from '../composables/useGraphSync';
 import { useConnect } from '../composables/useConnect';
+import { useStudioShortcuts } from '../composables/useStudioShortcuts';
+import { useShotActions } from '../composables/useShotActions';
 import { CREATE_MIME, useCanvasCreate, type CreateDescriptor } from '../composables/useCanvasCreate';
 import { useRunPlanStore } from '../stores/runPlan';
 import { useNoteEditorStore } from '../stores/noteEditor';
@@ -46,11 +55,17 @@ import GhostNode from './nodes/GhostNode.vue';
 import TypedEdge from './edges/TypedEdge.vue';
 
 const store = useStudioStore();
-const { viewport, project, connectionStartHandle } = useVueFlow();
+const ui = useStudioUiStore();
+const paid = usePaidActionStore();
+const toasts = useToastStore();
+const confirm = useConfirmStore();
+const rolePicker = useRolePickerStore();
+const { viewport, project, connectionStartHandle, fitView, zoomIn, zoomOut } = useVueFlow();
 const persist = useLayoutPersist();
 const history = useLayoutHistory();
 useGraphSync();
 const { create } = useCanvasCreate();
+const { mainAction } = useShotActions();
 const runPlan = useRunPlanStore();
 const noteEditor = useNoteEditorStore();
 
@@ -91,10 +106,98 @@ const canvasNodes = computed(() => [...store.flowNodes, ...ghostNodes.value] as 
 watch(
   () => viewport.value.zoom,
   (zoom) => {
-    const next = zoom < 0.45 ? 'overview' : zoom > 0.9 ? 'detail' : 'card';
-    if (store.lod !== next) store.setLod(next);
+    // 0.05 hysteresis around 0.45 / 0.9 keeps LOD from flapping at the edge.
+    const current = store.lod;
+    let next = current;
+    if (current === 'overview' && zoom >= 0.5) next = 'card';
+    else if (current === 'card' && zoom < 0.4) next = 'overview';
+    else if (current === 'card' && zoom > 0.95) next = 'detail';
+    else if (current === 'detail' && zoom <= 0.85) next = 'card';
+    if (next !== current) store.setLod(next);
   },
 );
+
+function laneNodeIds(lane: CanvasLane): string[] {
+  return store.flowNodes
+    .filter((item) => {
+      const node = (item.data as { node?: CanvasNode }).node;
+      return node?.lane === lane && !item.hidden;
+    })
+    .map((item) => item.id);
+}
+
+watch(
+  () => store.focusRequest,
+  (request) => void applyFocus(request),
+  { deep: true, flush: 'post' },
+);
+
+async function applyFocus(request: StudioFocusRequest | null): Promise<void> {
+  if (!request) return;
+  await nextTick();
+  if (request.kind === 'node') {
+    if (!store.flowNodes.some((item) => item.id === request.value)) return;
+    await fitView({ nodes: [request.value], padding: 0.45, duration: 300, maxZoom: 1.15 });
+  } else if (request.kind === 'lane') {
+    const ids = laneNodeIds(request.value);
+    if (ids.length > 0) await fitView({ nodes: ids, padding: 0.2, duration: 300, maxZoom: 0.9 });
+  } else if (request.kind === 'selection') {
+    if (store.selection.length > 0) {
+      await fitView({ nodes: [...store.selection], padding: 0.3, duration: 300, maxZoom: 1.15 });
+    }
+  } else {
+    await fitView({ padding: 0.15, duration: 300 });
+  }
+}
+
+function runSelected(): void {
+  const node = store.selectedNode;
+  if (!node || node.kind !== 'shot') return;
+  const action = mainAction(node.domainId, node.data as ShotNodeData);
+  if (!action.disabled) void action.run();
+}
+
+function escapeStudio(): void {
+  if (paid.pending || confirm.pending) return;
+  if (rolePicker.pending) {
+    rolePicker.answer(null);
+    return;
+  }
+  if (noteEditor.pending) {
+    noteEditor.close();
+    return;
+  }
+  if (quickCreate.pending) {
+    quickCreate.close();
+    return;
+  }
+  if (runPlan.contextMenu) {
+    runPlan.closeMenu();
+    return;
+  }
+  if (runPlan.plan || runPlan.autoPlan) {
+    runPlan.setPlan(null);
+    runPlan.setAutoPlan(null);
+    return;
+  }
+  if (store.selectedEdgeId) {
+    store.selectEdge(null);
+    return;
+  }
+  store.clearSelection();
+}
+
+useStudioShortcuts({
+  toggleLeftDock: ui.toggleLeft,
+  toggleInspector: ui.toggleInspector,
+  toggleBottomDock: ui.toggleBottom,
+  zoomIn: () => void zoomIn({ duration: 120 }),
+  zoomOut: () => void zoomOut({ duration: 120 }),
+  fitAll: store.fitAll,
+  fitSelection: store.fitSelection,
+  escape: escapeStudio,
+  runSelected,
+});
 
 function onNodeClick(event: NodeMouseEvent): void {
   const additive = event.event instanceof MouseEvent && (event.event.metaKey || event.event.ctrlKey);
@@ -173,6 +276,11 @@ function onEdgeClick(event: EdgeMouseEvent): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  const target = event.target;
+  if (
+    target instanceof HTMLElement &&
+    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+  ) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     if (event.shiftKey) void history.redo();
@@ -184,7 +292,11 @@ function onKeydown(event: KeyboardEvent): void {
     void connectApi.disconnect(store.selectedEdgeId);
   }
 }
-onMounted(() => window.addEventListener('keydown', onKeydown));
+onMounted(async () => {
+  window.addEventListener('keydown', onKeydown);
+  await nextTick();
+  if (store.focusRequest) await applyFocus(store.focusRequest);
+});
 onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 
 function onViewport(viewportTransform: ViewportTransform): void {
@@ -198,7 +310,61 @@ function onViewport(viewportTransform: ViewportTransform): void {
   persist.queueView(view);
 }
 
+function handleAt(clientX: number, clientY: number): { nodeId: string; port: string } | null {
+  const element = document.elementFromPoint(clientX, clientY)?.closest('.vue-flow__handle') as HTMLElement | null;
+  const nodeId = element?.getAttribute('data-nodeid');
+  const port = element?.getAttribute('data-handleid');
+  return nodeId && port ? { nodeId, port } : null;
+}
+
+async function importFiles(files: File[], position: { x: number; y: number }, target: { nodeId: string; port: string } | null): Promise<void> {
+  const storyId = store.graph?.storyId;
+  if (!storyId) return;
+  for (const [index, file] of files.entries()) {
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+      toasts.push({ kind: 'err', text: t('studio.create.unsupported', { name: file.name }) });
+      continue;
+    }
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('label', file.name);
+      const asset = await post<MediaAsset>('/api/assets/media/upload', form);
+      const nodeId = `media:${asset.id}`;
+      await store.saveLayout({
+        storyId,
+        nodes: [{
+          nodeId,
+          x: position.x + index * 26,
+          y: position.y + index * 26,
+          collapsed: false,
+          pinned: true,
+          userPlaced: true,
+        }],
+      });
+      await store.refreshGraph();
+      const port = asset.kind === 'image' ? 'image' : asset.kind === 'video' ? 'video' : 'audio';
+      if (target?.nodeId.startsWith('shot:')) {
+        await connectApi.connect(nodeId, port, target.nodeId, target.port);
+      } else {
+        store.select(nodeId);
+        store.focusNode(nodeId);
+      }
+      toasts.push({ kind: 'ok', text: t('studio.create.imported', { name: file.name }) });
+    } catch (error) {
+      toasts.push({ kind: 'err', text: t('studio.create.importFailed', { name: file.name, msg: error instanceof Error ? error.message : String(error) }) });
+    }
+  }
+}
+
 function onDrop(event: DragEvent): void {
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (files.length > 0) {
+    event.preventDefault();
+    const position = project({ x: event.clientX, y: event.clientY });
+    void importFiles(files, position, handleAt(event.clientX, event.clientY));
+    return;
+  }
   const raw = event.dataTransfer?.getData(CREATE_MIME);
   if (!raw) return;
   event.preventDefault();

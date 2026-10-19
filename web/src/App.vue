@@ -6,6 +6,7 @@ import { useRenderStore } from './stores/render';
 import { useToastStore } from './stores/toast';
 import { useThemeStore } from './stores/theme';
 import { useAiStore } from './stores/ai';
+import { useActivityStore } from './stores/activity';
 import { t } from './stores/locale';
 import { subscribeEvents, get } from './api/client';
 import AppSidebar from './components/AppSidebar.vue';
@@ -24,6 +25,7 @@ const render = useRenderStore();
 const toasts = useToastStore();
 const theme = useThemeStore();
 const ai = useAiStore();
+const activity = useActivityStore();
 const health = ref<{ ffmpeg: { available: boolean } } | null>(null);
 const paletteOpen = ref(false);
 const isStudio = computed(() => route.path.startsWith('/studio'));
@@ -104,6 +106,7 @@ onMounted(async () => {
   }
   document.addEventListener('keydown', onGlobalKeydown);
   off = subscribeEvents((e: AppEvent) => {
+    activity.push(e);
     render.onEvent(e.type, e as unknown as Record<string, unknown>);
     notify(e);
     if (e.type.startsWith('ai.request.')) void ai.refresh();

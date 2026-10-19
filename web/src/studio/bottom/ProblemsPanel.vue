@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { get } from '../../api/client';
+import { useStudioNavigate } from '../../composables/useStudioNavigate';
 import { t } from '../../stores/locale';
-import type { ProductionOverview } from '@h3mise/shared';
+import type { ProductionIssue, ProductionOverview } from '@h3mise/shared';
 
-const router = useRouter();
 const overview = ref<ProductionOverview | null>(null);
 const loading = ref(false);
+const { goLegacy } = useStudioNavigate();
 
 const SEV_ORDER: Record<string, number> = { blocker: 0, warning: 1, info: 2 };
 
@@ -20,8 +20,8 @@ async function load(): Promise<void> {
   }
 }
 
-function go(to: string): void {
-  if (to) void router.push(to);
+function open(issue: ProductionIssue): void {
+  goLegacy(issue.to, issue.category);
 }
 
 onMounted(() => void load());
@@ -37,7 +37,7 @@ defineExpose({ load, refresh: load });
       :key="issue.id"
       class="hf-issue"
       :class="issue.severity"
-      @click="go(issue.to)"
+      @click="open(issue)"
     >
       <span class="hf-chip" :class="issue.severity">{{ issue.severity }}</span>
       <span class="hf-issue-title">{{ issue.title }}</span>

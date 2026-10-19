@@ -38,7 +38,7 @@ export const zh = {
     unconfigured: '未配置',
   },
   palette: {
-    open: '打开指令面板', placeholder: '搜索页面、镜头，或输入指令…', navigation: '跳转', actions: '操作', shots: '镜头',
+    open: '打开指令面板', placeholder: '搜索页面、镜头，或输入指令…', navigation: '跳转', actions: '操作', shots: '镜头', studio: '画布节点',
     empty: '没有匹配结果', toggleTheme: '切换主题', renderQueue: '打开渲染队列',
   },
   brain: {
@@ -377,7 +377,7 @@ export const en: typeof zh = {
     unconfigured: 'Unconfigured',
   },
   palette: {
-    open: 'Open command palette', placeholder: 'Search pages, shots, or type a command…', navigation: 'Go to', actions: 'Actions', shots: 'Shots',
+    open: 'Open command palette', placeholder: 'Search pages, shots, or type a command…', navigation: 'Go to', actions: 'Actions', shots: 'Shots', studio: 'Canvas nodes',
     empty: 'No matching results', toggleTheme: 'Toggle theme', renderQueue: 'Open render queue',
   },
   brain: {
@@ -705,7 +705,7 @@ export const ja: typeof zh = {
     edit: '編集', irreversible: '元に戻せません。',
   },
   palette: {
-    open: 'コマンドパレットを開く', placeholder: 'ページ、Shot、コマンドを検索…', navigation: '移動', actions: '操作', shots: 'Shot',
+    open: 'コマンドパレットを開く', placeholder: 'ページ、Shot、コマンドを検索…', navigation: '移動', actions: '操作', shots: 'Shot', studio: 'キャンバスノード',
     empty: '一致する結果がありません', toggleTheme: 'テーマを切り替え', renderQueue: 'レンダーキューを開く',
   },
   brain: {

@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import { t } from '../../stores/locale';
+import { useStudioUiStore } from '../../stores/studioUi';
 import NodeLibrary from './NodeLibrary.vue';
 import AssetDock from './AssetDock.vue';
 import OutlineTree from './OutlineTree.vue';
 
-type Tab = 'nodes' | 'assets' | 'outline';
-const tab = ref<Tab>('nodes');
+const ui = useStudioUiStore();
+const { leftTab: tab } = storeToRefs(ui);
 </script>
 
 <template>

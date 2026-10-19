@@ -851,11 +851,14 @@ export function buildCanvasGraph(p: ProjectContext, options: BuildGraphOptions =
     if (storyboardPanelAssets.has(row.asset_id)) continue;
     includedMedia.add(row.asset_id);
   }
+  const userPlacedMedia = new Set<string>();
   for (const row of p.db.all<{ node_id: string; user_placed: number }>("SELECT node_id, user_placed FROM canvas_node_layouts WHERE story_id = ? AND user_placed = 1", [storyId])) {
     const kindPrefix = row.node_id.slice(0, row.node_id.indexOf(':'));
     if (kindPrefix !== 'media') continue;
     const mediaId = row.node_id.slice(row.node_id.indexOf(':') + 1);
-    if (mediaById.has(mediaId)) includedMedia.add(mediaId);
+    if (!mediaById.has(mediaId)) continue;
+    includedMedia.add(mediaId);
+    userPlacedMedia.add(mediaId);
   }
   for (const mediaId of includedMedia) {
     const media = mediaById.get(mediaId);
@@ -874,7 +877,7 @@ export function buildCanvasGraph(p: ProjectContext, options: BuildGraphOptions =
         mediaKind: media.kind as MediaKind,
         posterPath: media.poster_path,
         durationSeconds: media.duration_seconds ?? undefined,
-        userPlaced: false,
+        userPlaced: userPlacedMedia.has(mediaId),
       } satisfies MediaNodeData,
     });
   }

@@ -19,6 +19,14 @@
 .hf-topbar .hf-crumb { font-weight: 600; font-size: 14px; color: var(--text); }
 .hf-topbar .hf-sub { font-size: 12px; color: var(--text-3); }
 .hf-topbar .hf-spacer { flex: 1; }
+.hf-episode select {
+  max-width: 240px; padding: 5px 26px 5px 10px; border-radius: var(--radius-pill);
+  border: 1px solid var(--line-2); background: var(--bg-3); color: var(--text-2); font-size: 12px;
+}
+.hf-visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .hf-ghost {
   padding: 6px 14px; border-radius: var(--radius-pill); border: 1px solid var(--line-2);
   background: var(--bg-3); color: var(--text-2); cursor: pointer; font-size: 12px;
@@ -259,6 +267,7 @@
   background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer;
 }
 .hf-outline-row:hover { background: var(--bg-muted); color: var(--text); }
+.hf-outline-row.active { background: var(--accent-soft); color: var(--accent-text); }
 .hf-outline-row.beat { font-weight: 600; color: var(--text); }
 .hf-outline-row.shot { padding-left: 18px; }
 .hf-outline-row.group { color: var(--text-3); font-weight: 600; }

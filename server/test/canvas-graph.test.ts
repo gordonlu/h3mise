@@ -11,6 +11,8 @@ import type { AppServices } from '../src/http/routes.js';
 import { createShot } from '../src/modules/shots.js';
 import { activeEpisodeId } from '../src/modules/story.js';
 import * as canvasMod from '../src/modules/canvas.js';
+import { listMedia } from '../src/modules/assets.js';
+import type { MediaNodeData } from '@h3mise/shared';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -89,6 +91,27 @@ test('GET /api/canvas/graph returns an ETag and honors If-None-Match', async () 
   const stale = await get({ 'if-none-match': '"deadbeef"' });
   assert.equal(stale.status, 200);
   assert.equal(ctx.meta.id, store.current?.meta.id);
+});
+
+test('user-placed media appears and reports userPlaced=true', async () => {
+  const { ctx } = await openDemo();
+  const media = listMedia(ctx, 'image')[0];
+  assert.ok(media);
+  canvasMod.saveLayout(ctx, {
+    storyId: activeEpisodeId(ctx),
+    nodes: [{
+      nodeId: `media:${media.id}`,
+      x: 42,
+      y: 64,
+      collapsed: false,
+      pinned: true,
+      userPlaced: true,
+    }],
+  });
+  const graph = canvasMod.buildCanvasGraph(ctx);
+  const node = graph.nodes.find((candidate) => candidate.id === `media:${media.id}`);
+  assert.ok(node);
+  assert.equal((node.data as MediaNodeData).userPlaced, true);
 });
 
 test('query count does not grow linearly with the number of shots', async () => {

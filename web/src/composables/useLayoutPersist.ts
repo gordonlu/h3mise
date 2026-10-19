@@ -45,11 +45,20 @@ export function useLayoutPersist() {
   function takeBody() {
     const storyId = store.graph?.storyId;
     if (!storyId) return null;
+    // Viewport writes merge the latest lane/edge state at flush time so a
+    // slower viewport PUT never restores stale lane visibility.
+    const view = pendingView
+      ? {
+          ...(store.layout?.view ?? pendingView),
+          viewport: pendingView.viewport,
+          layoutMode: pendingView.layoutMode,
+        }
+      : undefined;
     const body = {
       storyId,
       nodes: [...pending.values()],
       removeNodeIds: [...removeIds],
-      ...(pendingView ? { view: pendingView } : {}),
+      ...(view ? { view } : {}),
     };
     pending.clear();
     removeIds.clear();

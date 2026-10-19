@@ -6,6 +6,7 @@ import { DEFAULT_LANE_ORDER, type CanvasLane, type StoryEpisodeList } from '@h3m
 import { useStudioStore } from '../stores/studio';
 import { useStudioUiStore, isBottomDockTab, isLeftDockTab, MEGAPIXEL_OPTIONS } from '../stores/studioUi';
 import { useRunPlanStore } from '../stores/runPlan';
+import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { useAutoProduce } from '../composables/useAutoProduce';
 import { useStudioNavigate } from '../composables/useStudioNavigate';
@@ -25,21 +26,24 @@ import QuickCreateMenu from '../studio/overlays/QuickCreateMenu.vue';
 const store = useStudioStore();
 const ui = useStudioUiStore();
 const runPlan = useRunPlanStore();
+const project = useProjectStore();
 const toasts = useToastStore();
 const route = useRoute();
 const { graph, loading, error } = storeToRefs(store);
 const narrow = ref(false);
+const noProject = ref(false);
+const installingDemo = ref(false);
 const episodes = ref<StoryEpisodeList | null>(null);
 const { open: openAutoProduce } = useAutoProduce();
 const navigate = useStudioNavigate();
 
-const showInspector = computed(() => ui.inspectorOpen && !loading.value && !error.value);
+const showInspector = computed(() => ui.inspectorOpen && !noProject.value && !loading.value && !error.value);
 const gridColumns = computed(() =>
   `${ui.leftOpen ? '220px ' : ''}minmax(0, 1fr)${showInspector.value ? ' 400px' : ''}`,
 );
 
 const isEmpty = computed(() => {
-  if (loading.value || error.value) return false;
+  if (noProject.value || loading.value || error.value) return false;
   const nodes = graph.value?.nodes ?? [];
   return !nodes.some((node) => node.kind === 'shot' || node.kind === 'beat');
 });
@@ -95,9 +99,29 @@ function applyDeepLink(): void {
   }
 }
 
+async function installGoodBoy(): Promise<void> {
+  installingDemo.value = true;
+  try {
+    const installed = await project.installDemo('good-boy');
+    if (!installed) return;
+    noProject.value = false;
+    await Promise.all([store.load(), loadEpisodes()]);
+    applyDeepLink();
+  } catch (e) {
+    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+  } finally {
+    installingDemo.value = false;
+  }
+}
+
 onMounted(async () => {
   checkWidth();
   window.addEventListener('resize', checkWidth);
+  await project.bootstrap();
+  if (!project.current) {
+    noProject.value = true;
+    return;
+  }
   await Promise.all([store.load(), loadEpisodes()]);
   applyDeepLink();
 });
@@ -121,29 +145,44 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
           </option>
         </select>
       </label>
-      <label class="hf-episode">
+      <label v-if="!noProject" class="hf-episode">
         <span class="hf-visually-hidden">{{ t('studio.mp') }}</span>
         <select v-model.number="ui.megapixels">
           <option v-for="mp in MEGAPIXEL_OPTIONS" :key="mp" :value="mp">{{ mp }} MP</option>
         </select>
       </label>
       <span class="hf-spacer" />
-      <button class="hf-ghost" :disabled="loading || !!error" @click="openAutoProduce">{{ t('studio.auto.open') }}</button>
-      <StudioViewMenu />
-      <button class="hf-ghost" @click="ui.toggleLeft()">{{ t('studio.dock.nodes') }}</button>
-      <button v-if="!ui.inspectorOpen" class="hf-ghost" @click="ui.inspectorOpen = true">
-        {{ t('studio.inspector.title') }}
-      </button>
-      <button class="hf-ghost" @click="store.load()">{{ t('studio.reload') }}</button>
+      <template v-if="!noProject">
+        <button class="hf-ghost" :disabled="loading || !!error" @click="openAutoProduce">{{ t('studio.auto.open') }}</button>
+        <StudioViewMenu />
+        <button class="hf-ghost" @click="ui.toggleLeft()">{{ t('studio.dock.nodes') }}</button>
+        <button v-if="!ui.inspectorOpen" class="hf-ghost" @click="ui.inspectorOpen = true">
+          {{ t('studio.inspector.title') }}
+        </button>
+        <button class="hf-ghost" @click="store.load()">{{ t('studio.reload') }}</button>
+      </template>
     </header>
 
     <div v-if="narrow" class="hf-narrow">{{ t('studio.tooNarrow') }}</div>
 
     <div class="hf-body-row" :style="{ gridTemplateColumns: gridColumns }">
-      <LeftDock v-if="ui.leftOpen && !loading && !error" />
+      <LeftDock v-if="ui.leftOpen && !noProject && !loading && !error" />
       <div class="hf-canvas">
-        <StudioCanvas v-if="!loading && !error" />
-        <div v-if="loading" class="hf-overlay">
+        <StudioCanvas v-if="!noProject && !loading && !error" />
+        <div v-if="noProject" class="hf-overlay">
+          <div class="hf-overlay-card hf-cold-start">
+            <p class="hf-template-title">{{ t('studio.noProject.title') }}</p>
+            <p class="hf-muted">{{ t('studio.noProject.hint') }}</p>
+            <div class="hf-project-actions">
+              <RouterLink to="/projects" class="hf-ghost">{{ t('studio.noProject.create') }}</RouterLink>
+              <button class="hf-ghost" :disabled="installingDemo" @click="installGoodBoy">
+                {{ installingDemo ? t('studio.noProject.installing') : t('studio.noProject.installDemo') }}
+              </button>
+              <RouterLink to="/projects" class="hf-ghost">{{ t('studio.noProject.openList') }}</RouterLink>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="loading" class="hf-overlay">
           <div class="hf-overlay-card">{{ t('studio.loading') }}</div>
         </div>
         <div v-else-if="error" class="hf-overlay">
@@ -181,7 +220,7 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
       />
     </div>
 
-    <BottomDock v-if="!loading && !error && !isEmpty" />
+    <BottomDock v-if="!noProject && !loading && !error && !isEmpty" />
     <ContextMenu />
     <NoteEditor />
     <QuickCreateMenu />

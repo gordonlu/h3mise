@@ -3,7 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/projects' },
+    { path: '/', redirect: '/studio' },
     { path: '/projects', name: 'projects', component: () => import('./pages/ProjectsPage.vue') },
     { path: '/quick', name: 'quick', component: () => import('./pages/QuickEditPage.vue') },
     { path: '/production', name: 'production', component: () => import('./pages/ProductionPage.vue') },

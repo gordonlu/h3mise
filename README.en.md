@@ -163,7 +163,7 @@ If you're unfamiliar with the Providers, let your coding assistant read [AGENTS.
 
 ## Pages
 
-- **Studio (new)**: a zoomable node canvas that puts story → beats → storyboard → shots → takes → timeline → export on one screen. Nodes and edges project existing domain objects, and the canvas stores only position/collapse/viewport/notes; dragging a wire performs one explicit domain operation, and every paid action still goes through cost confirmation. All classic pages remain available.
+- **Studio (new, default entry)**: a zoomable node canvas that puts story → beats → storyboard → shots → takes → timeline → export on one screen. Nodes and edges project existing domain objects, and the canvas stores only position/collapse/viewport/notes; dragging a wire performs one explicit domain operation, and every paid action still goes through cost confirmation. All classic pages remain available.
 - **Quick Edit (in progress)**: a simplified entry point exists, but editing still jumps to the professional timeline — not yet a self-contained beginner loop.
 - **Story**: story facts, full text, duration, and canonical StoryBeats; skeletons and AI refine in place, and uncovered Beats can create missing Shots with minimum DirectorPlans.
 - **Storyboard (optional)**: free text-panel editing and explicitly confirmed image generation; approval connects it to Shotboard, or it can be skipped entirely.

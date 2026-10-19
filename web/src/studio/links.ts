@@ -45,3 +45,21 @@ export function toStudioLink(to: string, storyId: string | null, category?: stri
   if (path === '/production') return { bottom: 'problems' };
   return null;
 }
+
+/** Studio target → /studio URL. */
+export function studioUrl(target: StudioTarget): string {
+  const params = new URLSearchParams();
+  if (target.node) params.set('node', target.node);
+  if (target.lane) params.set('lane', target.lane);
+  if (target.dock) params.set('dock', target.dock);
+  if (target.bottom) params.set('bottom', target.bottom);
+  if (target.tab) params.set('tab', target.tab);
+  const query = params.toString();
+  return query ? `/studio?${query}` : '/studio';
+}
+
+/** Classic page path → Studio path for links that do not know the storyId yet. */
+export function toStudioPath(to: string): string {
+  const target = toStudioLink(to, null);
+  return target ? studioUrl(target) : to;
+}

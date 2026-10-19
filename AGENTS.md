@@ -127,6 +127,7 @@ Rules:
 
 ## Studio Canvas
 
+- Studio is the default home (`/` redirects to `/studio`). With no project open it shows a cold-start card; `/projects` remains the project list and classic pages stay available.
 - `/studio` is a projection of the domain model, not a second data store. `GET /api/canvas/graph` derives nodes/edges from the existing tables; only layout is persisted (`canvas_node_layouts` / `canvas_views` / `canvas_annotations`, project migration v22). Deleting layout loses no project data.
 - Nodes are domain objects (Story/Beat/Shot/Take/Timeline…); edges are existing relations (`storyBeatId`, `ReferenceBinding`, `dependsOnShotId`, `timeline_clips`). A node id is `${kind}:${domainId}`.
 - Edges are commands: `POST /api/canvas/connections` dispatches through existing module functions only (never bypassing Preflight, the active-job lock, reference limits, or provider capability checks). `DELETE /api/canvas/connections/:edgeId` reverses. Validate drags with the shared rule table (`shared/src/canvas-rules.ts`, R1–R13); resolve `409 needs_replace` / `409 needs_mode_switch` with the user before retrying.

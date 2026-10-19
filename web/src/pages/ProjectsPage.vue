@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toast';
 import { confirmDialog } from '../stores/confirm';
 import { patch, post } from '../api/client';
 import { t } from '../stores/locale';
+import { toStudioPath } from '../studio/links';
 
 const project = useProjectStore();
 const router = useRouter();
@@ -22,8 +23,8 @@ const FORMATS = [
 ];
 
 const DEMOS = [
-  { id: 'last-film-reel', title: () => t('workflow.projects.theLastFilmReel'), desc: () => t('workflow.projects.aCompleteLongVideoExampleWithStory'), start: '/quick' },
-  { id: 'good-boy', title: () => 'Good Boy', desc: () => t('workflow.projects.a30SecondSitcomExampleWithA'), start: '/story' },
+  { id: 'last-film-reel', title: () => t('workflow.projects.theLastFilmReel'), desc: () => t('workflow.projects.aCompleteLongVideoExampleWithStory'), start: '/studio' },
+  { id: 'good-boy', title: () => 'Good Boy', desc: () => t('workflow.projects.a30SecondSitcomExampleWithA'), start: '/studio' },
 ];
 
 function localizeAttention(title: string): string {
@@ -57,7 +58,7 @@ async function createProject() {
       await patch('/api/story', { title: form.value.title, body: description });
     }
     toasts.push({ kind: 'ok', text: t('workflow.projects.projectValueCreated', { v0: form.value.title }) });
-    router.push(description ? '/story?propose=1' : form.value.format === 'story' ? '/story' : '/shots');
+    router.push(description ? '/story?propose=1' : '/studio');
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -81,12 +82,12 @@ async function installDemo(demo: typeof DEMOS[number]) {
 
 async function openProject(id: string) {
   if (!(await project.openProject(id))) return;
-  router.push(project.current?.meta.format === 'story' ? '/story' : '/shots');
+  router.push('/studio');
 }
 
-async function continueProject(id: string, to = '/shots') {
+async function continueProject(id: string, to = '/studio') {
   if (!(await project.openProject(id))) return;
-  router.push(to);
+  router.push(toStudioPath(to));
 }
 
 async function quickEditProject(id: string) {

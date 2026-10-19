@@ -294,6 +294,9 @@
 
 /* ----------------------------------------------------- empty templates --- */
 .hf-template-title { margin: 0 0 12px; }
+.hf-cold-start { max-width: 520px; }
+.hf-project-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.hf-project-actions .hf-ghost { display: inline-flex; align-items: center; text-decoration: none; }
 .hf-templates { display: grid; gap: 8px; }
 .hf-template {
   display: grid; gap: 2px; text-align: left; padding: 12px 14px;

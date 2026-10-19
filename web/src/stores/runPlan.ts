@@ -33,6 +33,7 @@ export const useRunPlanStore = defineStore('runPlan', () => {
   const plan = ref<RunPlan | null>(null);
   const autoPlan = ref<AutoProducePlan | null>(null);
   const contextMenu = ref<{ x: number; y: number; nodeId: string } | null>(null);
+  const edgeContextMenu = ref<{ x: number; y: number; edgeId: string } | null>(null);
 
   const orderByNode = computed<Record<string, number>>(() => {
     const map: Record<string, number> = {};
@@ -67,12 +68,19 @@ export const useRunPlanStore = defineStore('runPlan', () => {
   }
 
   function openMenu(x: number, y: number, nodeId: string): void {
+    edgeContextMenu.value = null;
     contextMenu.value = { x, y, nodeId };
+  }
+
+  function openEdgeMenu(x: number, y: number, edgeId: string): void {
+    contextMenu.value = null;
+    edgeContextMenu.value = { x, y, edgeId };
   }
 
   function closeMenu(): void {
     contextMenu.value = null;
+    edgeContextMenu.value = null;
   }
 
-  return { plan, autoPlan, contextMenu, orderByNode, autoOrderByNode, ghostBeats, renderable, setPlan, setAutoPlan, openMenu, closeMenu };
+  return { plan, autoPlan, contextMenu, edgeContextMenu, orderByNode, autoOrderByNode, ghostBeats, renderable, setPlan, setAutoPlan, openMenu, openEdgeMenu, closeMenu };
 });

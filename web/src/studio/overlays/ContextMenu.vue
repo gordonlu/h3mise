@@ -9,6 +9,7 @@ import { useStudioStore } from '../../stores/studio';
 import { useStudioUiStore } from '../../stores/studioUi';
 import { useToastStore } from '../../stores/toast';
 import { useShotActions } from '../../composables/useShotActions';
+import { useConnect } from '../../composables/useConnect';
 import { useCanvasCreate } from '../../composables/useCanvasCreate';
 import { useDuplicateShot } from '../../composables/useDuplicateShot';
 import { confirmDialog } from '../../stores/confirm';
@@ -23,6 +24,7 @@ const { build } = useRunPlan();
 const { mainAction } = useShotActions();
 const { create } = useCanvasCreate();
 const { duplicate } = useDuplicateShot();
+const { disconnect } = useConnect();
 const busy = ref(false);
 
 const shotId = computed(() => {
@@ -34,6 +36,10 @@ const node = computed(() => {
   return nodeId ? store.nodeById.get(nodeId) ?? null : null;
 });
 const data = computed<ShotNodeData | null>(() => (node.value?.kind === 'shot' ? node.value.data : null));
+const edge = computed(() => {
+  const edgeId = plan.edgeContextMenu?.edgeId;
+  return edgeId ? store.graph?.edges.find((item) => item.id === edgeId) ?? null : null;
+});
 const stage = computed(() => (shotId.value && data.value ? mainAction(shotId.value, data.value) : null));
 
 async function runStage(): Promise<void> {
@@ -125,6 +131,13 @@ function locateInOutline(): void {
   plan.closeMenu();
 }
 
+async function disconnectEdge(): Promise<void> {
+  const id = edge.value?.id;
+  if (!id) return;
+  plan.closeMenu();
+  await disconnect(id);
+}
+
 async function deleteShot(): Promise<void> {
   const id = shotId.value;
   if (!id) return;
@@ -178,6 +191,19 @@ async function deleteShot(): Promise<void> {
       </div>
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div v-if="plan.edgeContextMenu" class="hf-ctx-backdrop" @click="plan.closeMenu()" @contextmenu.prevent="plan.closeMenu()">
+      <div class="hf-ctx" :style="{ left: `${plan.edgeContextMenu.x}px`, top: `${plan.edgeContextMenu.y}px` }" @click.stop>
+        <div class="hf-ctx-label">{{ t('studio.edge.why') }}</div>
+        <div class="hf-ctx-reason">{{ edge ? t(`studio.edge.${edge.kind}`) : '' }}</div>
+        <template v-if="edge && !edge.derived">
+          <div class="hf-ctx-sep" />
+          <button class="hf-ctx-item danger" @click="disconnectEdge">{{ t('studio.menu.disconnect') }}</button>
+        </template>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -192,5 +218,7 @@ async function deleteShot(): Promise<void> {
 .hf-ctx-item.danger { color: var(--bad); }
 .hf-ctx-item.muted { color: var(--text-3); cursor: default; }
 .hf-ctx-paid { color: var(--accent-text); font-weight: 700; }
+.hf-ctx-label { padding: 6px 10px 2px; color: var(--text-3); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.hf-ctx-reason { padding: 2px 10px 8px; max-width: 260px; color: var(--text-2); font-size: 12px; line-height: 1.5; }
 .hf-ctx-sep { height: 1px; margin: 4px 0; background: var(--line); }
 </style>

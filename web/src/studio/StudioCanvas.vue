@@ -212,6 +212,12 @@ function onNodeContext(event: NodeMouseEvent): void {
   runPlan.openMenu(point.clientX, point.clientY, event.node.id);
 }
 
+function onEdgeContext(event: EdgeMouseEvent): void {
+  const point = event.event as MouseEvent;
+  store.selectEdge(event.edge.id);
+  runPlan.openEdgeMenu(point.clientX, point.clientY, event.edge.id);
+}
+
 function onPaneClick(): void {
   store.clearSelection();
   runPlan.closeMenu();
@@ -413,6 +419,7 @@ function onDrop(event: DragEvent): void {
     @connect="onConnect"
     @connect-end="onConnectEnd"
     @edge-click="onEdgeClick"
+    @edge-context-menu="onEdgeContext"
     @viewport-change-end="onViewport"
     @pane-click="onPaneClick"
   >

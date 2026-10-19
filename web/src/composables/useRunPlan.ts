@@ -66,10 +66,41 @@ export function useRunPlan() {
 
   async function prepareAll(): Promise<void> {
     const providerId = project.current?.config.default_provider ?? 'runninghub';
-    await post('/api/render/batch/prepare', { providerId, megapixels: ui.megapixels });
+    let failed = 0;
+    for (const item of plan.plan?.items ?? []) {
+      if (item.stage !== 'needs_prompt') continue;
+      const data = store.nodeById.get(item.nodeId)?.data as ShotNodeData | undefined;
+      try {
+        await post(`/api/shots/${encodeURIComponent(item.shotId)}/prompts/compile`, {
+          mode: data?.h3Mode ?? 't2va',
+        });
+      } catch {
+        failed += 1;
+      }
+    }
     await store.refreshGraph();
     rebuild();
-    toasts.push({ kind: 'ok', text: t('studio.runplan.prepared') });
+    for (const item of plan.plan?.items ?? []) {
+      if (item.stage !== 'needs_preflight') continue;
+      const data = store.nodeById.get(item.nodeId)?.data as ShotNodeData | undefined;
+      if (!data?.latestPromptVersionId) continue;
+      try {
+        await post(`/api/shots/${encodeURIComponent(item.shotId)}/preflight`, {
+          promptVersionId: data.latestPromptVersionId,
+          providerId,
+          megapixels: ui.megapixels,
+        });
+      } catch {
+        failed += 1;
+      }
+    }
+    await store.refreshGraph();
+    rebuild();
+    if (failed > 0) {
+      toasts.push({ kind: 'err', text: t('studio.runplan.preparePartial', { n: failed }) });
+    } else {
+      toasts.push({ kind: 'ok', text: t('studio.runplan.prepared') });
+    }
   }
 
   async function renderAll(): Promise<void> {

@@ -153,6 +153,7 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
       </label>
       <span class="hf-spacer" />
       <template v-if="!noProject">
+        <RouterLink to="/studio/series" class="hf-ghost hf-link">{{ t('studio.series.open') }}</RouterLink>
         <button class="hf-ghost" :disabled="loading || !!error" @click="openAutoProduce">{{ t('studio.auto.open') }}</button>
         <StudioViewMenu />
         <button class="hf-ghost" @click="ui.toggleLeft()">{{ t('studio.dock.nodes') }}</button>

@@ -86,8 +86,8 @@ MiniMax Design 的 Canvas Flow 与 ComfyUI 证明了**节点画布**适合表达
 
 ### P2
 
-- 已实现（2026-10）：复制镜头（⌘D）、键盘连线、Studio 默认首页、MCP 暴露画布图（`get_canvas_graph` 只读工具）。
-- 仍待实现：参考拆解节点、系列总览画布。
+- 已实现（2026-10）：复制镜头（⌘D）、键盘连线、Studio 默认首页、系列总览画布（`/studio/series`）、MCP 暴露画布图（`get_canvas_graph` 只读工具）。
+- 仍待实现：参考拆解节点。
 
 ## 5. 范围分期
 
@@ -774,6 +774,7 @@ actions: load(), refreshGraph() (ETag), moveNodes(), toggleCollapse(), select(),
 ### 13.9 路由与导航
 
 - `router.ts` 新增 `{ path: '/studio', name: 'studio', component: () => import('./pages/StudioPage.vue') }`；`/` 重定向到 `/studio`（工作流模式为默认首页）。未打开项目时 Studio 显示冷启动卡，`/projects` 仍保留。
+- `/studio/series` 提供系列总览（每集一个大节点），可切换当前剧集或新建剧集后返回 Studio。
 - 支持深链：`/studio?node=shot:shot-002&tab=prompt` → 加载后定位并打开 Inspector 标签。
 - `ProductionIssue.to`、`NextAction.to` 现有为旧页面路径；新增前端映射函数 `toStudioLink(to)`，在 Studio 内点击时转为节点定位（P1），不修改服务端返回值。
 - `AppSidebar`：新增首项"制作台 Studio"；在 `/studio` 下侧栏收为 56px 图标栏（`App.vue` 的 grid 列宽根据路由切换）。Studio 页面不使用 `.page` 的 1440px 最大宽度与 padding（全屏画布）。

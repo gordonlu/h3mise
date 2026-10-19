@@ -151,9 +151,15 @@ export const useStudioStore = defineStore('studio', () => {
         result.set(stored.nodeId, { x: stored.x, y: stored.y });
       }
     }
-    const visible = graph.value.nodes.filter(
-      (node) => node.kind !== 'character_state' || !node.groupId || expandedEntities.value.includes(node.groupId),
-    );
+    const visible = graph.value.nodes
+      .filter((node) => node.kind !== 'character_state' || !node.groupId || expandedEntities.value.includes(node.groupId))
+      .map((node) => {
+        // Older servers projected these kinds into 'free'; normalize on the
+        // client so references always land left of the narrative lanes.
+        if (node.kind === 'media') return { ...node, lane: 'media' as const };
+        if (node.kind === 'take') return { ...node, lane: 'take' as const };
+        return node;
+      });
     const auto = laneLayout(visible, pinned, {
       ...defaultLaneLayoutOptions((node) => {
         const fallback = studioNodeSize(node);
@@ -195,7 +201,7 @@ export const useStudioStore = defineStore('studio', () => {
         data: { node },
         style: { width: `${width}px` },
         hidden:
-          (hiddenLanes.value.includes(node.lane) && node.kind !== 'note' && node.kind !== 'frame') ||
+          (hiddenLanes.value.includes(node.kind === 'media' ? 'media' : node.kind === 'take' ? 'take' : node.lane) && node.kind !== 'note' && node.kind !== 'frame') ||
           (node.kind === 'character_state' && Boolean(node.groupId) && !expandedEntities.value.includes(node.groupId!)),
       };
     }),

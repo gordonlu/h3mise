@@ -86,7 +86,7 @@
 }
 .hf-node.k-frame { background: transparent; border: 1px dashed var(--line-2); box-shadow: none; }
 
-.hf-head { display: flex; align-items: center; gap: 7px; padding: 9px 10px 7px 14px; min-height: 34px; }
+.hf-head { display: flex; align-items: center; gap: 8px; padding: 11px 12px 9px 16px; min-height: 38px; }
 .hf-icon {
   flex: none; width: 20px; height: 20px; display: grid; place-items: center;
   border-radius: 6px; background: var(--bg-muted); color: var(--text-2);
@@ -106,10 +106,10 @@
 .hf-badge.b-stale { background: var(--warn-soft); color: var(--warn); }
 .hf-badge.b-waiting { background: var(--info-soft); color: var(--info); }
 
-.hf-main { display: flex; align-items: stretch; gap: 4px; padding: 0 4px; flex: 1; min-height: 0; }
+.hf-main { display: flex; align-items: stretch; gap: 8px; padding: 0 9px; flex: 1; min-height: 0; }
 .hf-col { display: flex; flex-direction: column; justify-content: flex-start; gap: 4px; padding: 2px 0; }
 .hf-col.hf-out { flex-direction: column; }
-.hf-body { flex: 1; min-width: 0; padding: 2px 6px 6px; font-size: 12px; color: var(--text-2); overflow: hidden; }
+.hf-body { flex: 1; min-width: 0; padding: 5px 10px 10px; font-size: 12px; color: var(--text-2); overflow: hidden; }
 
 .hf-port { display: flex; align-items: center; gap: 4px; min-height: 14px; }
 .hf-port.hf-out { justify-content: flex-end; }
@@ -130,7 +130,7 @@
 .hf-port.p-TAKE .vue-flow__handle { background: var(--line-3); width: 7px; height: 7px; }
 .hf-port.p-CLIP .vue-flow__handle { background: var(--hf-clip-type); border-radius: 2px; }
 
-.hf-foot { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-3); }
+.hf-foot { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-3); }
 .hf-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-3); flex: none; }
 .hf-dot.s-ready { background: var(--info); }
 .hf-dot.s-rendering { background: var(--accent); animation: hf-pulse 1.6s ease-in-out infinite; }
@@ -141,8 +141,8 @@
 /* thumbnails */
 .hf-thumb { width: 100%; height: 96px; border-radius: 6px; background: var(--bg-muted); object-fit: cover; display: block; }
 .hf-thumb-sm { width: 100%; height: 60px; border-radius: 6px; background: var(--bg-muted); object-fit: cover; display: block; }
-.hf-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.hf-chip { font-size: 10px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--bg-muted); border: 1px solid var(--line); color: var(--text-2); }
+.hf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hf-chip { font-size: 10px; padding: 2px 7px; border-radius: var(--radius-pill); background: var(--bg-muted); border: 1px solid var(--line); color: var(--text-2); }
 .hf-chip.missing { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
 
 /* LOD */
@@ -247,7 +247,7 @@
 .hf-dock-panel { font-size: 12px; }
 
 .hf-action {
-  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--radius-pill);
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: var(--radius-pill);
   border: 1px solid var(--line-2); background: var(--bg-3); color: var(--text); font-size: 11px; cursor: pointer;
 }
 .hf-action:hover { border-color: var(--accent); color: var(--accent-text); }

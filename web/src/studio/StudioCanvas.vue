@@ -62,7 +62,7 @@ const paid = usePaidActionStore();
 const toasts = useToastStore();
 const confirm = useConfirmStore();
 const rolePicker = useRolePickerStore();
-const { viewport, project, connectionStartHandle, fitView, zoomIn, zoomOut, setViewport, onNodesInitialized } = useVueFlow();
+const { viewport, project, connectionStartHandle, fitView, zoomIn, zoomOut, setViewport, onNodesInitialized, updateNodeInternals } = useVueFlow();
 const persist = useLayoutPersist();
 const history = useLayoutHistory();
 useGraphSync();
@@ -260,7 +260,11 @@ const connectApi = useConnect();
 const quickCreate = useQuickCreateStore();
 let connectedThisDrag = false;
 
-function isValidConnection(connection: Connection): boolean {
+function isValidConnection(connection: Connection | Edge): boolean {
+  // Vue Flow re-validates every projected edge through this callback. Derived
+  // edges (story→beat, shot→takes, timeline→export) are not user-connectable
+  // rules, so accept edges that already carry their canvas projection.
+  if ((connection as Edge).data?.edge) return true;
   return connectApi.isValid(connection.source, connection.sourceHandle, connection.target, connection.targetHandle);
 }
 
@@ -335,14 +339,31 @@ async function applyInitialView(): Promise<void> {
   }
 }
 
+function refreshHandleBounds(): void {
+  updateNodeInternals(store.flowNodes.map((node) => node.id));
+}
+
 onNodesInitialized(() => {
-  if (store.focusRequest) void applyFocus(store.focusRequest);
-  else void applyInitialView();
+  void nextTick().then(() => {
+    refreshHandleBounds();
+    if (store.focusRequest) return applyFocus(store.focusRequest);
+    return applyInitialView();
+  });
 });
+
+watch(
+  () => store.flowNodes.map((node) => `${node.id}:${node.hidden ? 1 : 0}`).join('|'),
+  async () => {
+    await nextTick();
+    refreshHandleBounds();
+  },
+  { flush: 'post' },
+);
 
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown);
   await nextTick();
+  refreshHandleBounds();
   if (store.focusRequest) await applyFocus(store.focusRequest);
 });
 onUnmounted(() => window.removeEventListener('keydown', onKeydown));
@@ -428,7 +449,7 @@ function onDrop(event: DragEvent): void {
 </script>
 
 <template>
-  <div class="hf-canvas-drop" @dragover.prevent @drop="onDrop">
+  <div class="hf-canvas-drop" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
     <VueFlow
     class="hf-vueflow"
     :nodes="canvasNodes"

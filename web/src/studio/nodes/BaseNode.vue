@@ -1,10 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { CanvasBadge, CanvasNode, CanvasPort } from '@h3mise/shared';
 import { t } from '../../stores/locale';
 import type { StudioLod } from '../../stores/studio';
 import PortHandle from './PortHandle.vue';
 import NodeIcon from './NodeIcon.vue';
+import { useStudioStore } from '../../stores/studio';
+
+const studio = useStudioStore();
+const root = ref<HTMLElement | null>(null);
+let observer: ResizeObserver | null = null;
+
+onMounted(() => {
+  if (!root.value) return;
+  observer = new ResizeObserver((entries) => {
+    const entry = entries[0];
+    if (entry) studio.setMeasuredHeight(props.node.id, entry.contentRect.height);
+  });
+  observer.observe(root.value);
+});
+onUnmounted(() => observer?.disconnect());
 
 const props = defineProps<{
   node: CanvasNode;
@@ -38,6 +53,7 @@ const aria = computed(() => `${t(`studio.node.${props.node.kind}`)} ${props.node
 
 <template>
   <div
+    ref="root"
     class="hf-node"
     :class="[`k-${props.node.kind}`, `lod-${props.lod}`, { 'is-selected': props.selected, 'is-dim': props.dim }]"
     role="group"

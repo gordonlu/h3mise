@@ -48,18 +48,18 @@ type StudioFocusInput =
   | { kind: 'selection'; value: null };
 
 const NODE_SIZE: Record<string, { width: number; height: number }> = {
-  story: { width: 280, height: 200 },
-  beat: { width: 240, height: 120 },
-  sequence: { width: 240, height: 96 },
-  storyboard: { width: 320, height: 200 },
-  entity: { width: 170, height: 178 },
-  character_state: { width: 150, height: 100 },
-  media: { width: 190, height: 150 },
-  breakdown: { width: 208, height: 178 },
-  shot: { width: 300, height: 220 },
-  takes: { width: 260, height: 160 },
-  timeline: { width: 300, height: 170 },
-  export: { width: 260, height: 150 },
+  story: { width: 280, height: 220 },
+  beat: { width: 240, height: 140 },
+  sequence: { width: 240, height: 110 },
+  storyboard: { width: 320, height: 220 },
+  entity: { width: 180, height: 195 },
+  character_state: { width: 155, height: 110 },
+  media: { width: 195, height: 180 },
+  breakdown: { width: 208, height: 195 },
+  shot: { width: 305, height: 245 },
+  takes: { width: 260, height: 180 },
+  timeline: { width: 300, height: 190 },
+  export: { width: 260, height: 170 },
   note: { width: 240, height: 160 },
   frame: { width: 320, height: 240 },
 };
@@ -82,6 +82,8 @@ export const useStudioStore = defineStore('studio', () => {
   const focusRequest = ref<StudioFocusRequest | null>(null);
   const keyboardConnect = ref<KeyboardConnectState | null>(null);
   const expandedEntities = ref<CanvasNodeId[]>([]);
+  /** Real rendered card heights, supplied by BaseNode's ResizeObserver. */
+  const measuredHeights = ref<Record<CanvasNodeId, number>>({});
   let focusNonce = 0;
   let loadSeq = 0;
 
@@ -94,6 +96,7 @@ export const useStudioStore = defineStore('studio', () => {
     liveJobs.value = {};
     keyboardConnect.value = null;
     expandedEntities.value = [];
+    measuredHeights.value = {};
     loading.value = true;
     error.value = null;
   }
@@ -151,7 +154,10 @@ export const useStudioStore = defineStore('studio', () => {
       (node) => node.kind !== 'character_state' || !node.groupId || expandedEntities.value.includes(node.groupId),
     );
     const auto = laneLayout(visible, pinned, {
-      ...defaultLaneLayoutOptions(studioNodeSize),
+      ...defaultLaneLayoutOptions((node) => {
+        const fallback = studioNodeSize(node);
+        return { width: fallback.width, height: measuredHeights.value[node.id] ?? fallback.height };
+      }),
       hiddenLanes: hiddenLanes.value,
     });
     for (const [id, position] of auto) if (!result.has(id)) result.set(id, position);
@@ -244,6 +250,14 @@ export const useStudioStore = defineStore('studio', () => {
     expandedEntities.value = expandedEntities.value.includes(nodeId)
       ? expandedEntities.value.filter((id) => id !== nodeId)
       : [...expandedEntities.value, nodeId];
+  }
+
+  function setMeasuredHeight(nodeId: CanvasNodeId, height: number): void {
+    if (!Number.isFinite(height) || height <= 0) return;
+    // Keep the largest observed height so overview LOD never compresses or
+    // overlaps the card layout when zooming back in.
+    if (height <= (measuredHeights.value[nodeId] ?? 0) + 0.5) return;
+    measuredHeights.value = { ...measuredHeights.value, [nodeId]: height };
   }
 
   function selectEdge(id: string | null): void {
@@ -422,12 +436,14 @@ export const useStudioStore = defineStore('studio', () => {
     nodeById,
     selectedNode,
     expandedEntities,
+    measuredHeights,
     reset,
     load,
     refreshGraph,
     select,
     clearSelection,
     toggleEntity,
+    setMeasuredHeight,
     selectEdge,
     setLod,
     focusNode,

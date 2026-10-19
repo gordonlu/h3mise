@@ -34,6 +34,7 @@ const trimPlayer = ref<InstanceType<typeof VideoPlayer> | null>(null);
 const dragId = ref<string | null>(null);
 const dropTargetId = ref<string | null>(null);
 const filmCheck = ref<FilmCheckResult | null>(null);
+let loadSeq = 0;
 
 const PX_PER_SEC = 14;
 const MIN_CLIP_PX = 72;
@@ -65,8 +66,8 @@ const activeClip = computed(() => clips.value.find((c) => c.id === activeClipId.
 const activeClipIndex = computed(() => clips.value.findIndex((c) => c.id === activeClipId.value));
 
 async function load() {
+  const seq = ++loadSeq;
   const tl = await get<{ id: string; clips: TimelineClip[] }>('/api/timeline');
-  clips.value = tl.clips;
   const shots = await get<Array<{ id: string; title: string }>>('/api/shots');
   const takes = await Promise.all(
     shots.map(async (s) => {
@@ -75,10 +76,14 @@ async function load() {
       return sel ? { shotId: s.id, shotTitle: s.title, takeId: sel.id, duration: sel.duration, poster: sel.posterPath } : null;
     }),
   );
+  const nextExports = await get<TimelineExport[]>('/api/timeline/exports');
+  const nextCheck = await get<FilmCheckResult>('/api/film-check');
+  if (seq !== loadSeq) return;
+  clips.value = tl.clips;
   shotsWithTakes.value = takes.filter((t): t is ShotWithTake => t !== null);
-  exports.value = await get<TimelineExport[]>('/api/timeline/exports');
-  playUrl.value = exports.value[0]?.url ?? '';
-  filmCheck.value = await get<FilmCheckResult>('/api/film-check');
+  exports.value = nextExports;
+  playUrl.value = nextExports[0]?.url ?? '';
+  filmCheck.value = nextCheck;
 }
 
 async function addClip(shotId: string, takeId: string) {

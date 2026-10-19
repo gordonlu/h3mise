@@ -204,13 +204,17 @@ export const useStudioStore = defineStore('studio', () => {
     new Set(flowNodes.value.filter((node) => node.hidden).map((node) => node.id)),
   );
 
-  const flowEdges = computed(() =>
-    (graph.value?.edges ?? [])
-      // Asset bindings are focusOnly: hidden by default, shown when one of
-      // their endpoints is selected (design §7.5 — avoids spaghetti). The view
-      // menu can reveal every edge.
+  const flowEdges = computed(() => {
+    const kinds = new Map((graph.value?.nodes ?? []).map((node) => [node.id, node.kind]));
+    const assetEdge = (source: string, target: string, kind: string): boolean =>
+      kind === 'cast' ||
+      kinds.get(source) === 'entity' || kinds.get(target) === 'entity' ||
+      kinds.get(source) === 'character_state' || kinds.get(target) === 'character_state';
+    return (graph.value?.edges ?? [])
+      // Character/cast relationships stay visible; generic media bindings are
+      // focusOnly until an endpoint is selected (design §7.5 — avoids spaghetti).
       .filter((edge) => !hiddenNodeIds.value.has(edge.source) && !hiddenNodeIds.value.has(edge.target))
-      .filter((edge) => layout.value?.view.edgeVisibility === 'all' || !edge.focusOnly || selection.value.includes(edge.source) || selection.value.includes(edge.target))
+      .filter((edge) => layout.value?.view.edgeVisibility === 'all' || assetEdge(edge.source, edge.target, edge.kind) || !edge.focusOnly || selection.value.includes(edge.source) || selection.value.includes(edge.target))
       .map((edge) => ({
         id: edge.id,
         type: 'typed',
@@ -219,8 +223,8 @@ export const useStudioStore = defineStore('studio', () => {
         sourceHandle: edge.sourcePort,
         targetHandle: edge.targetPort,
         data: { edge },
-      })),
-  );
+      }));
+  });
 
   const nodeById = computed<Map<CanvasNodeId, CanvasNode>>(
     () => new Map((graph.value?.nodes ?? []).map((node) => [node.id, node])),

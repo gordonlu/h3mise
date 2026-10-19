@@ -2,10 +2,11 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { DEFAULT_LANE_ORDER, type CanvasLane } from '@h3mise/shared';
 import { useStudioStore } from '../stores/studio';
-import { confirmDialog } from '../stores/confirm';
+import { useArrangeLayout } from '../composables/useArrangeLayout';
 import { t } from '../stores/locale';
 
 const store = useStudioStore();
+const { arrange } = useArrangeLayout();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 
@@ -37,18 +38,6 @@ function fitAll(): void {
 function fitSelection(): void {
   store.fitSelection();
   open.value = false;
-}
-
-async function resetLayout(): Promise<void> {
-  open.value = false;
-  const ok = await confirmDialog({
-    title: t('studio.view.resetTitle'),
-    message: t('studio.view.resetMessage'),
-    confirmLabel: t('studio.view.resetConfirm'),
-  });
-  if (!ok) return;
-  await store.resetLayout();
-  store.fitAll();
 }
 
 function onDocumentClick(event: MouseEvent): void {
@@ -87,7 +76,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
         {{ t(`studio.lane.${lane}`) }}
       </button>
       <div class="hf-view-sep" />
-      <button class="hf-view-item danger" role="menuitem" @click="resetLayout">{{ t('studio.view.reset') }}</button>
+      <button class="hf-view-item danger" role="menuitem" @click="open = false; arrange()">{{ t('studio.view.reset') }}</button>
     </div>
   </div>
 </template>

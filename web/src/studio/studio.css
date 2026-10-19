@@ -146,7 +146,9 @@
 .hf-chip.missing { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
 
 /* LOD */
-.hf-node.lod-overview .hf-body, .hf-node.lod-overview .hf-col, .hf-node.lod-overview .hf-foot { display: none; }
+.hf-node.lod-overview .hf-body, .hf-node.lod-overview .hf-foot { display: none; }
+.hf-node.lod-overview .hf-port { min-height: 8px; }
+.hf-node.lod-overview .hf-port-label { display: none; }
 .hf-node.lod-overview .hf-head { padding: 10px 12px; }
 .hf-node.lod-overview .hf-title { font-size: 12px; }
 .hf-node.lod-overview .hf-badges { display: none; }

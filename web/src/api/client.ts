@@ -88,17 +88,29 @@ export async function getConditional<T>(
   return { status: res.status, data, etag: res.headers.get('etag') };
 }
 
+let mediaScope = '';
+
+/** Project-scoped media URLs. Switching projects must never reuse a cached
+ * image/video URL from the previous project, since asset ids repeat per project. */
+export function setMediaScope(scope: string | null): void {
+  mediaScope = scope ?? '';
+}
+
+function scopedMediaUrl(path: string): string {
+  return mediaScope ? `${path}${path.includes('?') ? '&' : '?'}scope=${encodeURIComponent(mediaScope)}` : path;
+}
+
 export function mediaUrl(id: string): string {
-  return `/api/media/${id}`;
+  return scopedMediaUrl(`/api/media/${id}`);
 }
 
 export function takeVideoUrl(takeId: string): string {
-  return `/api/takes/${takeId}/video`;
+  return scopedMediaUrl(`/api/takes/${takeId}/video`);
 }
 
 /** Serve a project-relative file path (poster, frame, export) via the file API. */
 export function fileUrl(relPath: string): string {
-  return `/api/file/${encodeURIComponent(relPath)}`;
+  return scopedMediaUrl(`/api/file/${encodeURIComponent(relPath)}`);
 }
 
 /** Subscribe to server events over SSE with auto-reconnect. */

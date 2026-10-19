@@ -2,7 +2,7 @@
 
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { ApiError, get, post, patch } from '../api/client';
+import { ApiError, get, post, patch, setMediaScope } from '../api/client';
 import type { ProjectConfig, ProjectMeta, ProviderStatus } from '@h3mise/shared';
 import { confirmDialog } from './confirm';
 
@@ -26,6 +26,7 @@ export const useProjectStore = defineStore('project', () => {
 
   async function refreshCurrent() {
     current.value = await get<{ meta: ProjectMeta; config: ProjectConfig } | null>('/api/current-project');
+    setMediaScope(current.value?.meta.id ?? null);
   }
 
   async function refreshProviders() {

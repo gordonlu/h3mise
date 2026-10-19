@@ -23,7 +23,16 @@ export function buildApp(services: AppServices, webDist: string | null): Hono<{ 
     await next();
   });
 
-  // 2) Dev mode: API-only — no stale build served. Tell users where the UI is.
+  // 2) API JSON must never be replayed from the browser cache after a project
+  //    switch. Media/file/video routes keep their own streaming behavior.
+  app.use('/api/*', async (c, next) => {
+    const path = c.req.path;
+    const isStream = path.startsWith('/api/media/') || path.startsWith('/api/file/') || /^\/api\/takes\/[^/]+\/video$/.test(path);
+    if (!isStream) c.header('Cache-Control', 'no-store');
+    await next();
+  });
+
+  // 3) Dev mode: API-only — no stale build served. Tell users where the UI is.
   if (!webDist) {
     app.get('/', (c) =>
       c.json({
@@ -35,7 +44,7 @@ export function buildApp(services: AppServices, webDist: string | null): Hono<{ 
     );
   }
 
-  // 3) Production: static web (built SPA) with history fallback — skips /api/*.
+  // 4) Production: static web (built SPA) with history fallback — skips /api/*.
   //    P2: paths are resolved and contained inside webDist (no ".."), and
   //    assets stream through serveLocalFile — hono's serveStatic wants a
   //    cwd-relative root and silently mis-served with an absolute one on Windows.
@@ -65,7 +74,7 @@ export function buildApp(services: AppServices, webDist: string | null): Hono<{ 
     });
   }
 
-  // 3) API routes (their own middleware runs after these).
+  // 5) API routes (their own middleware runs after these).
   app.route('/', buildRoutes(services));
 
   return app;

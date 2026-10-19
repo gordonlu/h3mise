@@ -343,6 +343,15 @@ function refreshHandleBounds(): void {
   updateNodeInternals(store.flowNodes.map((node) => node.id));
 }
 
+/** Handle bounds are measured relative to the node at the current zoom and
+ * also disappear when virtualized nodes unmount. Refresh after any viewport or
+ * position change so edges never fall back to stale/0,0 coordinates. */
+function scheduleHandleRefresh(): void {
+  void nextTick().then(() => {
+    requestAnimationFrame(() => refreshHandleBounds());
+  });
+}
+
 onNodesInitialized(() => {
   void nextTick().then(() => {
     refreshHandleBounds();
@@ -353,10 +362,15 @@ onNodesInitialized(() => {
 
 watch(
   () => store.flowNodes.map((node) => `${node.id}:${node.hidden ? 1 : 0}`).join('|'),
-  async () => {
-    await nextTick();
-    refreshHandleBounds();
-  },
+  () => scheduleHandleRefresh(),
+  { flush: 'post' },
+);
+
+watch(
+  () => [...store.positions.entries()]
+    .map(([id, point]) => `${id}:${Math.round(point.x)},${Math.round(point.y)}`)
+    .join('|'),
+  () => scheduleHandleRefresh(),
   { flush: 'post' },
 );
 
@@ -377,6 +391,7 @@ function onViewport(viewportTransform: ViewportTransform): void {
   };
   store.setView(view);
   persist.queueView(view);
+  scheduleHandleRefresh();
 }
 
 function handleAt(clientX: number, clientY: number): { nodeId: string; port: string } | null {

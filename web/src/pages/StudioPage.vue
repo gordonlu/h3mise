@@ -10,6 +10,7 @@ import { useProjectStore } from '../stores/project';
 import { useToastStore } from '../stores/toast';
 import { useAutoProduce } from '../composables/useAutoProduce';
 import { useStudioNavigate } from '../composables/useStudioNavigate';
+import { useArrangeLayout } from '../composables/useArrangeLayout';
 import { get, post } from '../api/client';
 import { t } from '../stores/locale';
 import StudioCanvas from '../studio/StudioCanvas.vue';
@@ -38,6 +39,7 @@ const episodes = ref<StoryEpisodeList | null>(null);
 let episodeSeq = 0;
 const { open: openAutoProduce } = useAutoProduce();
 const navigate = useStudioNavigate();
+const { arrange } = useArrangeLayout();
 
 const showInspector = computed(() => ui.inspectorOpen && !noProject.value && !loading.value && !error.value);
 const gridColumns = computed(() =>
@@ -162,6 +164,7 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
       <template v-if="!noProject">
         <RouterLink to="/studio/series" class="hf-ghost hf-link">{{ t('studio.series.open') }}</RouterLink>
         <button class="hf-ghost" :disabled="loading || !!error" @click="openAutoProduce">{{ t('studio.auto.open') }}</button>
+        <button class="hf-ghost" :disabled="loading || !!error" :title="t('studio.view.arrangeHint')" @click="arrange">{{ t('studio.view.arrange') }}</button>
         <StudioViewMenu />
         <button class="hf-ghost" @click="ui.toggleLeft()">{{ t('studio.dock.nodes') }}</button>
         <button v-if="!ui.inspectorOpen" class="hf-ghost" @click="ui.inspectorOpen = true">

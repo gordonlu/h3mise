@@ -10,6 +10,8 @@ import { usePaidActionStore } from '../stores/paidAction';
 import { useQuickCreateStore } from '../stores/quickCreate';
 import { useRolePickerStore } from '../stores/rolePicker';
 import { useRunPlanStore } from '../stores/runPlan';
+import { useStudioStore } from '../stores/studio';
+import { useKeyboardConnect } from './useKeyboardConnect';
 
 export interface StudioShortcutHandlers {
   toggleLeftDock: () => void;
@@ -36,6 +38,8 @@ export function useStudioShortcuts(handlers: StudioShortcutHandlers) {
   const noteEditor = useNoteEditorStore();
   const rolePicker = useRolePickerStore();
   const confirm = useConfirmStore();
+  const studio = useStudioStore();
+  const keyboard = useKeyboardConnect();
 
   function overlayOpen(): boolean {
     return Boolean(
@@ -58,6 +62,23 @@ export function useStudioShortcuts(handlers: StudioShortcutHandlers) {
       if (document.querySelector('.palette-backdrop')) return;
       handlers.escape();
       return;
+    }
+    if (studio.keyboardConnect) {
+      if (event.code === 'ArrowRight' || event.code === 'ArrowDown') {
+        event.preventDefault();
+        void keyboard.move(1);
+        return;
+      }
+      if (event.code === 'ArrowLeft' || event.code === 'ArrowUp') {
+        event.preventDefault();
+        void keyboard.move(-1);
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void keyboard.confirm();
+        return;
+      }
     }
     if (isTyping(event.target) || overlayOpen()) return;
 

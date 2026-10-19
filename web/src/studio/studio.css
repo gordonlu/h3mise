@@ -279,6 +279,15 @@
 /* ----------------------------------------------------- accessibility --- */
 .hf-node:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .hf-node .vue-flow__handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.hf-node .vue-flow__handle.hf-kb-source { box-shadow: 0 0 0 4px var(--accent-soft), 0 0 0 6px var(--accent); }
+.hf-node .vue-flow__handle.hf-kb-target { box-shadow: 0 0 0 4px var(--ok-soft), 0 0 0 6px var(--ok); }
+.hf-node .vue-flow__handle.hf-kb-dim { opacity: 0.25; }
+.hf-kb-hint {
+  position: absolute; top: 12px; left: 50%; z-index: 9; transform: translateX(-50%);
+  padding: 6px 12px; border-radius: var(--radius-pill); background: var(--bg-2);
+  border: 1px solid var(--accent-line); color: var(--accent-text); font-size: 12px;
+  box-shadow: var(--shadow-1); pointer-events: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .hf-board-regen { transition: none; }
 }

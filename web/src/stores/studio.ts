@@ -15,12 +15,25 @@ import type {
   CanvasNodeId,
   CanvasNodeLayout,
   CanvasNodeKind,
+  CanvasPortId,
   CanvasViewState,
 } from '@h3mise/shared';
-import { defaultLaneLayoutOptions, laneLayout } from '@h3mise/shared';
+import { canConnect, defaultLaneLayoutOptions, laneLayout } from '@h3mise/shared';
 import { del, get, getConditional, post, put } from '../api/client';
 
 export type StudioLod = 'overview' | 'card' | 'detail';
+
+export interface KeyboardConnectTarget {
+  nodeId: CanvasNodeId;
+  port: CanvasPortId;
+}
+
+export interface KeyboardConnectState {
+  sourceNodeId: CanvasNodeId;
+  sourcePort: CanvasPortId;
+  targets: KeyboardConnectTarget[];
+  index: number;
+}
 
 export type StudioFocusRequest =
   | { kind: 'node'; value: CanvasNodeId; nonce: number }
@@ -66,6 +79,7 @@ export const useStudioStore = defineStore('studio', () => {
   const liveJobs = ref<Record<string, { jobId: string; status: string }>>({});
   /** One-shot request for the canvas to fit a node, lane, or the whole graph. */
   const focusRequest = ref<StudioFocusRequest | null>(null);
+  const keyboardConnect = ref<KeyboardConnectState | null>(null);
   let focusNonce = 0;
 
   async function load(): Promise<void> {
@@ -225,6 +239,37 @@ export const useStudioStore = defineStore('studio', () => {
     requestFocus({ kind: 'selection', value: null });
   }
 
+  /** Start keyboard linking from a focused output port. Returns false when no
+   * compatible input port exists, so the caller can explain why. */
+  function startKeyboardConnect(nodeId: CanvasNodeId, port: CanvasPortId): boolean {
+    const source = nodeById.value.get(nodeId);
+    if (!source) return false;
+    const targets: KeyboardConnectTarget[] = [];
+    for (const target of graph.value?.nodes ?? []) {
+      for (const candidate of target.ports) {
+        if (candidate.direction !== 'in' || !candidate.visible || !candidate.userConnectable) continue;
+        if (canConnect(source, port, target, candidate.id).ok) targets.push({ nodeId: target.id, port: candidate.id });
+      }
+    }
+    if (targets.length === 0) {
+      keyboardConnect.value = null;
+      return false;
+    }
+    keyboardConnect.value = { sourceNodeId: nodeId, sourcePort: port, targets, index: 0 };
+    return true;
+  }
+
+  function moveKeyboardConnect(delta: number): void {
+    const state = keyboardConnect.value;
+    if (!state || state.targets.length === 0) return;
+    const index = (state.index + delta + state.targets.length) % state.targets.length;
+    keyboardConnect.value = { ...state, index };
+  }
+
+  function cancelKeyboardConnect(): void {
+    keyboardConnect.value = null;
+  }
+
   function upsertLocalLayout(node: CanvasNodeLayout): void {
     if (!layout.value) return;
     const index = layout.value.nodes.findIndex((item) => item.nodeId === node.nodeId);
@@ -333,6 +378,7 @@ export const useStudioStore = defineStore('studio', () => {
     error,
     liveJobs,
     focusRequest,
+    keyboardConnect,
     hiddenLanes,
     positions,
     flowNodes,
@@ -349,6 +395,9 @@ export const useStudioStore = defineStore('studio', () => {
     focusLane,
     fitAll,
     fitSelection,
+    startKeyboardConnect,
+    moveKeyboardConnect,
+    cancelKeyboardConnect,
     setNodePosition,
     toggleCollapse,
     setView,

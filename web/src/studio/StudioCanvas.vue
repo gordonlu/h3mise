@@ -160,6 +160,10 @@ function runSelected(): void {
 }
 
 function escapeStudio(): void {
+  if (store.keyboardConnect) {
+    store.cancelKeyboardConnect();
+    return;
+  }
   if (paid.pending || confirm.pending) return;
   if (rolePicker.pending) {
     rolePicker.answer(null);
@@ -423,6 +427,7 @@ function onDrop(event: DragEvent): void {
     @viewport-change-end="onViewport"
     @pane-click="onPaneClick"
   >
+    <div v-if="store.keyboardConnect" class="hf-kb-hint">{{ t('studio.keyboard.hint') }}</div>
     <Background :gap="24" :size="1.4" pattern-color="var(--line)" />
     <MiniMap pannable zoomable :node-color="() => 'var(--line-3)'" />
     <Controls />

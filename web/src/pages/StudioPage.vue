@@ -17,6 +17,7 @@ import StudioViewMenu from '../studio/StudioViewMenu.vue';
 import BottomDock from '../studio/bottom/BottomDock.vue';
 import LeftDock from '../studio/dock/LeftDock.vue';
 import RunPlanCard from '../studio/overlays/RunPlanCard.vue';
+import SelectionToolbar from '../studio/overlays/SelectionToolbar.vue';
 import ContextMenu from '../studio/overlays/ContextMenu.vue';
 import NoteEditor from '../studio/overlays/NoteEditor.vue';
 import QuickCreateMenu from '../studio/overlays/QuickCreateMenu.vue';
@@ -171,6 +172,7 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
           </div>
         </div>
         <RunPlanCard />
+        <SelectionToolbar />
       </div>
 
       <StudioInspector

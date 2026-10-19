@@ -44,6 +44,7 @@ Restart Codex after changing MCP configuration. Use `/mcp` or `codex mcp list` t
 - `list_entities`, `create_entity`, `list_character_states`, `create_character_state`
 - `list_media`, `import_media_path`
 - `get_production_overview`, `list_shots`, `update_shot`, `inspect_shot`
+- `get_canvas_graph` (read-only Studio node/edge projection for the active episode)
 - `list_reference_bindings`, `create_reference_binding`
 - `build_context_package`, `parse_director_plan`, `apply_director_plan`
 - `compile_prompt`, `import_prompt`, `create_revision_prompt`

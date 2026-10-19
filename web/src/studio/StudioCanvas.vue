@@ -34,6 +34,7 @@ import { useGraphSync } from '../composables/useGraphSync';
 import { useConnect } from '../composables/useConnect';
 import { useStudioShortcuts } from '../composables/useStudioShortcuts';
 import { useShotActions } from '../composables/useShotActions';
+import { useDuplicateShot } from '../composables/useDuplicateShot';
 import { CREATE_MIME, useCanvasCreate, type CreateDescriptor } from '../composables/useCanvasCreate';
 import { useRunPlanStore } from '../stores/runPlan';
 import { useNoteEditorStore } from '../stores/noteEditor';
@@ -66,6 +67,7 @@ const history = useLayoutHistory();
 useGraphSync();
 const { create } = useCanvasCreate();
 const { mainAction } = useShotActions();
+const { duplicateSelected } = useDuplicateShot();
 const runPlan = useRunPlanStore();
 const noteEditor = useNoteEditorStore();
 
@@ -285,6 +287,11 @@ function onKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     if (event.shiftKey) void history.redo();
     else void history.undo();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
+    event.preventDefault();
+    void duplicateSelected();
     return;
   }
   if ((event.key === 'Delete' || event.key === 'Backspace') && store.selectedEdgeId) {

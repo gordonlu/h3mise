@@ -162,6 +162,12 @@ const tools = [
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
+    name: 'get_canvas_graph',
+    description: 'Read the Studio canvas projection for the active episode (nodes, edges, revision). Read-only; does not change layout, execute, or render.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
     name: 'update_shot',
     description: 'Update safe canonical fields on one existing Shot.',
     inputSchema: objectSchema({
@@ -461,6 +467,7 @@ async function callTool(name, args = {}) {
     case 'list_media': return api('GET', `/api/assets/media${args.kind ? `?kind=${encodeURIComponent(args.kind)}` : ''}`);
     case 'import_media_path': return api('POST', '/api/assets/media/import-path', { path: requireString(args, 'path'), ...(args.label ? { label: args.label } : {}) });
     case 'list_shots': return api('GET', '/api/shots');
+    case 'get_canvas_graph': return api('GET', '/api/canvas/graph');
     case 'update_shot': {
       const { shotId, ...patch } = args;
       return api('PATCH', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}`, patch);

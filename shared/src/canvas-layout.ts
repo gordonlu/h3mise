@@ -22,6 +22,7 @@ export interface CanvasPoint {
 
 export const DEFAULT_LANE_ORDER: CanvasLane[] = [
   'cast',
+  'reference',
   'story',
   'beats',
   'storyboard',
@@ -33,6 +34,7 @@ export const DEFAULT_LANE_ORDER: CanvasLane[] = [
 
 export const DEFAULT_LANE_WIDTH: Record<CanvasLane, number> = {
   cast: 240,
+  reference: 240,
   story: 260,
   beats: 300,
   storyboard: 300,
@@ -204,6 +206,13 @@ export function laneLayout(
   for (const orphan of states.filter((state) => !state.groupId)) {
     place(orphan, castY);
     castY += opts.nodeSize(orphan).height + opts.rowGap;
+  }
+
+  // Reference breakdowns: one stacked card per analyzed media asset.
+  let referenceY = 0;
+  for (const reference of active.filter((node) => node.kind === 'breakdown').sort(compareNodes)) {
+    place(reference, referenceY);
+    referenceY += opts.nodeSize(reference).height + opts.rowGap;
   }
 
   for (const story of active.filter((node) => node.kind === 'story')) place(story, 0);

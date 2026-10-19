@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 import type { NodeProps } from '@vue-flow/core';
 import type { CanvasNode, MediaNodeData } from '@h3mise/shared';
 import { mediaUrl } from '../../api/client';
@@ -9,9 +10,14 @@ import { useNodeChrome } from './useNodeChrome';
 
 const props = defineProps<NodeProps<{ node: CanvasNode }>>();
 const { node, selected, lod } = useNodeChrome(props);
+const router = useRouter();
 const data = computed(() => node.value.data as MediaNodeData);
 const kindLabel = computed(() => t(`studio.kind.${data.value.mediaKind}`));
 const thumb = computed(() => (data.value.mediaKind === 'audio' ? null : mediaUrl(node.value.domainId)));
+
+function openBreakdown(): void {
+  void router.push(`/assets/${encodeURIComponent(node.value.domainId)}/breakdown`);
+}
 </script>
 
 <template>
@@ -22,6 +28,9 @@ const thumb = computed(() => (data.value.mediaKind === 'audio' ? null : mediaUrl
       <span class="hf-chip">{{ kindLabel }}</span>
       <span v-if="data.durationSeconds" class="hf-chip">{{ t('studio.media.duration', { n: Math.round(data.durationSeconds) }) }}</span>
     </div>
+    <template v-if="data.mediaKind === 'video'" #foot>
+      <button class="hf-action nodrag nopan" @click.stop="openBreakdown" @mousedown.stop>{{ t('studio.breakdown.open') }}</button>
+    </template>
   </BaseNode>
 </template>
 

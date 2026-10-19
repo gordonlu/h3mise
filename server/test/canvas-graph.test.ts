@@ -12,7 +12,7 @@ import { createShot } from '../src/modules/shots.js';
 import { activeEpisodeId } from '../src/modules/story.js';
 import * as canvasMod from '../src/modules/canvas.js';
 import { listMedia } from '../src/modules/assets.js';
-import type { MediaNodeData } from '@h3mise/shared';
+import type { BreakdownNodeData, MediaNodeData } from '@h3mise/shared';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -112,6 +112,37 @@ test('user-placed media appears and reports userPlaced=true', async () => {
   const node = graph.nodes.find((candidate) => candidate.id === `media:${media.id}`);
   assert.ok(node);
   assert.equal((node.data as MediaNodeData).userPlaced, true);
+});
+
+test('saved reference breakdowns project as reference-lane nodes', async () => {
+  const { ctx } = await openDemo();
+  const media = listMedia(ctx)[0];
+  assert.ok(media);
+  ctx.db.run(
+    'INSERT OR REPLACE INTO reference_breakdowns (asset_id, document_json, analysis_json) VALUES (?, ?, NULL)',
+    [media.id, JSON.stringify({
+      assetId: media.id,
+      duration: 12,
+      fps: 25,
+      width: 1920,
+      height: 1080,
+      cuts: [],
+      frames: [{ relPath: 'a.jpg', timeSeconds: 0 }, { relPath: 'b.jpg', timeSeconds: 1 }],
+      segments: [{ id: 'seg-1', start: 0, end: 6, label: 'A' }, { id: 'seg-2', start: 6, end: 12, label: 'B' }],
+      revision: 3,
+    })],
+  );
+  const graph = canvasMod.buildCanvasGraph(ctx);
+  const node = graph.nodes.find((candidate) => candidate.id === `breakdown:${media.id}`);
+  assert.ok(node);
+  assert.equal(node.kind, 'breakdown');
+  assert.equal(node.lane, 'reference');
+  const data = node.data as BreakdownNodeData;
+  assert.equal(data.segmentCount, 2);
+  assert.equal(data.frameCount, 2);
+  assert.equal(data.hasAnalysis, false);
+  assert.equal(data.revision, 3);
+  assert.ok(node.badges.some((badge) => badge.kind === 'warning'));
 });
 
 test('query count does not grow linearly with the number of shots', async () => {

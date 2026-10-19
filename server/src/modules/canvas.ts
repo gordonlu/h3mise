@@ -19,6 +19,7 @@ import type {
   CanvasPortId,
   CanvasViewState,
   BeatNodeData,
+  BreakdownNodeData,
   CharacterStateNodeData,
   Entity,
   EntityNodeData,
@@ -879,6 +880,44 @@ export function buildCanvasGraph(p: ProjectContext, options: BuildGraphOptions =
         durationSeconds: media.duration_seconds ?? undefined,
         userPlaced: userPlacedMedia.has(mediaId),
       } satisfies MediaNodeData,
+    });
+  }
+
+  const breakdownRows = p.db.all<{
+    asset_id: string;
+    document_json: string;
+    analysis_json: string | null;
+    kind: string;
+    label: string;
+    poster_path: string | null;
+    duration_seconds: number | null;
+  }>(
+    `SELECT rb.asset_id, rb.document_json, rb.analysis_json, m.kind, m.label, m.poster_path, m.duration_seconds
+     FROM reference_breakdowns rb JOIN media_assets m ON m.id = rb.asset_id
+     ORDER BY m.label, rb.asset_id`,
+  );
+  for (const row of breakdownRows) {
+    const doc = jget<{ segments?: unknown[]; frames?: unknown[]; revision?: number }>(row.document_json, {});
+    nodes.push({
+      id: canvasNodeId('breakdown', row.asset_id),
+      kind: 'breakdown',
+      domainId: row.asset_id,
+      title: row.label || row.asset_id,
+      lane: 'reference',
+      rowKey: 0,
+      ports: [],
+      badges: row.analysis_json ? [] : [{ kind: 'warning' }],
+      groupId: null,
+      data: {
+        mediaId: row.asset_id,
+        mediaKind: row.kind as MediaKind,
+        posterPath: row.poster_path,
+        durationSeconds: row.duration_seconds,
+        segmentCount: Array.isArray(doc.segments) ? doc.segments.length : 0,
+        frameCount: Array.isArray(doc.frames) ? doc.frames.length : 0,
+        hasAnalysis: Boolean(row.analysis_json),
+        revision: typeof doc.revision === 'number' ? doc.revision : 0,
+      } satisfies BreakdownNodeData,
     });
   }
 

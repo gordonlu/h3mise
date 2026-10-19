@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type {
   BeatNodeData,
+  BreakdownNodeData,
   CanvasNode,
   CanvasNodeId,
   ShotNodeData,
@@ -64,6 +65,11 @@ function takes(id: string): CanvasNode {
   return { id: canvasNodeId('takes', id), kind: 'takes', domainId: id, title: id, lane: 'takes', rowKey: 0, ports: [], badges: [], groupId: null, data };
 }
 
+function breakdown(id: string): CanvasNode {
+  const data: BreakdownNodeData = { mediaId: id, mediaKind: 'video', posterPath: null, durationSeconds: 10, segmentCount: 1, frameCount: 1, hasAnalysis: false, revision: 1 };
+  return { id: canvasNodeId('breakdown', id), kind: 'breakdown', domainId: id, title: id, lane: 'reference', rowKey: 0, ports: [], badges: [], groupId: null, data };
+}
+
 function ids(map: Map<CanvasNodeId, { x: number; y: number }>): Record<string, { x: number; y: number }> {
   return Object.fromEntries([...map.entries()].map(([key, value]) => [key, { x: value.x, y: value.y }]));
 }
@@ -91,6 +97,14 @@ test('hiding a lane tightens the x coordinates of later lanes', () => {
   const hidden = laneLayout(nodes, new Map(), { ...opts(), hiddenLanes: ['cast'] });
   const expectedShift = DEFAULT_LANE_WIDTH.cast + opts().laneGap;
   assert.equal(visible.get(canvasNodeId('shot', 's1'))!.x - hidden.get(canvasNodeId('shot', 's1'))!.x, expectedShift);
+});
+
+test('reference breakdowns stack in the reference lane', () => {
+  const result = laneLayout([breakdown('r1'), breakdown('r2')], new Map(), opts());
+  const x = DEFAULT_LANE_WIDTH.cast + opts().laneGap;
+  assert.equal(result.get(canvasNodeId('breakdown', 'r1'))!.x, x);
+  assert.equal(result.get(canvasNodeId('breakdown', 'r2'))!.x, x);
+  assert.equal(result.get(canvasNodeId('breakdown', 'r2'))!.y, 100 + opts().rowGap);
 });
 
 test('two shots under one beat increase the row height used by the next beat', () => {

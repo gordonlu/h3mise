@@ -86,8 +86,8 @@ MiniMax Design 的 Canvas Flow 与 ComfyUI 证明了**节点画布**适合表达
 
 ### P2
 
-- 已实现（2026-10）：复制镜头（⌘D）、键盘连线、Studio 默认首页、系列总览画布（`/studio/series`）、MCP 暴露画布图（`get_canvas_graph` 只读工具）。
-- 仍待实现：参考拆解节点。
+- 已实现（2026-10）：复制镜头（⌘D）、键盘连线、Studio 默认首页、系列总览画布（`/studio/series`）、参考拆解节点（保存的拆解投影为 `reference` 泳道节点）、MCP 暴露画布图（`get_canvas_graph` 只读工具）。
+- 仍待实现：无（P2 清单完成）。
 
 ## 5. 范围分期
 
@@ -558,9 +558,10 @@ CREATE INDEX IF NOT EXISTS idx_canvas_annotations_story ON canvas_annotations(st
 5. Takes 节点：每个 Shot 一个 `takes:<shotId>`，包含该 Shot 全部 Take 摘要（按 createdAt 降序）。
 6. Entities：`assetsMod.listEntities(ctx)` 全部（项目级）；`usageShotIds` 只统计本集 Shot。CharacterState 作为 `character_state` 节点，`groupId` = 所属 entity 节点（前端渲染为可展开子卡）。
 7. Media：仅包括 (a) 被本集 Shot 的 binding 引用、且该 binding **不是**实体主图自动绑定（`sourceEntityId` 为空）的媒体；(b) 布局表中 `user_placed=1` 的媒体。
-8. Storyboards：`storyboardMod.listStoryboardPages(ctx)`（当前集）。
-9. Timeline / Export：`timelineMod.getTimeline(ctx)`（已按集过滤）+ `listTimelineExports`。
-10. Edges：
+8. Reference breakdowns：`reference_breakdowns` 中已保存拆解的媒体 → `breakdown:<assetId>` 节点（`reference` 泳道），数据含段数、帧数、是否已 AI 分析与 revision；未分析时带 warning 角标。
+9. Storyboards：`storyboardMod.listStoryboardPages(ctx)`（当前集）。
+10. Timeline / Export：`timelineMod.getTimeline(ctx)`（已按集过滤）+ `listTimelineExports`。
+11. Edges：
 
 | edge | 来源 |
 | --- | --- |
@@ -575,8 +576,8 @@ CREATE INDEX IF NOT EXISTS idx_canvas_annotations_story ON canvas_annotations(st
 | timeline_export | 1 根 derived |
 | continuity | 相邻 Shot 且前者有 `continuity_entries(scope=visual, kind=actual)` → derived |
 
-11. 注释节点（note/frame）**不在** graph 中返回，只在 layout 文档里（它们不是领域对象）。
-12. 排序：nodes 按 (lane 顺序, rowKey, id) 排序；edges 按 id 排序 → revision 稳定。
+12. 注释节点（note/frame）**不在** graph 中返回，只在 layout 文档里（它们不是领域对象）。
+13. 排序：nodes 按 (lane 顺序, rowKey, id) 排序；edges 按 id 排序 → revision 稳定。
 
 性能预算：60 个 Shot、300 个 Take、50 个实体的项目，`buildCanvasGraph` ≤ 50ms（本地 SQLite）。在测试中断言查询次数不随 Shot 数线性增长（可通过包装 `ctx.db` 计数）。
 
@@ -640,6 +641,7 @@ web/src/
     inspector/TakesInspector.vue
     inspector/EntityInspector.vue
     inspector/MediaInspector.vue
+    inspector/BreakdownInspector.vue
     inspector/StoryboardInspector.vue
     inspector/TimelineInspector.vue
     inspector/MultiInspector.vue
@@ -656,6 +658,7 @@ web/src/
     nodes/StoryboardNode.vue
     nodes/EntityNode.vue
     nodes/MediaNode.vue
+    nodes/BreakdownNode.vue
     nodes/ShotNode.vue
     nodes/TakesNode.vue
     nodes/TimelineNode.vue

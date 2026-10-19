@@ -55,6 +55,7 @@ const NODE_SIZE: Record<string, { width: number; height: number }> = {
   entity: { width: 170, height: 178 },
   character_state: { width: 170, height: 110 },
   media: { width: 190, height: 150 },
+  breakdown: { width: 208, height: 178 },
   shot: { width: 300, height: 220 },
   takes: { width: 260, height: 160 },
   timeline: { width: 300, height: 170 },
@@ -414,5 +415,5 @@ export const useStudioStore = defineStore('studio', () => {
 
 export const STUDIO_NODE_KINDS: CanvasNodeKind[] = [
   'story', 'beat', 'sequence', 'storyboard', 'entity', 'character_state',
-  'media', 'shot', 'takes', 'timeline', 'export', 'note', 'frame',
+  'media', 'breakdown', 'shot', 'takes', 'timeline', 'export', 'note', 'frame',
 ];

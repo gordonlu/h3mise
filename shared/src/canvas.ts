@@ -12,7 +12,7 @@ import type { TakeStatus } from './render.js';
 
 export type CanvasNodeKind =
   | 'story' | 'beat' | 'sequence' | 'storyboard'
-  | 'entity' | 'character_state' | 'media'
+  | 'entity' | 'character_state' | 'media' | 'breakdown'
   | 'shot' | 'takes' | 'timeline' | 'export'
   | 'note' | 'frame';
 
@@ -45,7 +45,7 @@ export interface CanvasBadge {
   text?: string;
 }
 
-export type CanvasLane = 'cast' | 'story' | 'beats' | 'storyboard' | 'shots' | 'takes' | 'edit' | 'free';
+export type CanvasLane = 'cast' | 'reference' | 'story' | 'beats' | 'storyboard' | 'shots' | 'takes' | 'edit' | 'free';
 
 export interface CanvasNodeBase<K extends CanvasNodeKind, D> {
   id: CanvasNodeId;
@@ -132,6 +132,17 @@ export interface StoryboardNodeData {
   activeJobId: string | null;
 }
 
+export interface BreakdownNodeData {
+  mediaId: string;
+  mediaKind: MediaKind;
+  posterPath: string | null;
+  durationSeconds: number | null;
+  segmentCount: number;
+  frameCount: number;
+  hasAnalysis: boolean;
+  revision: number;
+}
+
 export interface EntityNodeData {
   entityKind: EntityKind;
   imageAssetId: string | null;
@@ -177,6 +188,7 @@ export type CanvasNode =
   | CanvasNodeBase<'entity', EntityNodeData>
   | CanvasNodeBase<'character_state', CharacterStateNodeData>
   | CanvasNodeBase<'media', MediaNodeData>
+  | CanvasNodeBase<'breakdown', BreakdownNodeData>
   | CanvasNodeBase<'shot', ShotNodeData>
   | CanvasNodeBase<'takes', TakesNodeData>
   | CanvasNodeBase<'timeline', TimelineNodeData>

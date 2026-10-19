@@ -58,7 +58,7 @@ H3Mise 借鉴两者的**交互形态**，但保留自己的**产品模型**（�
 | 镜头工作台列表（ShotsPage） | 画布「镜头」泳道 | 拖拽排序 = 泳道内纵向拖动 |
 | 导演台（ShotPage） | 选中镜头 → 右侧 Inspector（复用导演计划/参考/Prompt/预检/Takes 面板） | 宽度不足时可"展开为全屏工作台" |
 | 素材库（AssetsPage） | 左侧 Dock「资产」标签 + 画布「演员与场景」泳道 | 实体节点常驻；媒体按需钉到画布 |
-| 参考拉片（ReferenceBreakdownPage） | P2：画布「参考拆解」节点 | P0/P1 仍跳转原页面 |
+| 参考拉片（ReferenceBreakdownPage） | 画布「参考拆解」节点（已实现的保存拆解会出现在 `reference` 泳道） | 从节点或 Media 节点可跳转原页面精修 |
 | 时间线与导出（TimelinePage） | 底部 Dock「时间线」+ 画布「剪辑/导出」节点 | 精修仍可打开完整时间线页 |
 | 快速剪辑（QuickEditPage） | 被底部时间线条吸收 | 过渡期保留 |
 | 制作总览（ProductionPage） | 底部 Dock「问题」标签 + 顶栏进度 | issues 直接定位到节点 |

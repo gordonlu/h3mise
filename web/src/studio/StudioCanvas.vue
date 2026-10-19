@@ -46,6 +46,7 @@ import StoryboardNode from './nodes/StoryboardNode.vue';
 import EntityNode from './nodes/EntityNode.vue';
 import CharacterStateNode from './nodes/CharacterStateNode.vue';
 import MediaNode from './nodes/MediaNode.vue';
+import BreakdownNode from './nodes/BreakdownNode.vue';
 import ShotNode from './nodes/ShotNode.vue';
 import TakesNode from './nodes/TakesNode.vue';
 import TimelineNode from './nodes/TimelineNode.vue';
@@ -79,6 +80,7 @@ const nodeTypes = {
   entity: markRaw(EntityNode),
   character_state: markRaw(CharacterStateNode),
   media: markRaw(MediaNode),
+  breakdown: markRaw(BreakdownNode),
   shot: markRaw(ShotNode),
   takes: markRaw(TakesNode),
   timeline: markRaw(TimelineNode),

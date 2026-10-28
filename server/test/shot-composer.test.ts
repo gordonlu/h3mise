@@ -430,6 +430,12 @@ test('first and last stills bind only for modes the provider already supports', 
   const labels = listBindings(project, shotId).map((binding) => binding.label);
   assert.ok(labels.includes('User first frame'));
   assert.equal(labels.filter((label) => label.startsWith('Composer first')).length, 0);
+
+  const unsupported = await exportShotComposerFrames(project, ffmpeg, shotId, { bind: true, supportedModes: ['t2va'] });
+  assert.equal(unsupported.firstBindingId, null);
+  assert.equal(unsupported.lastBindingId, null);
+  assert.ok(listBindings(project, shotId).some((binding) => binding.label === 'Composer last frame (planned)'));
+
   const unbound = await exportShotComposerFrames(project, ffmpeg, shotId, { bind: false, supportedModes: ['i2va', 'fl2va', 'l2va'] });
   assert.equal(unbound.firstBindingId, null);
   assert.equal(unbound.lastBindingId, null);

@@ -12,7 +12,7 @@ import { get, post, del, takeVideoUrl, fileUrl, subscribeEvents } from '../../ap
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan, MediaAsset, NextAction, ReferenceBinding, ShotRenderDependencyMode, ShotRenderReadiness } from '@h3mise/shared';
 import PlanEditor from './PlanEditor.vue';
-import ShotComposerPanel from './ShotComposerPanel.vue';
+import ShotComposerHost from './ShotComposerHost.vue';
 import PromptPanel from './PromptPanel.vue';
 import PreflightPanel from './PreflightPanel.vue';
 import TakesPanel from './TakesPanel.vue';
@@ -87,7 +87,23 @@ const currentActualContinuity = computed(() => [...(sDetail.value?.continuity ??
 /** Single-page workflow sections (replaces the old inspector tabs). */
 type FlowSection = 'design' | 'composer' | 'references' | 'prompt' | 'preflight' | 'takes' | 'external';
 
+/** The composer is an optional local rehearsal. It stays collapsed and
+ * unmounted until asked for, so p5 never loads on a normal shot visit. */
+const composerOpen = ref(false);
+const composerMounted = ref(false);
+
+function openComposer(): void {
+  composerOpen.value = true;
+  composerMounted.value = true;
+}
+
+function toggleComposer(): void {
+  if (composerOpen.value) composerOpen.value = false;
+  else openComposer();
+}
+
 function scrollToSection(section: FlowSection): void {
+  if (section === 'composer') openComposer();
   void nextTick(() => {
     const el = document.getElementById(`sec-${section}`) ?? document.getElementById(section);
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -885,14 +901,21 @@ function localizeRequirement(value: string): string {
           <div class="flow-head">
             <span class="flow-step">2</span>
             <strong>{{ tr('shot.composer.title') }}</strong>
+            <span class="badge no-dot">{{ tr('shot.composer.optional') }}</span>
+            <button class="sm ghost composer-toggle" type="button" @click="toggleComposer">
+              {{ composerOpen ? tr('shot.composer.collapse') : tr('shot.composer.expand') }}
+            </button>
           </div>
-          <ShotComposerPanel
-            v-if="sShot"
-            :shot="sShot"
-            :media="media"
-            :modes="availableModes"
-            @assets-added="() => { void loadMedia(); void s.load(); }"
-          />
+          <p v-if="!composerOpen" class="muted composer-summary">{{ tr('shot.composer.summary') }}</p>
+          <div v-show="composerOpen" class="composer-body">
+            <ShotComposerHost
+              v-if="composerMounted && sShot"
+              :shot="sShot"
+              :media="media"
+              :modes="availableModes"
+              @assets-added="() => { void loadMedia(); void s.load(); }"
+            />
+          </div>
         </section>
 
         <section id="sec-references" class="flow-section">
@@ -1107,6 +1130,9 @@ function localizeRequirement(value: string): string {
 .flow-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-3); }
 .flow-chip.done i { background: var(--ok); }
 .flow-chip.dirty i { background: var(--warn); }
+.composer-toggle { margin-left: auto; }
+.composer-summary { margin: 0; }
+.composer-body { min-width: 0; }
 .flow-section {
   display: grid; gap: 12px; min-width: 0;
   padding: 18px;

@@ -153,20 +153,23 @@ function bindExportedFrames(
   bind: boolean,
 ): { firstBindingId: string | null; lastBindingId: string | null; handoff: ComposerHandoff } {
   const handoff = composerHandoffForModes(supportedModes);
-  if (!bind) return { firstBindingId: null, lastBindingId: null, handoff };
+  const canFirst = composerCanBindFrame(handoff, 'first_frame');
+  const canLast = composerCanBindFrame(handoff, 'last_frame');
+  // An unsupported request must not delete bindings written by an earlier
+  // export when the provider did support them.
+  if (!bind || (!canFirst && !canLast)) return { firstBindingId: null, lastBindingId: null, handoff };
   const shotBindings = listBindings(p, shotId);
   const ours = (label: string) => label.startsWith('Composer ');
   for (const binding of shotBindings) {
     const framed = binding.roles.includes('first_frame') || binding.roles.includes('last_frame');
-    if (!framed || !ours(binding.label)) continue;
-    if (binding.roles.includes('first_frame') || binding.roles.includes('last_frame')) deleteBinding(p, binding.id);
+    if (framed && ours(binding.label)) deleteBinding(p, binding.id);
   }
   const remainsFirst = shotBindings.some((binding) => !ours(binding.label) && binding.roles.includes('first_frame'));
   const remainsLast = shotBindings.some((binding) => !ours(binding.label) && binding.roles.includes('last_frame'));
-  const firstBindingId = !remainsFirst && composerCanBindFrame(handoff, 'first_frame')
+  const firstBindingId = !remainsFirst && canFirst
     ? createBinding(p, { assetId: firstAssetId, roles: ['first_frame'], label: 'Composer first frame (planned)', shotId }).id
     : null;
-  const lastBindingId = !remainsLast && composerCanBindFrame(handoff, 'last_frame')
+  const lastBindingId = !remainsLast && canLast
     ? createBinding(p, { assetId: lastAssetId, roles: ['last_frame'], label: 'Composer last frame (planned)', shotId }).id
     : null;
   return { firstBindingId, lastBindingId, handoff };

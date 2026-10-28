@@ -51,6 +51,31 @@ async function run(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: strin
   return (await runResult(bin, args, inputLabel, timeoutMs)).stdout;
 }
 
+function runBuffer(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string, timeoutMs = 60_000): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks: Buffer[] = [];
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new FfmpegError(`${bin} timed out after ${Math.round(timeoutMs / 1000)}s`, stderr));
+    }, timeoutMs);
+    child.stdout.on('data', (d: Buffer) => chunks.push(Buffer.from(d)));
+    child.stderr.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new FfmpegError(`${bin} failed to start: ${err.message}`, stderr));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(Buffer.concat(chunks));
+      else reject(new FfmpegError(`${bin} ${inputLabel ? `(${inputLabel}) ` : ''}exited with code ${code}`, stderr));
+    });
+  });
+}
+
 export interface LoudnessMeasurement {
   integratedLufs: number;
   truePeakDb: number;
@@ -96,6 +121,115 @@ export class Ffmpeg {
   /** Generic raw invocation with our spawn/timeout/error semantics. */
   async runRaw(args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<void> {
     await run('ffmpeg', args, inputLabel, timeoutMs);
+  }
+
+  /** Decode one image to tightly packed RGBA. PNG composers use pngjs instead. */
+  async readImageRgba(path: string): Promise<{ width: number; height: number; data: Uint8Array }> {
+    const info = await this.probe(path);
+    if (!info.width || !info.height) throw new FfmpegError('unable to read image size', '');
+    const stdout = await runBuffer('ffmpeg', [
+      '-v', 'error',
+      '-i', path,
+      '-frames:v', '1',
+      '-f', 'rawvideo',
+      '-pix_fmt', 'rgba',
+      'pipe:1',
+    ], path, 60_000);
+    const expected = info.width * info.height * 4;
+    if (stdout.length !== expected) throw new FfmpegError(`unexpected image byte length (${stdout.length} != ${expected})`, '');
+    return { width: info.width, height: info.height, data: new Uint8Array(stdout) };
+  }
+
+  /**
+   * Encode a raw RGBA sequence from memory. Callers reuse one frame buffer;
+   * each write copies the bytes before yielding.
+   */
+  async encodeRgbaStream(
+    spec: { width: number; height: number; fps: number; frameCount: number },
+    outPath: string,
+    produce: (writeFrame: (rgba: Uint8Array) => Promise<void>) => Promise<void>,
+  ): Promise<void> {
+    if (spec.width % 2 !== 0 || spec.height % 2 !== 0) {
+      throw new FfmpegError('ffmpeg rgba encode requires even dimensions', '');
+    }
+    const expected = spec.width * spec.height * 4;
+    await mkdir(dirname(outPath), { recursive: true });
+    const args = [
+      '-y',
+      '-f', 'rawvideo',
+      '-pix_fmt', 'rgba',
+      '-s', `${spec.width}x${spec.height}`,
+      '-r', String(spec.fps),
+      '-i', 'pipe:0',
+      '-an',
+      '-r', String(spec.fps),
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '18',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      outPath,
+    ];
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
+      let stderr = '';
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(error);
+      };
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      timer = setTimeout(() => fail(new FfmpegError('ffmpeg timed out after 600s', stderr)), 600_000);
+      child.stderr?.on('data', (d: Buffer) => {
+        stderr += d.toString();
+      });
+      child.on('error', (err) => fail(new FfmpegError(`ffmpeg failed to start: ${err.message}`, stderr)));
+      child.on('close', (code) => {
+        if (code === 0) succeed();
+        else fail(new FfmpegError(`ffmpeg (${outPath}) exited with code ${code}`, stderr));
+      });
+      const stdin = child.stdin;
+      if (!stdin) {
+        fail(new FfmpegError('ffmpeg stdin unavailable', stderr));
+        return;
+      }
+      let ending = false;
+      stdin.on('error', (err: NodeJS.ErrnoException) => {
+        if (ending && err.code === 'EPIPE') return;
+        fail(new FfmpegError(`ffmpeg stdin: ${err.message}`, stderr));
+      });
+      const writeFrame = (rgba: Uint8Array) => new Promise<void>((res, rej) => {
+        if (rgba.byteLength !== expected) {
+          rej(new FfmpegError('invalid composer frame bytes', stderr));
+          return;
+        }
+        try {
+          const ok = stdin.write(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength));
+          if (ok) res();
+          else stdin.once('drain', () => res());
+        } catch (err) {
+          rej(err instanceof Error ? err : new Error(String(err)));
+        }
+      });
+      produce(writeFrame).then(() => {
+        ending = true;
+        stdin.end();
+      }).catch((err: unknown) => {
+        ending = true;
+        stdin.destroy();
+        fail(err instanceof Error ? err : new FfmpegError(String(err), stderr));
+      });
+    });
   }
 
   async capabilityCheck(): Promise<FfmpegCapabilities> {

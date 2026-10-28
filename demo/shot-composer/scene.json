@@ -1,0 +1,90 @@
+{
+  "note": "Asset ids in this file are the fixture filenames. Import them into a project to bind real media ids. The camera is a 2D crop, not a 3D move.",
+  "spatial": "2d-crop",
+  "composer": {
+    "version": 1,
+    "durationSeconds": 5,
+    "fps": 24,
+    "aspectRatio": "16:9",
+    "width": 1280,
+    "height": 720,
+    "camera": {
+      "sourceAssetId": null,
+      "durationSeconds": 5,
+      "aspectRatio": "16:9",
+      "frameMode": true,
+      "startFraming": {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      },
+      "endFraming": {
+        "x": 0.11,
+        "y": 0.11,
+        "w": 0.78,
+        "h": 0.78
+      },
+      "steps": []
+    },
+    "layers": [
+      {
+        "id": "hall",
+        "name": "Palace hall",
+        "role": "background",
+        "assetId": "palace-hall.png",
+        "sourceKind": "image",
+        "sequencePath": null,
+        "x": 0.5,
+        "y": 0.5,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "scale": 1,
+        "rotation": 0,
+        "opacity": 1,
+        "zIndex": 0,
+        "visible": true,
+        "keyframes": []
+      },
+      {
+        "id": "figure",
+        "name": "Figure",
+        "role": "subject",
+        "assetId": "figure.png",
+        "sourceKind": "image",
+        "sequencePath": null,
+        "x": 0.5,
+        "y": 0.62,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "scale": 0.72,
+        "rotation": 0,
+        "opacity": 1,
+        "zIndex": 10,
+        "visible": true,
+        "keyframes": []
+      },
+      {
+        "id": "column",
+        "name": "Foreground column",
+        "role": "foreground",
+        "assetId": "foreground.png",
+        "sourceKind": "image",
+        "sequencePath": null,
+        "x": 0.39,
+        "y": 0.5,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "scale": 1,
+        "rotation": 0,
+        "opacity": 1,
+        "zIndex": 20,
+        "visible": true,
+        "keyframes": []
+      }
+    ],
+    "limits": {
+      "spatial": "2d-crop"
+    }
+  }
+}

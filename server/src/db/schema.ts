@@ -611,6 +611,20 @@ CREATE INDEX IF NOT EXISTS idx_canvas_annotations_story ON canvas_annotations(st
 `,
 });
 
+PROJECT_MIGRATIONS.push({
+  version: 23,
+  name: 'shot-composer',
+  sql: `
+CREATE TABLE IF NOT EXISTS shot_composers (
+  id TEXT PRIMARY KEY,
+  shot_id TEXT NOT NULL UNIQUE REFERENCES shots(id) ON DELETE CASCADE,
+  document_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`,
+});
+
 export const REGISTRY_MIGRATIONS: Migration[] = [
   {
     version: 1,

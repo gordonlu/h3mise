@@ -207,9 +207,34 @@ const tools = [
   },
   {
     name: 'inspect_shot',
-    description: 'Read one Shot and its plans, prompts, bindings, Takes, jobs, and Preflight history.',
+    description: 'Read one Shot and its plans, prompts, bindings, Takes, jobs, Preflight history, and Shot Composer document.',
     inputSchema: objectSchema({ shotId: stringProp('Exact Shot ID returned by list_shots.') }, ['shotId']),
     annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'get_shot_composer',
+    description: 'Read the Shot Composer stage for one Shot. Coordinates are normalized, origin top-left, +x right, +y down. Position is the layer anchor; the default anchor is the bitmap center. Scale 1 matches the stage height. The camera is a 2D CameraPlan crop, not perspective or parallax. Returns null when the Shot has no composer.',
+    inputSchema: objectSchema({ shotId: stringProp('Exact Shot ID.') }, ['shotId']),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'save_shot_composer',
+    description: 'Save the Shot Composer document for one Shot. This is deterministic local state. It does not render or submit a paid task. Visible layers in v1 must use sourceKind "image".',
+    inputSchema: objectSchema({
+      shotId: stringProp('Shot that owns the composer.'),
+      composer: { type: 'object', description: 'ShotComposer document: durationSeconds, fps, aspectRatio, width, height, camera (CameraMotionPlan), and layers (x, y, anchorX, anchorY, scale, rotation, opacity, zIndex, visible, assetId, sourceKind, keyframes).', additionalProperties: true },
+    }, ['shotId', 'composer']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'export_shot_composer',
+    description: 'Export a saved Shot Composer locally. kind "frames" writes first, mid, and last PNG assets. kind "preview" starts a local FFmpeg MP4 job and returns jobId; poll inspect_jobs. bind=true writes first_frame or last_frame bindings only when the active provider already supports that mode. This does not submit a paid render and does not skip Preflight. The MP4 is a 2D rehearsal, not a motion track a video model will follow.',
+    inputSchema: objectSchema({
+      shotId: stringProp('Shot whose saved composer to export.'),
+      kind: { type: 'string', enum: ['frames', 'preview'], description: 'frames writes stills now. preview queues a local MP4.' },
+      bind: { type: 'boolean', description: 'Bind exported stills when the provider supports them. Defaults to false.' },
+    }, ['shotId', 'kind']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: 'build_context_package',
@@ -475,6 +500,16 @@ async function callTool(name, args = {}) {
     case 'list_reference_bindings': return api('GET', `/api/assets/bindings${args.shotId ? `?shotId=${encodeURIComponent(args.shotId)}` : ''}`);
     case 'create_reference_binding': return api('POST', '/api/assets/bindings', args);
     case 'inspect_shot': return api('GET', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}`);
+    case 'get_shot_composer': return api('GET', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/composer`);
+    case 'save_shot_composer': {
+      if (!args.composer || typeof args.composer !== 'object' || Array.isArray(args.composer)) throw new Error('composer is required');
+      return api('PUT', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/composer`, args.composer);
+    }
+    case 'export_shot_composer': {
+      const kind = args.kind;
+      if (kind !== 'frames' && kind !== 'preview') throw new Error('kind must be frames or preview');
+      return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/composer/${kind}`, { bind: args.bind === true });
+    }
     case 'build_context_package': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/context-package`, { task: requireString(args, 'task') });
     case 'parse_director_plan': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/plans/parse`, { text: requireString(args, 'text') });
     case 'apply_director_plan': {
@@ -592,7 +627,7 @@ async function handle(message) {
           protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'h3mise', version: '0.1.0' },
-          instructions: 'H3Mise is a local-first director workstation. Inspect the current project and canonical Context Package before writing. Save DirectorPlans and prompts as new immutable versions. Never claim a render happened from Preflight. Paid render submission requires explicit user authorization and confirmPaid=true on that exact submit_render call. This MCP server cannot accept or reveal API keys, select Takes, delete work, or overwrite existing Takes. RunningHub node detection is not a render and only reaches nodes_detected. Record picture and audio judgments separately. Keep the director in control.',
+          instructions: 'H3Mise is a local-first director workstation. Inspect the current project and canonical Context Package before writing. Save DirectorPlans and prompts as new immutable versions. Shot Composer is a per-shot 2D stage: read and save it with the composer tools, and export stills or a local preview without submitting a paid render. The preview MP4 does not make a video model follow the p5 camera path. Never claim a render happened from Preflight. Paid render submission requires explicit user authorization and confirmPaid=true on that exact submit_render call. This MCP server cannot accept or reveal API keys, select Takes, delete work, or overwrite existing Takes. RunningHub node detection is not a render and only reaches nodes_detected. Record picture and audio judgments separately. Keep the director in control.',
         });
         return;
       case 'ping':

@@ -147,6 +147,17 @@ Rules:
 - Current ComfyUI reference upload supports images only. Do not pretend audio or video bindings are connected.
 - Follow the complete procedure and Profile schema in `ComfyUI.md`.
 
+## Shot Composer
+
+Shot Composer is a per-shot 2D stage for placing still layers and previewing a camera crop. Studio Canvas is the workflow graph; do not treat it as this compositor.
+
+- Coordinates are normalized to the stage. The origin is the top-left, +x points right, and +y points down. A layer's `(x, y)` is its anchor on the stage. The default anchor inside the bitmap is the center, `(0.5, 0.5)`. `scale` 1 makes the bitmap as tall as the stage and keeps the bitmap's own aspect.
+- The camera is the existing `CameraMotionPlan` read through `viewAt()`. Supported motion is a 2D crop: hold, push in, pull out, and pan. It does not create perspective or parallax.
+- Read and write the document with `GET`/`PUT /api/shots/:id/composer`, or the MCP tools `get_shot_composer` and `save_shot_composer`. `inspect_shot` includes the saved document. Visible layers in this version must be still images. `video` and `image_sequence` may be stored and are not rendered.
+- Export stills with `POST /api/shots/:id/composer/frames` or MCP `export_shot_composer` `kind: "frames"`. A preview MP4 is `kind: "preview"` and returns a local job; follow it with `inspect_jobs`. Both paths use the same frame sampling as the p5 preview.
+- `bind: true` writes `first_frame` or `last_frame` bindings only when the active provider's `supportedModes` already include that side (`i2va`/`fl2va` for the first frame, `l2va`/`fl2va` for the last). It does not submit a paid render and does not skip Preflight.
+- The preview MP4 is a local 2D rehearsal. Do not describe it as a motion reference that makes MiniMax, or any other video model, follow the p5 camera path. The deterministic placement sentence compiled into the H3 prompt states the same limit.
+
 ## Render safety rules
 
 - Never start, retry, or duplicate a paid render merely to test connectivity.
@@ -171,6 +182,8 @@ Rules:
 
 - `server/src/providers/registry.ts`: profile persistence, discovery, capability inference, and verification state.
 - `server/src/providers/runninghub.ts`: upload, workflow input mapping, submission, polling, and download.
+- `server/src/modules/shot-composer.ts`: per-shot layer stage, local still/MP4 export, and provider-gated first/last-frame binding.
+- `shared/src/shot-composer.ts`: composer document, keyframe interpolation, and the deterministic placement sentence.
 - `server/src/modules/preflight.ts`: deterministic checks before paid submission.
 - `server/src/modules/render.ts`: persistent queue and reconciliation.
 - `server/src/modules/storyboard.ts`: optional text boards, paid image jobs, reconciliation, splitting, and panel versioning.

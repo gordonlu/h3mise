@@ -12,6 +12,7 @@ import { get, post, del, takeVideoUrl, fileUrl, subscribeEvents } from '../../ap
 import { H3_MODE_LABEL, H3_MODES, SHOT_STATUS_LABEL, SHOT_USER_STATUS, SHOT_USER_STATUS_LABEL, emptyDirectorPlan } from '@h3mise/shared';
 import type { DirectorPlan, MediaAsset, NextAction, ReferenceBinding, ShotRenderDependencyMode, ShotRenderReadiness } from '@h3mise/shared';
 import PlanEditor from './PlanEditor.vue';
+import ShotComposerPanel from './ShotComposerPanel.vue';
 import PromptPanel from './PromptPanel.vue';
 import PreflightPanel from './PreflightPanel.vue';
 import TakesPanel from './TakesPanel.vue';
@@ -84,7 +85,7 @@ const currentActualContinuity = computed(() => [...(sDetail.value?.continuity ??
   .find((entry) => entry.scope === 'visual' && entry.kind === 'actual') ?? null);
 
 /** Single-page workflow sections (replaces the old inspector tabs). */
-type FlowSection = 'design' | 'references' | 'prompt' | 'preflight' | 'takes' | 'external';
+type FlowSection = 'design' | 'composer' | 'references' | 'prompt' | 'preflight' | 'takes' | 'external';
 
 function scrollToSection(section: FlowSection): void {
   void nextTick(() => {
@@ -224,6 +225,7 @@ function openGuideAction(action: NextAction) {
 
 const SECTION_FOR_QUERY: Record<string, FlowSection> = {
   workspace: 'design', plan: 'design', camera: 'design',
+  composer: 'composer',
   references: 'references', prompt: 'prompt', preflight: 'preflight', external: 'external',
   design: 'design', takes: 'takes',
 };
@@ -659,6 +661,7 @@ const flowNav = computed(() => {
   const missing = (sDetail.value?.requirements ?? []).filter((r) => r.level === 'required').length;
   return [
     { id: 'design' as FlowSection, label: tr('shot.plan.shotDesign'), state: sPlan.value ? (planDirty.value ? 'dirty' : 'done') : 'todo' },
+    { id: 'composer' as FlowSection, label: tr('shot.composer.title'), state: 'todo' },
     { id: 'references' as FlowSection, label: tr('shot.tab.references'), state: missing ? 'dirty' : 'done' },
     { id: 'prompt' as FlowSection, label: tr('shot.tab.prompt'), state: latestPrompt() ? 'done' : 'todo' },
     { id: 'preflight' as FlowSection, label: tr('shot.tab.preflight'), state: (sDetail.value?.preflights.length ?? 0) > 0 ? 'done' : 'todo' },
@@ -878,9 +881,23 @@ function localizeRequirement(value: string): string {
           />
         </section>
 
-        <section id="sec-references" class="flow-section">
+        <section id="sec-composer" class="flow-section">
           <div class="flow-head">
             <span class="flow-step">2</span>
+            <strong>{{ tr('shot.composer.title') }}</strong>
+          </div>
+          <ShotComposerPanel
+            v-if="sShot"
+            :shot="sShot"
+            :media="media"
+            :modes="availableModes"
+            @assets-added="() => { void loadMedia(); void s.load(); }"
+          />
+        </section>
+
+        <section id="sec-references" class="flow-section">
+          <div class="flow-head">
+            <span class="flow-step">3</span>
             <strong>{{ tr('shot.tab.references') }}</strong>
           </div>
           <div class="requirements-row">
@@ -913,7 +930,7 @@ function localizeRequirement(value: string): string {
 
         <section id="sec-prompt" class="flow-section">
           <div class="flow-head">
-            <span class="flow-step">3</span>
+            <span class="flow-step">4</span>
             <strong>{{ tr('shot.tab.prompt') }}</strong>
           </div>
           <PromptPanel
@@ -928,7 +945,7 @@ function localizeRequirement(value: string): string {
 
         <section id="sec-preflight" class="flow-section">
           <div class="flow-head">
-            <span class="flow-step">4</span>
+            <span class="flow-step">5</span>
             <strong>{{ tr('shot.tab.preflight') }}</strong>
           </div>
           <PreflightPanel
@@ -948,7 +965,7 @@ function localizeRequirement(value: string): string {
 
         <section id="sec-takes" ref="takesSection" class="flow-section takes-section">
           <div class="flow-head">
-            <span class="flow-step">5</span>
+            <span class="flow-step">6</span>
             <strong>Takes</strong>
             <span class="muted">{{ tr('shot.takes.count', { n: sDetail?.takes.length ?? 0 }) }} · {{ tr('shot.takes.shotVsTake') }}</span>
           </div>
@@ -981,7 +998,7 @@ function localizeRequirement(value: string): string {
 
         <section id="sec-external" class="flow-section">
           <div class="flow-head">
-            <span class="flow-step">6</span>
+            <span class="flow-step">7</span>
             <strong>{{ tr('shot.tab.external') }}</strong>
           </div>
           <div class="external-flow">

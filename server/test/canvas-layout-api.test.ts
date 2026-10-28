@@ -33,10 +33,10 @@ test('migration v22 applies on a fresh project', async () => {
   const tables = ctx.db
     .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
     .map((row) => row.name);
-  for (const table of ['canvas_node_layouts', 'canvas_views', 'canvas_annotations']) {
+  for (const table of ['canvas_node_layouts', 'canvas_views', 'canvas_annotations', 'shot_composers']) {
     assert.ok(tables.includes(table), `missing ${table}`);
   }
-  assert.equal(schemaVersion(ctx.db), 22);
+  assert.equal(schemaVersion(ctx.db), 23);
 });
 
 test('migration v22 upgrades an existing v21 database additively', () => {
@@ -48,8 +48,9 @@ test('migration v22 upgrades an existing v21 database additively', () => {
   assert.equal(db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='canvas_node_layouts'").length, 0);
 
   migrate(db, PROJECT_MIGRATIONS);
-  assert.equal(schemaVersion(db), 22);
+  assert.equal(schemaVersion(db), 23);
   assert.equal(db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='canvas_node_layouts'").length, 1);
+  assert.equal(db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='shot_composers'").length, 1);
   db.close();
 });
 

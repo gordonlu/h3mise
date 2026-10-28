@@ -27,6 +27,7 @@ export type IdKind =
   | 'storyboard-panel-version'
   | 'storyboard-job'
   | 'camera-plan'
+  | 'composer'
   | 'aireq'
   | 'note';
 

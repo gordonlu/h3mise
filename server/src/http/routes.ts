@@ -26,6 +26,7 @@ import * as shotsMod from '../modules/shots.js';
 import * as assetsMod from '../modules/assets.js';
 import * as directorMod from '../modules/director.js';
 import * as cameraPlanMod from '../modules/camera-plan.js';
+import * as composerMod from '../modules/shot-composer.js';
 import * as promptMod from '../modules/prompt.js';
 import * as preflightMod from '../modules/preflight.js';
 import * as renderBatchMod from '../modules/render-batch.js';
@@ -618,6 +619,85 @@ export function buildRoutes(services: AppServices): App {
     const result = await cameraPlanMod.renderCameraFrames(ctx, services.ffmpeg, plan, source, shotId, { bind: body.bind === true });
     services.bus.emit({ type: 'shot.updated', shotId, status: shotsMod.getShot(ctx, shotId).status });
     return c.json(result, 201);
+  });
+
+  // --- shot composer (local p5 preview + deterministic stills / MP4) --------
+
+  async function composerModes(c: Context): Promise<string[]> {
+    const providerId = p(c).config.default_provider ?? 'runninghub';
+    const caps = await services.providers.capabilities(providerId);
+    return caps?.supportedModes ?? [];
+  }
+
+  app.get('/api/shots/:id/composer', (c) => c.json(composerMod.getShotComposer(p(c), c.req.param('id'))));
+
+  app.put('/api/shots/:id/composer', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const doc = composerMod.saveShotComposer(ctx, shotId, await c.req.json());
+    services.bus.emit({ type: 'shot.updated', shotId, status: shotsMod.getShot(ctx, shotId).status });
+    return c.json(doc);
+  });
+
+  app.post('/api/shots/:id/composer/demo', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { width?: number; height?: number };
+    const size = body.width && body.height ? { width: Number(body.width), height: Number(body.height) } : undefined;
+    const installed = await composerMod.installPalaceDemo(ctx, shotId, size);
+    services.bus.emit({ type: 'shot.updated', shotId, status: shotsMod.getShot(ctx, shotId).status });
+    return c.json(installed, 201);
+  });
+
+  /** One exact export frame. Accepts the unsaved document so the UI can compare it with p5. */
+  app.post('/api/shots/:id/composer/frame', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { frameIndex?: number; composer?: unknown };
+    const png = await composerMod.renderShotComposerPng(
+      ctx,
+      services.ffmpeg,
+      shotId,
+      Number(body.frameIndex ?? 0),
+      body.composer,
+    );
+    return new Response(new Uint8Array(png), {
+      headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' },
+    });
+  });
+
+  app.post('/api/shots/:id/composer/frames', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { bind?: boolean };
+    const result = await composerMod.exportShotComposerFrames(ctx, services.ffmpeg, shotId, {
+      bind: body.bind === true,
+      supportedModes: await composerModes(c),
+    });
+    services.bus.emit({ type: 'shot.updated', shotId, status: shotsMod.getShot(ctx, shotId).status });
+    return c.json(result, 201);
+  });
+
+  app.post('/api/shots/:id/composer/preview', async (c) => {
+    const ctx = p(c);
+    const shotId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({})) as { bind?: boolean };
+    const supportedModes = await composerModes(c);
+    const projectId = ctx.meta.id;
+    const job = services.jobs.start('composer.preview', '镜头合成预演', async (update) => {
+      const pctx = await services.store.openDetached(projectId);
+      try {
+        update({ message: '逐帧合成预演…' });
+        return await composerMod.exportShotComposerPreview(pctx, services.ffmpeg, shotId, {
+          bind: body.bind === true,
+          supportedModes,
+          onProgress: (frame, total) => update({ progress: frame / total, message: `${frame}/${total}` }),
+        });
+      } finally {
+        pctx.close();
+      }
+    });
+    return c.json({ jobId: job.id, status: job.status }, 202);
   });
 
   // --- prompt --------------------------------------------------------------

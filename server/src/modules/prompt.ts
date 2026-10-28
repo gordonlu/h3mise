@@ -2,7 +2,7 @@
 // never overwrites history. Raw Prompt path bypasses DirectorPlan entirely.
 
 import type { H3Mode, PromptSource, PromptVersion } from '@h3mise/shared';
-import { cameraPlanWarnings, describeCameraPlan, normalizeCameraPlan } from '@h3mise/shared';
+import { cameraPlanWarnings, describeCameraPlan, describeShotComposer, normalizeCameraPlan } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
 import { jget } from '../db/sqlite.js';
@@ -12,6 +12,7 @@ import { getShot } from './shots.js';
 import { ensureShotEntityImageBindings, listBindings } from './assets.js';
 import { directorStyleAiContext, directorStylePromptDirective } from './director-styles.js';
 import { getBeat, getStory } from './story.js';
+import { getShotComposer } from './shot-composer.js';
 
 interface PvRow {
   id: string;
@@ -123,6 +124,7 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
     references: refs,
     directorStyle: directorStylePromptDirective(p),
     cameraPlan: cameraPlanPromptSummary(p, shotId, shot.durationSeconds),
+    shotComposer: composerPromptSummary(p, shotId),
     story: (() => {
       const story = getStory(p);
       return { title: story.title, synopsis: story.synopsis, body: story.body };
@@ -150,6 +152,11 @@ function cameraPlanPromptSummary(p: ProjectContext, shotId: string, durationSeco
   if (!description || description === 'Static camera') return '';
   const warnings = cameraPlanWarnings(plan);
   return warnings.length ? `${description} (note: ${warnings.map((w) => w.message).join('; ')})` : description;
+}
+
+function composerPromptSummary(p: ProjectContext, shotId: string): string {
+  const doc = getShotComposer(p, shotId);
+  return doc ? describeShotComposer(doc) : '';
 }
 
 /** Store a user-authored or AI-optimized prompt as an immutable version. */
@@ -206,6 +213,8 @@ export function buildContextPackage(
     continuity,
     assets,
     shot,
+    shot_composer: getShotComposer(p, shotId),
+    shot_composer_summary: composerPromptSummary(p, shotId),
     director_plan: plan?.plan ?? null,
     prompt_versions: prompts,
     provider_constraints: {

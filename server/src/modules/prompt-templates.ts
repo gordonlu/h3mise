@@ -22,6 +22,8 @@ export interface CompileContext {
   directorStyle?: string;
   /** Deterministic camera-plan summary (motion wording + bounds note). */
   cameraPlan?: string;
+  /** Deterministic Shot Composer placement and 2D-crop limit. */
+  shotComposer?: string;
   /** Canonical narrative facts. The StoryBeat defines what happens in this
    * shot; the episode premise explains why it matters without advancing later
    * events early. */
@@ -538,6 +540,7 @@ function cameraDescriptionLines(ctx: CompileContext): string[] {
     fixed ? '' : line('Speed relation', camera.speedRelation),
     line('Stop condition', camera.stopCondition),
     line('Camera planning', ctx.cameraPlan ?? ''),
+    line('Shot composer', ctx.shotComposer ?? ''),
   ].filter((value): value is string => Boolean(value));
 }
 

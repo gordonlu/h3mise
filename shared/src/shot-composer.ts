@@ -19,6 +19,7 @@
 
 import type { H3Mode } from './director.js';
 import {
+  describeCameraPlan,
   emptyCameraPlan,
   normalizeCameraPlan,
   viewAt,
@@ -527,6 +528,32 @@ const FIRST_FRAME_MODES = ['i2va', 'fl2va'] as const;
 const LAST_FRAME_MODES = ['l2va', 'fl2va'] as const;
 
 /** Which already-supported still modes can receive an exported frame. */
+function placementPhrase(label: string, layer: ResolvedComposerLayer, end: ResolvedComposerLayer | undefined): string {
+  const here = `(${layer.x.toFixed(2)}, ${layer.y.toFixed(2)}), scale ${layer.scale.toFixed(2)}, z ${layer.zIndex}`;
+  const moved = end !== undefined && (
+    Math.abs(layer.x - end.x) > 0.01
+    || Math.abs(layer.y - end.y) > 0.01
+    || Math.abs(layer.scale - end.scale) > 0.01
+  );
+  const span = moved && end
+    ? `from ${here} to (${end.x.toFixed(2)}, ${end.y.toFixed(2)}), scale ${end.scale.toFixed(2)}`
+    : `at ${here}`;
+  return `${label} ${span}`;
+}
+
+/** One deterministic sentence for the prompt compiler and Agent context. */
+export function describeShotComposer(doc: ShotComposer): string {
+  const start = resolveComposerFrame(doc, 0);
+  const end = resolveComposerFrame(doc, composerFrameCount(doc) - 1);
+  const visible = start.layers.filter((layer) => layer.visible);
+  if (!visible.length) return '';
+  const endById = new Map(end.layers.map((layer) => [layer.id, layer]));
+  const names = new Map(doc.layers.map((layer) => [layer.id, layer.role === 'custom' ? layer.name : `${layer.role} ${layer.name}`]));
+  const placement = visible.map((layer) => placementPhrase(names.get(layer.id) ?? layer.id, layer, endById.get(layer.id))).join('; ');
+  const camera = describeCameraPlan(doc.camera, doc.durationSeconds);
+  return `Stage placement: ${placement}. Camera: ${camera}. 2D crop rehearsal only. Exported stills can be bound as first or last frames when the provider already supports that mode. The preview MP4 does not make a video model follow the p5 camera path.`;
+}
+
 export function composerHandoffForModes(modes: readonly string[]): ComposerHandoff {
   const available = new Set(modes);
   return {

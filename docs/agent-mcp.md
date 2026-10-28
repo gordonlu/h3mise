@@ -44,6 +44,7 @@ Restart Codex after changing MCP configuration. Use `/mcp` or `codex mcp list` t
 - `list_entities`, `create_entity`, `list_character_states`, `create_character_state`
 - `list_media`, `import_media_path`
 - `get_production_overview`, `list_shots`, `update_shot`, `inspect_shot`
+- `get_shot_composer`, `save_shot_composer`, `export_shot_composer`
 - `get_canvas_graph` (read-only Studio node/edge projection for the active episode)
 - `list_reference_bindings`, `create_reference_binding`
 - `build_context_package`, `parse_director_plan`, `apply_director_plan`
@@ -54,6 +55,10 @@ Restart Codex after changing MCP configuration. Use `/mcp` or `codex mcp list` t
 - `configure_runninghub_storyboard_profile`, `detect_runninghub_storyboard_nodes`
 
 `run_preflight` performs checks only. It cannot submit a render.
+
+`export_shot_composer` is local. `kind: "frames"` writes the first, middle, and last PNG assets. `kind: "preview"` queues a local MP4 and returns a `jobId` to follow with `inspect_jobs`. `bind: true` writes `first_frame` or `last_frame` bindings only when the active provider already supports that mode. It does not submit a paid render and does not skip Preflight. The MP4 is a 2D rehearsal, not a motion track for a video model.
+
+Shot Composer coordinates are normalized to the stage: origin at the top-left, +x to the right, +y down. A layer position is its anchor. The default anchor is the bitmap center. Scale 1 makes the bitmap as tall as the stage and keeps the bitmap aspect. The camera reuses CameraPlan as a 2D crop.
 
 ## RunningHub configuration
 

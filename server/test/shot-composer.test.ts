@@ -16,6 +16,7 @@ import {
   composerFrameSize,
   composerHandoffForModes,
   composerSampleIndices,
+  describeShotComposer,
   describeCameraPlan,
   emptyCameraPlan,
   normalizeShotComposer,
@@ -26,6 +27,7 @@ import {
 } from '@h3mise/shared';
 import { Ffmpeg } from '../src/ffmpeg.js';
 import { saveCameraPlan, getCameraPlan } from '../src/modules/camera-plan.js';
+import { compilePrompt, buildContextPackage } from '../src/modules/prompt.js';
 import { createBinding, getMedia, insertMedia, listBindings } from '../src/modules/assets.js';
 import { createShot, getShot } from '../src/modules/shots.js';
 import { decodePng, encodePng, renderComposerRgba, renderComposerRgbaInto, type RgbaImage } from '../src/modules/shot-composer-raster.js';
@@ -274,6 +276,42 @@ test('camera presets reuse viewAt and only crop in 2D', () => {
   const still = renderComposerRgba(rolled, 0, new Map([['plate', plate]]));
   const turned = renderComposerRgba(rolled, composerFrameCount(rolled) - 1, new Map([['plate', plate]]));
   assert.notEqual(sha(still), sha(turned));
+});
+
+test('compiled prompt and context package state composer placement without claiming model tracking', async () => {
+  const { root, store } = await makeStore('composer-prompt');
+  roots.push(root);
+  const project = await makeProject(store, 'prompt');
+  const shot = createShot(project, { title: 'Placed', durationSeconds: 5, aspectRatio: '16:9' });
+  const saved = saveShotComposer(project, shot.id, {
+    durationSeconds: 5,
+    fps: 24,
+    aspectRatio: '16:9',
+    width: 320,
+    height: 180,
+    camera: composerCameraPreset('push-in', 5, '16:9'),
+    layers: [{
+      id: 'figure',
+      name: 'Figure',
+      role: 'subject',
+      assetId: null,
+      x: 0.2,
+      y: 0.62,
+      scale: 0.72,
+      zIndex: 10,
+      keyframes: [{ id: 'end', t: 1, ease: 'linear', x: 0.8 }],
+    }],
+  });
+  const summary = describeShotComposer(saved);
+  assert.match(summary, /subject Figure from \(0\.20, 0\.62\)/);
+  assert.match(summary, /to \(0\.80, 0\.62\)/);
+  assert.match(summary, /2D crop rehearsal only/);
+  assert.match(summary, /preview MP4 does not make a video model follow the p5 camera path/);
+  const prompt = compilePrompt(project, shot.id, 't2va');
+  assert.match(prompt.text, /Shot composer: Stage placement:/);
+  const context = buildContextPackage(project, shot.id, 'Plan this shot');
+  assert.equal((context.shot_composer as { layers: unknown[] }).layers.length, 1);
+  assert.equal(context.shot_composer_summary, summary);
 });
 
 test('saving a composer does not change the camera plan, shot, or takes', async () => {

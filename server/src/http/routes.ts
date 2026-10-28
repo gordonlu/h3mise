@@ -493,6 +493,7 @@ export function buildRoutes(services: AppServices): App {
         narrative: continuityMod.latestContinuity(ctx, 'narrative', 'actual'),
       },
       guide: guideMod.shotGuidePayload(ctx, shot),
+      composer: composerMod.getShotComposer(ctx, shot.id),
     });
   });
 

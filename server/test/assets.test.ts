@@ -126,6 +126,37 @@ test('Ref2VA automatically binds selected character and scene images without dup
   assert.equal(replaced.bindings.some((binding) => binding.assetId === sceneImage.id), false);
 });
 
+test('explicit shot image roles override entity defaults without losing entity links or user references', async () => {
+  const { root, store } = await makeStore('asset-shot-reference-override');
+  roots.push(root);
+  const project = await makeProject(store, 'shot reference override');
+  const image = (name: string) => insertMedia(project, {
+    kind: 'image', fileName: `assets/${name}.png`, mimeType: 'image/png', sizeBytes: 1, label: name,
+  });
+  const oldFace = image('old-face');
+  const oldScene = image('old-scene');
+  const revised = image('revised-combined');
+  const character = createEntity(project, { kind: 'character', name: 'Character', imageAssetId: oldFace.id });
+  const scene = createEntity(project, { kind: 'scene', name: 'Scene', imageAssetId: oldScene.id });
+  const shot = createShot(project, {
+    title: 'Override', h3Mode: 'ref2va', primaryCharacterId: character.id, sceneId: scene.id,
+  });
+  ensureShotEntityImageBindings(project, shot);
+  const explicit = createBinding(project, { assetId: revised.id, roles: ['identity'], shotId: shot.id });
+  const partial = ensureShotEntityImageBindings(project, shot);
+  assert.deepEqual(new Set(partial.bindings.map((ref) => ref.assetId)), new Set([revised.id, oldScene.id]));
+  assert.equal(partial.bindings.find((ref) => ref.id === explicit.id)?.sourceEntityId, null);
+  const environment = createBinding(project, { assetId: revised.id, roles: ['environment'], shotId: shot.id });
+  const combined = ensureShotEntityImageBindings(project, shot);
+  assert.deepEqual(combined.bindings.map((ref) => ref.id), [explicit.id, environment.id]);
+  assert.equal(combined.added.length, 0);
+  assert.equal(ensureShotEntityImageBindings(project, shot).added.length, 0);
+  deleteBinding(project, explicit.id);
+  const restored = ensureShotEntityImageBindings(project, shot);
+  assert.ok(restored.bindings.some((ref) => ref.assetId === oldFace.id && ref.sourceEntityId === character.id));
+  assert.ok(restored.bindings.some((ref) => ref.id === environment.id && ref.sourceEntityId === null));
+});
+
 test('a creature can own and require CharacterState as the primary subject', async () => {
   const { root, store } = await makeStore('asset-creature-primary');
   roots.push(root);

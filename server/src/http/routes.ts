@@ -117,6 +117,7 @@ export function buildRoutes(services: AppServices): App {
     const comfyVerification = services.providers.getComfyUiProfile().verification.status;
     return c.json({
       ok: true,
+      app: 'h3mise',
       ffmpeg: caps,
       runningHubConfigured: services.providers.runningHubKeyPresent,
       comfyUiConfigured: comfyVerification === 'nodes_detected' || comfyVerification === 'verified',
@@ -565,7 +566,7 @@ export function buildRoutes(services: AppServices): App {
 
   app.post('/api/shots/:id/context-package', async (c) => {
     const { task } = await c.req.json();
-    return c.json(promptMod.buildContextPackage(p(c), c.req.param('id'), String(task ?? 'Plan this shot'), services.providers.getProfile()));
+    return c.json(promptMod.buildContextPackage(p(c), c.req.param('id'), String(task ?? 'Plan this shot'), services.providers.getProfileForMode(shotsMod.getShot(p(c), c.req.param('id')).h3Mode ?? undefined)));
   });
 
   // --- camera plan (local, deterministic, no paid API) -----------------------
@@ -626,7 +627,7 @@ export function buildRoutes(services: AppServices): App {
 
   async function composerModes(c: Context): Promise<string[]> {
     const providerId = p(c).config.default_provider ?? 'runninghub';
-    const caps = await services.providers.capabilities(providerId);
+    const caps = await services.providers.accountCapabilities(providerId);
     return caps?.supportedModes ?? [];
   }
 
@@ -801,7 +802,7 @@ export function buildRoutes(services: AppServices): App {
           preflight,
         }, 422);
       }
-      const runningHubProfile = intent.mode === 'vref2va' ? services.providers.getVideoReferenceProfile() : services.providers.getProfile();
+      const runningHubProfile = services.providers.getProfileForMode(intent.mode);
       const comfyProfile = services.providers.getComfyUiProfile();
       const profileRef = providerId === 'comfyui'
         ? { appId: `comfyui:${comfyProfile.clientId}`, checkedAt: comfyProfile.verification.checkedAt }
@@ -896,6 +897,11 @@ export function buildRoutes(services: AppServices): App {
     }, services.ffmpeg);
     services.bus.emit({ type: 'shot.updated', shotId: take.shotId, status: shotsMod.getShot(ctx, take.shotId).status });
     return c.json(take, 201);
+  });
+
+  app.post('/api/takes/:id/review-evidence', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    return c.json(await videoAnalysisMod.prepareTakeReview(p(c), services.ffmpeg, c.req.param('id'), body.force === true));
   });
 
   app.get('/api/takes/:id', (c) => c.json(takesMod.getTake(p(c), c.req.param('id'))));
@@ -1128,6 +1134,22 @@ export function buildRoutes(services: AppServices): App {
     const profile = services.providers.getProfile();
     return c.json(profile ? { ...profile, bindingSlots: enabledBindingSlots(profile) } : null);
   });
+  app.get('/api/providers/runninghub/frame-profile', (c) => c.json(services.providers.getFrameProfile()));
+  const activeFrameJobs = async () => (await services.queue.listAll()).some(job =>
+    ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(job.status)
+    && job.provider === 'runninghub' && ['i2va', 'l2va', 'fl2va'].includes(job.requestSnapshot?.mode ?? ''));
+  app.put('/api/providers/runninghub/frame-profile', async (c) => {
+    if (await activeFrameJobs()) return c.json({ error: 'Frame jobs are active; reconcile them before changing the frame profile' }, 409);
+    const profile = services.providers.saveFrameProfile(await c.req.json());
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(profile);
+  });
+  app.post('/api/providers/runninghub/frame-profile/verify', async (c) => {
+    if (await activeFrameJobs()) return c.json({ error: 'Frame jobs are active; wait before redetecting the frame mapping' }, 409);
+    const profile = await services.providers.detectFrameProfile();
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(profile);
+  });
   app.get('/api/providers/runninghub/video-reference-profile', (c) => c.json(services.providers.getVideoReferenceProfile()));
   app.post('/api/providers/runninghub/video-reference-profile/verify', async (c) => c.json(await services.providers.detectVideoReference()));
   app.put('/api/providers/runninghub/profile', async (c) => {
@@ -1298,7 +1320,7 @@ export function buildRoutes(services: AppServices): App {
       ? rawVision as { mode: 'multimodal' | 'text_fallback' | 'text_only'; imageCount: number }
       : null;
     try {
-      const outcome = await delegationMod.applyResult(services.ai, ctx, id, (body as { result: unknown }).result, vision);
+      const outcome = await delegationMod.applyResult(services.ai, ctx, id, (body as { result: unknown }).result, vision, body.persist === true);
       if (outcome.status === 'applied') {
         const action = delegationMod.getRequest(ctx, id)?.action ?? 'unknown';
         services.bus.emit({ type: 'ai.request.applied', requestId: id, action });

@@ -98,7 +98,13 @@ AGENTS.md を読んでください：https://github.com/gordonlu/h3mise/blob/mas
 
 ## クイックスタート
 
-Node.js ≥ 22（`node:sqlite` 同梱）と FFmpeg が必要です。
+### ワンクリック起動（推奨）
+
+npm を含む [Node.js 22.13 以降](https://nodejs.org/) をインストールし、全ファイルを展開します。Windows は **`start.bat`** をダブルクリック、macOS は **`start.command`**（必要なら実行権限を付与）、Linux は **`sh start.sh`**。依存関係と UI を自動準備し、ブラウザを開きます。使用中は起動ウィンドウを開いたままにし、Ctrl+C で停止します。pnpm のグローバル導入や `.env` の作成は不要です。Key 未設定時は入門画面が開き、無料 Mock サンプルとローカル設定へ進めます。FFmpeg / FFprobe は動画処理に必要ですが、閲覧と計画には不要です。[入門・トラブル解決](START_HERE.md) を参照してください。
+
+### 開発者向け手動起動
+
+Node.js ≥ 22.13（`node:sqlite` 同梱）と FFmpeg が必要です。
 
 ```bash
 pnpm install
@@ -114,7 +120,7 @@ pnpm start
 
 ### Windows（PowerShell）
 
-まず [Node.js 22+](https://nodejs.org/) をインストールし、PowerShell で pnpm と FFmpeg を用意します:
+まず [Node.js 22.13+](https://nodejs.org/) をインストールし、PowerShell で pnpm と FFmpeg を用意します:
 
 ```powershell
 corepack enable

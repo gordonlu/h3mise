@@ -5,9 +5,10 @@
 // Take selection remain explicit decisions in the H3Mise UI.
 
 import { createInterface } from 'node:readline';
+import { createApiClient } from './h3mise-api.mjs';
 
 const API_BASE = (process.env.H3MISE_API_URL ?? 'http://127.0.0.1:4789').replace(/\/$/, '');
-let sessionCookie = '';
+const api = createApiClient(API_BASE);
 
 const objectSchema = (properties = {}, required = []) => ({
   type: 'object',
@@ -19,6 +20,60 @@ const objectSchema = (properties = {}, required = []) => ({
 const stringProp = (description) => ({ type: 'string', description });
 
 const tools = [
+  {
+    name: 'configure_runninghub_frame_profile',
+    description: 'Configure the separate first/last-frame App without replacing the primary reference App. Mapping changes invalidate frame evidence; all frame and reference jobs share the same account concurrency.',
+    inputSchema: objectSchema({ appId: stringProp('Exact frame App ID.'), inputs: { type: 'object', additionalProperties: true } }, ['appId']),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'detect_runninghub_frame_nodes',
+    description: 'Discover the separate frame App nodes for free via apiCallDemo. Requires unambiguous first/last-frame ports. Never submits a render.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    name: 'prepare_take_review',
+    description: 'Prepare cached local review evidence for an existing Take: media probe, full decode check, scene/filmstrip analysis and a contact-sheet image path. Open the image/video and listen separately before review_take. Never approves, selects or renders. Creates derived cache files only.',
+    inputSchema: objectSchema({ takeId: stringProp('Existing exact Take ID.'), force: { type: 'boolean', description: 'Rebuild cached evidence. Default false.' } }, ['takeId']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'create_shot',
+    description: 'Create one planned Shot without inference or rendering. For story-wide materialization prefer materialize_story_shots to avoid duplicates.',
+    inputSchema: objectSchema({ title: stringProp('Shot title.'), durationSeconds: { type: 'integer', minimum: 1, maximum: 15 }, storyBeatId: { type: 'string' }, sequenceId: { type: 'string' }, purpose: { type: 'string' }, aspectRatio: { type: 'string' }, h3Mode: { type: 'string', enum: ['t2va', 'i2va', 'l2va', 'fl2va', 'ref2va'] } }, ['title']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'inspect_render_jobs',
+    description: 'Inspect persistent video render jobs (distinct from inspect_jobs background work). Returns provider task IDs, statuses, Take IDs and errors; snapshots are opt-in. Never submits or retries.',
+    inputSchema: objectSchema({ shotId: { type: 'string' }, jobId: { type: 'string' }, includeSnapshots: { type: 'boolean', description: 'Include full request/provider snapshots only for diagnosis. Default false keeps polling compact.' } }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'prepare_ai_action',
+    description: 'Prepare validated inference for your own model without calling project AI. Returns requestId, contextHash and exact inference, including reference images when applicable.',
+    inputSchema: objectSchema({ action: stringProp('Delegated action from AGENTS.md.'), body: { type: 'object', additionalProperties: true } }, ['action', 'body']),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'apply_ai_result',
+    description: 'Validate your prepared answer. Persist=true atomically saves a completed director plan or prompt as an immutable version and returns result.saved IDs; existing request replay is idempotent. Follow continue/stale responses. Never renders.',
+    inputSchema: objectSchema({ requestId: stringProp('Exact prepared request ID.'), result: {}, persist: { type: 'boolean' }, vision: objectSchema({ mode: { type: 'string', enum: ['multimodal', 'text_fallback', 'text_only'] }, imageCount: { type: 'integer', minimum: 0 } }, ['mode', 'imageCount']) }, ['requestId', 'result']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'agent_session',
+    description: 'Inspect, attach or detach the external inference agent. Attached UI AI actions wait for your model instead of calling project AI.',
+    inputSchema: objectSchema({ action: { type: 'string', enum: ['inspect', 'attach', 'detach'] }, model: { type: 'string' } }, ['action']),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'inspect_ai_requests',
+    description: 'List delegated requests or retrieve one pending inference step, without calling a model.',
+    inputSchema: objectSchema({ requestId: { type: 'string' }, status: { type: 'string', enum: ['pending', 'applied', 'failed', 'cancelled', 'stale'] } }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
   {
     name: 'h3mise_status',
     description: 'Check the local H3Mise server and return the currently open project.',
@@ -421,45 +476,39 @@ function requireString(args, key) {
   return value;
 }
 
-async function ensureSession() {
-  if (sessionCookie) return;
-  const response = await fetch(`${API_BASE}/api/session`);
-  if (!response.ok) throw new Error(`H3Mise session bootstrap failed: HTTP ${response.status}`);
-  const setCookie = response.headers.get('set-cookie') ?? '';
-  const match = setCookie.match(/h3mise_session=([^;]+)/);
-  if (!match) throw new Error('H3Mise did not return a session cookie');
-  sessionCookie = `h3mise_session=${match[1]}`;
-}
-
-async function api(method, path, body) {
-  await ensureSession();
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      Cookie: sessionCookie,
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  }).catch((error) => {
-    throw new Error(`Cannot reach H3Mise at ${API_BASE}: ${error.message}`);
-  });
-  const text = await response.text();
-  let data;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
-  if (!response.ok) {
-    if (response.status === 401) sessionCookie = '';
-    const message = data && typeof data === 'object' && 'error' in data ? data.error : `HTTP ${response.status}`;
-    throw new Error(`H3Mise ${method} ${path} failed: ${message}`);
-  }
-  return data;
-}
-
 async function callTool(name, args = {}) {
   switch (name) {
+    case 'configure_runninghub_frame_profile': return api('PUT', '/api/providers/runninghub/frame-profile', args);
+    case 'detect_runninghub_frame_nodes': return api('POST', '/api/providers/runninghub/frame-profile/verify', {});
+    case 'prepare_take_review': return api('POST', `/api/takes/${encodeURIComponent(requireString(args, 'takeId'))}/review-evidence`, { force: args.force === true });
+    case 'create_shot': return api('POST', '/api/shots', args);
+    case 'inspect_render_jobs': {
+      const result = await api('GET', args.jobId
+        ? `/api/render/${encodeURIComponent(args.jobId)}`
+        : `/api/render${args.shotId ? `?shotId=${encodeURIComponent(args.shotId)}` : ''}`);
+      const compact = (job) => {
+        if (!job || args.includeSnapshots === true) return job;
+        const { requestSnapshot, providerResponseSnapshot, ...summary } = job;
+        return summary;
+      };
+      return Array.isArray(result) ? result.map(compact) : compact(result);
+    }
+    case 'prepare_ai_action': return api('POST', `/api/ai/actions/${encodeURIComponent(requireString(args, 'action'))}/prepare`, args.body ?? {});
+    case 'apply_ai_result': {
+      if (!Object.hasOwn(args, 'result')) throw new Error('result is required');
+      return api('POST', `/api/ai/requests/${encodeURIComponent(requireString(args, 'requestId'))}/apply`, {
+        result: args.result, persist: args.persist === true, ...(args.vision ? { vision: args.vision } : {}),
+      });
+    }
+    case 'agent_session': {
+      if (args.action === 'inspect') return api('GET', '/api/ai/agent');
+      if (args.action === 'attach') return api('POST', '/api/ai/agent/session', { model: requireString(args, 'model') });
+      if (args.action === 'detach') return api('DELETE', '/api/ai/agent/session');
+      throw new Error('invalid agent session action');
+    }
+    case 'inspect_ai_requests': return api('GET', args.requestId
+      ? `/api/ai/requests/${encodeURIComponent(args.requestId)}/step`
+      : `/api/ai/requests${args.status ? `?status=${encodeURIComponent(args.status)}` : ''}`);
     case 'h3mise_status': {
       const [health, currentProject] = await Promise.all([
         api('GET', '/api/health'),
@@ -565,12 +614,13 @@ async function callTool(name, args = {}) {
     }
     case 'inspect_jobs': return api('GET', '/api/jobs');
     case 'get_runninghub_config': {
-      const [apiKey, videoProfile, storyboardProfile] = await Promise.all([
+      const [apiKey, videoProfile, storyboardProfile, frameProfile] = await Promise.all([
         api('GET', '/api/providers/runninghub/apikey'),
         api('GET', '/api/providers/runninghub/profile'),
         api('GET', '/api/providers/runninghub/storyboard-profile'),
+        api('GET', '/api/providers/runninghub/frame-profile'),
       ]);
-      return { apiKey, videoProfile, storyboardProfile };
+      return { apiKey, videoProfile, storyboardProfile, frameProfile };
     }
     case 'set_runninghub_region': {
       if (args.region !== 'cn' && args.region !== 'global') throw new Error('region must be cn or global');

@@ -4,6 +4,9 @@ import type { VideoAnalysis } from '@h3mise/shared';
 import type { Ffmpeg } from '../ffmpeg.js';
 import type { ProjectContext } from '../project-store.js';
 import { getTake } from './takes.js';
+import { createKeyedMutex } from './mutex.js';
+
+const analysisMutex = createKeyedMutex();
 
 interface CachedManifest extends VideoAnalysis {
   cacheVersion: number;
@@ -39,7 +42,7 @@ function suitability(input: { duration: number; width: number | null; height: nu
   return { level, reasons };
 }
 
-export async function analyzeTakeVideo(p: ProjectContext, ffmpeg: Ffmpeg, takeId: string, force = false): Promise<VideoAnalysis> {
+async function analyzeTakeVideoUnlocked(p: ProjectContext, ffmpeg: Ffmpeg, takeId: string, force = false): Promise<VideoAnalysis> {
   const take = getTake(p, takeId);
   const source = p.resolveProjectPath(take.localVideoPath);
   const sourceStat = await stat(source);
@@ -80,4 +83,46 @@ export async function analyzeTakeVideo(p: ProjectContext, ffmpeg: Ffmpeg, takeId
   const manifest: CachedManifest = { ...analysis, cacheVersion: CACHE_VERSION, sourceSize: sourceStat.size, sourceMtimeMs: sourceStat.mtimeMs };
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
   return analysis;
+}
+
+export async function analyzeTakeVideo(p: ProjectContext, ffmpeg: Ffmpeg, takeId: string, force = false): Promise<VideoAnalysis> {
+  return analysisMutex(`${p.root}:${takeId}`, () => analyzeTakeVideoUnlocked(p, ffmpeg, takeId, force));
+}
+
+/** Local mechanical evidence for an agent; never judges, selects or renders a Take.
+ * Inspired by ffmpeg-skill's probe/edit/check/look separation. No upstream code or runtime dependency.
+ */
+export async function prepareTakeReview(p: ProjectContext, ffmpeg: Ffmpeg, takeId: string, force = false) {
+  return analysisMutex(`${p.root}:${takeId}`, async () => {
+    const take = getTake(p, takeId);
+    const analysis = await analyzeTakeVideoUnlocked(p, ffmpeg, takeId, force);
+    const cacheDir = join(p.paths.cache, 'video-analysis', take.id);
+    const sheet = join(cacheDir, 'contact-sheet.jpg');
+    const receipt = join(cacheDir, 'review-evidence.json');
+    if (!force) {
+      try {
+        const cached = JSON.parse(await readFile(receipt, 'utf8'));
+        if (cached.version === 1 && cached.analysisGeneratedAt === analysis.generatedAt) {
+          await stat(sheet);
+          return { ...cached.evidence, cached: true };
+        }
+      } catch { /* Missing evidence is rebuilt, never reported as checked. */ }
+    }
+    const source = p.resolveProjectPath(take.localVideoPath);
+    const probe = await ffmpeg.probe(source);
+    if (!probe.width || !probe.height) throw new Error('Take has no video stream');
+    // Keep the decode check explicit; a contact sheet is sampled evidence only.
+    await ffmpeg.verifyDecode(source);
+    await ffmpeg.contactSheet(source, sheet, analysis.durationSeconds);
+    const evidence = {
+      takeId: take.id, shotId: take.shotId, probe, analysis,
+      technical: { decode: 'passed' as const },
+      contactSheet: { absolutePath: sheet, relativePath: portableRel(p, sheet) },
+      visualInspectionRequired: true, audioListeningRequired: probe.hasAudio,
+      instruction: 'Open the contact sheet and source video to judge picture/identity/motion. Listen separately to judge audio. A decode pass does not approve content. Record judgments with review_take.',
+      generatedAt: new Date().toISOString(),
+    };
+    await writeFile(receipt, JSON.stringify({ version: 1, analysisGeneratedAt: analysis.generatedAt, evidence }, null, 2), 'utf8');
+    return { ...evidence, cached: false };
+  });
 }

@@ -415,6 +415,21 @@ export class Ffmpeg {
     }));
   }
 
+  /** Decode every video/audio packet; metadata alone cannot establish decodability. */
+  async verifyDecode(input: string): Promise<void> {
+    await run('ffmpeg', ['-hide_banner', '-v', 'error', '-nostdin', '-xerror', '-i', input,
+      '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-'], input);
+  }
+
+  /** Eight evenly sampled pictures, letterboxed so the whole source frame remains visible. */
+  async contactSheet(input: string, outPath: string, durationSeconds: number): Promise<void> {
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) throw new Error('contact sheet duration must be positive');
+    await mkdir(dirname(outPath), { recursive: true });
+    await run('ffmpeg', ['-y', '-hide_banner', '-v', 'error', '-nostdin', '-i', input,
+      '-vf', `fps=${(8 / durationSeconds).toFixed(8)},scale=480:270:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2,tile=4x2`,
+      '-frames:v', '1', outPath], input);
+  }
+
   /** Trim input to [start, end] into outPath (mp4, h264+aac). */
   async trim(
     input: string,

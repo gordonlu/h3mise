@@ -11,11 +11,13 @@
     "dev": "pnpm --parallel --filter @h3mise/server --filter @h3mise/web dev",
     "dev:server": "pnpm --filter @h3mise/server dev",
     "dev:web": "pnpm --filter @h3mise/web dev",
+    "launch": "node scripts/launch.mjs",
     "mcp": "node tools/h3mise-mcp.mjs",
     "build": "pnpm -r build",
     "start": "pnpm --filter @h3mise/server start",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @h3mise/server test",
+    "test": "node --test scripts/launch.test.mjs && pnpm --filter @h3mise/server test",
+    "test:agent": "node --test scripts/h3mise-api.test.mjs scripts/h3mise-mcp.test.mjs && node --import ./server/node_modules/tsx/dist/loader.mjs --test web/test/studio-performance.test.ts",
     "test:smoke": "node scripts/smoke-production.mjs"
   }
 }

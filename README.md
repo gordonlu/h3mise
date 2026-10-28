@@ -99,7 +99,15 @@ H3Mise 管理的正是这一层：
 
 ## 快速开始
 
-需要 Node.js ≥ 22（含 `node:sqlite`）与 FFmpeg。
+### 一键启动（推荐新用户）
+
+安装 [Node.js 22.13 或更新版本](https://nodejs.org/)（保留 npm 默认选项），下载并解压完整项目：Windows 双击 **`start.bat`**，macOS 打开 **`start.command`**，Linux 运行 **`sh start.sh`**。首次自动安装依赖、构建界面并打开浏览器，后续自动检查更新过的文件；无需手工安装 pnpm 或复制 `.env`。
+
+没有 Key 会打开新手引导，可先用 Mock 示例免费体验，或前往本机设置页填写 RunningHub Key。使用期间保持启动窗口打开，按 Ctrl+C 停止。FFmpeg / FFprobe 缺失时仍可浏览与规划，视频处理前再安装。完整步骤与排错见 **[第一次使用](START_HERE.md)**。
+
+### 开发者手动启动
+
+需要 Node.js ≥ 22.13（含 `node:sqlite`）与 FFmpeg。
 
 ```bash
 pnpm install
@@ -115,7 +123,7 @@ pnpm start
 
 ### Windows（PowerShell）
 
-先安装 [Node.js 22+](https://nodejs.org/)；然后在 PowerShell 中安装 pnpm 和 FFmpeg：
+先安装 [Node.js 22.13+](https://nodejs.org/)；然后在 PowerShell 中安装 pnpm 和 FFmpeg：
 
 ```powershell
 corepack enable

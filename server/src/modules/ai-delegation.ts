@@ -15,6 +15,9 @@ import { extractJsonValue } from './ai.js';
 import { advanceAction, decorateResult, prepareAction, stepHasImages, type AdvanceState, type InferenceStep } from './ai-actions.js';
 import { createKeyedMutex } from './mutex.js';
 import { nextId } from '../db/ids.js';
+import { createPlanVersion, latestPlan } from './director.js';
+import { createPrompt, getPrompt, listPrompts } from './prompt.js';
+import type { DirectorPlan } from '@h3mise/shared';
 
 const MAX_STATE_BYTES = 2_000_000;
 const AGENT_TTL_MS = 10 * 60_000;
@@ -240,6 +243,7 @@ export async function applyResult(
   id: string,
   result: unknown,
   vision: VisionStatus | null,
+  persist = false,
 ): Promise<ApplyOutcome> {
   return mutex(`ai-request:${id}`, async () => {
     touchAgent(null);
@@ -292,12 +296,37 @@ export async function applyResult(
     }
 
     if (outcome.done) {
-      const decorated = decorateResult(row.action, outcome.result, state.vision);
-      const ts = now();
-      ctx.db.run('UPDATE ai_requests SET status = ?, result_json = ?, state_json = ?, updated_at = ?, completed_at = ? WHERE id = ?', [
-        'applied', JSON.stringify(decorated ?? null), JSON.stringify(state), ts, ts, id,
-      ]);
-      return { status: 'applied', result: decorated, vision: state.vision };
+      // Commit the immutable version and applied receipt in the same transaction.
+      // UI callers retain their existing preview-only behavior unless they opt in.
+      return ctx.db.tx(() => {
+        let decorated = decorateResult(row.action, outcome.result, state.vision);
+        if (persist && decorated && typeof decorated === 'object') {
+          const value = decorated as { kind?: string; plan?: DirectorPlan; text?: string };
+          if (value.kind === 'director_plan' && value.plan) {
+            const version = createPlanVersion(ctx, { shotId: String(body.shotId), plan: value.plan, source: 'external_ai' });
+            decorated = { ...value, saved: { directorPlanVersionId: version.id } };
+          } else if (value.kind === 'prompt' && typeof value.text === 'string') {
+            const source = row.action === 'repair_prompt'
+              ? getPrompt(ctx, String(body.promptId))
+              : listPrompts(ctx, String(body.shotId)).at(-1);
+            if (!source) throw new Error('source prompt not found');
+            if (!value.text.trim()) throw new Error('prompt must not be empty');
+            const version = createPrompt(ctx, {
+              shotId: source.shotId, text: value.text, h3Mode: source.h3Mode, source: 'ai_compiler',
+              directorPlanVersionId: row.action === 'repair_prompt'
+                ? source.directorPlanVersionId : latestPlan(ctx, source.shotId)?.id ?? null,
+              sourceTakeId: source.sourceTakeId, revisionReason: source.revisionReason,
+              preservedAspects: source.preservedAspects,
+            });
+            decorated = { ...value, saved: { promptVersionId: version.id } };
+          }
+        }
+        const ts = now();
+        ctx.db.run('UPDATE ai_requests SET status = ?, result_json = ?, state_json = ?, updated_at = ?, completed_at = ? WHERE id = ?', [
+          'applied', JSON.stringify(decorated ?? null), JSON.stringify(state), ts, ts, id,
+        ]);
+        return { status: 'applied' as const, result: decorated, vision: state.vision };
+      });
     }
 
     state.pendingJson = outcome.step.json;

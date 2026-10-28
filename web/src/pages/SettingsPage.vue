@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
 import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, ProjectConfig, RunningHubRegion, StoryboardProviderProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
+const route = useRoute();
 const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; comfyUiConfigured: boolean; aiConfigured: boolean } | null>(null);
 const healthError = ref('');
 const profile = ref<AiAppProfile | null>(null);
@@ -342,11 +344,17 @@ async function verifyStoryboardProfile() {
 function scrollToSetting(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+// Sections are mounted synchronously; wait for rendering before following guide links.
+watch(() => route.hash, async (hash) => {
+  await nextTick();
+  if (hash.startsWith('#set-')) scrollToSetting(hash.slice(1));
+}, { immediate: true });
 </script>
 
 <template>
   <div class="page">
     <h1>{{ t('pages.settings.title') }}</h1>
+    <p><RouterLink to="/welcome">{{ t('welcome.guide') }}</RouterLink></p>
 
     <div class="settings-layout">
       <nav class="settings-nav" :aria-label="t('pages.settings.title')">
@@ -403,6 +411,9 @@ function scrollToSetting(id: string): void {
       <div id="set-runninghub" class="panel">
         <div class="panel-title">{{ t('pages.settings.runningHubProvider') }}</div>
         <div class="panel-body col">
+          <p v-if="apiKeyInfo && !apiKeyInfo.configured" class="muted">
+            {{ t('welcome.missingKeyHelp') }} <RouterLink to="/welcome">{{ t('welcome.guide') }}</RouterLink>
+          </p>
           <div class="row">
             <span class="badge" :class="health === null || apiKeyInfo === null ? 'muted' : apiKeyInfo?.configured ? 'ok' : 'warn'">
               <template v-if="health === null || apiKeyInfo === null">{{ t('pages.settings.apiKeyChecking') }}</template>

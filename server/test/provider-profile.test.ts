@@ -232,3 +232,36 @@ test('Ref2VA compiler keeps each identity distinct and removes plan contradictio
   assert.match(prompt, /Objective: Miles从洗碗转向关注水槽泡沫/);
   assert.doesNotMatch(prompt, /Objective: Miles完成洗碗/);
 });
+
+
+test('node discovery retains all nine image references with abbreviated Chinese labels', () => {
+  const nodes = [
+    node('4', 'prompt', 'Prompt'),
+    node('1', 'image', '首帧（可选）'),
+    node('20', 'image', '尾帧（可选）'),
+    ...Array.from({ length: 9 }, (_, i) => node(String(21 + i), 'image', i < 2 ? `参考图${i + 1}（可选）` : `参考${i + 1}（可选）`)),
+    ...Array.from({ length: 3 }, (_, i) => node(String(33 + i), 'audio', `参考audio${i + 1}（可选）`)),
+  ];
+  const inputs = mapDiscoveredNodes(nodes);
+  assert.deepEqual(inputs.refImages.map(s => s.nodeId), ['21', '22', '23', '24', '25', '26', '27', '28', '29']);
+  assert.deepEqual(inputs.refAudios.map(s => s.nodeId), ['33', '34', '35']);
+  assert.deepEqual(inputs.firstFrame, { nodeId: '1', fieldName: 'image' });
+  assert.deepEqual(inputs.lastFrame, { nodeId: '20', fieldName: 'image' });
+  assert.deepEqual(inferSupportedModes(inputs, nodes), ['t2va', 'i2va', 'l2va', 'fl2va', 'ref2va']);
+});
+
+test('generic typed multimodal ports retain nine images and three audios with optional video', () => {
+  const nodes = [node('250', 'prompt', 'Prompt'),
+    ...Array.from({ length: 9 }, (_, i) => ({ ...node(String(231 + i), 'image', 'image'), nodeName: 'LoadImage', fieldType: 'IMAGE' })),
+    ...Array.from({ length: 3 }, (_, i) => ({ ...node(String(247 + i), 'audio', 'audio'), nodeName: 'LoadAudio', fieldType: 'AUDIO' })),
+    { ...node('251', 'file', '参考视频'), nodeName: 'LoadVideo', fieldType: 'VIDEO', fieldData: '["COMBO", {"options": ["None"], "video_upload": true}]' },
+  ];
+  const inputs = mapDiscoveredNodes(nodes);
+  assert.deepEqual(inputs.refImages.map(slot => slot.nodeId), Array.from({ length: 9 }, (_, i) => String(231 + i)));
+  assert.deepEqual(inputs.refAudios.map(slot => slot.nodeId), ['247', '248', '249']);
+  assert.equal(inputs.firstFrame?.nodeId, '');
+  assert.equal(inputs.lastFrame?.nodeId, '');
+  assert.deepEqual(inferSupportedModes(inputs, nodes), ['t2va', 'ref2va', 'vref2va']);
+  const dedicated = mapDiscoveredNodes([nodes[0]!, nodes.at(-1)!]);
+  assert.deepEqual(inferSupportedModes(dedicated, nodes), ['vref2va']);
+});

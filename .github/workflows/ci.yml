@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Check out repository
@@ -50,6 +50,16 @@ jobs:
             choco install ffmpeg --yes --no-progress
           }
           ffmpeg -version
+
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Check POSIX launcher syntax
+        if: runner.os != 'Windows'
+        run: |
+          sh -n start.sh
+          sh -n start.command
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

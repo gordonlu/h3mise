@@ -29,7 +29,8 @@ const activity = useActivityStore();
 const health = ref<{ ffmpeg: { available: boolean } } | null>(null);
 const paletteOpen = ref(false);
 const isStudio = computed(() => route.path.startsWith('/studio'));
-const shellColumns = computed(() => (isStudio.value ? '76px minmax(0, 1fr)' : '276px minmax(0, 1fr)'));
+const compactShell = computed(() => isStudio.value || route.path === '/welcome');
+const shellColumns = computed(() => (compactShell.value ? '76px minmax(0, 1fr)' : '276px minmax(0, 1fr)'));
 const projectGuide = ref<ProjectGuideSummary | null>(null);
 let off: (() => void) | null = null;
 let aiTimer: number | undefined;
@@ -151,7 +152,7 @@ watch(() => route.path, () => {
       :guide="projectGuide"
       :ffmpeg-available="health?.ffmpeg.available ?? null"
       :on-switch="switchProject"
-      :collapsed="isStudio"
+      :collapsed="compactShell"
       @palette="paletteOpen = true"
     />
 
@@ -175,4 +176,7 @@ watch(() => route.path, () => {
 .shell { position: relative; z-index: 1; display: grid; grid-template-columns: 276px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; overflow: hidden; }
 .main { min-width: 0; min-height: 0; overflow: auto; }
 .main :deep(.page) { width: 100%; max-width: 1440px; margin: 0 auto; padding: 28px 36px 56px; }
+@media (max-width: 900px) {
+  .main :deep(.welcome-page) { padding: 24px 16px 40px; }
+}
 </style>

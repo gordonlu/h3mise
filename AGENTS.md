@@ -65,6 +65,13 @@ RunningHub AI Apps are not assumed to share fixed node IDs or field names. Treat
 
 If detection fails or the workflow cannot express a requested H3 mode, keep that mode disabled and fall back to Mock or a supported mode. Do not bypass capability checks.
 
+## Separate frame App
+
+- Keep a frame-only App in `/api/providers/runninghub/frame-profile`; configure then POST its `/verify` endpoint, or use `configure_runninghub_frame_profile` and `detect_runninghub_frame_nodes`. Never register a different-node App as merely an alias in the primary App list.
+- I2VA/L2VA/FL2VA use the configured frame App; Ref2VA/T2VA retain the primary App. Both use the same account key and shared concurrency ceiling.
+- Detection stores separate frame evidence. Preflight, request snapshots, queue submission and verification all resolve by mode. No configured frame App preserves legacy primary behavior; an unverified configured frame App blocks frame renders.
+- Frame mappings cannot change while frame jobs are active. Changing account region invalidates frame evidence. Do not claim successful node detection is an actual render.
+
 ## Use optional Storyboards safely
 
 - Do not tell a user that Storyboard generation is required. They can continue directly from Story to Shotboard without spending anything.
@@ -110,6 +117,14 @@ First call `GET /api/session` and keep the returned `h3mise_session` cookie for 
    - `status: "continue"` — the answer failed validation; run the returned `inference` step and apply again (repair / retry round).
    - `409 code: "stale"` — the project changed after prepare; prepare again instead of retrying.
    - `422 code: "invalid_json"` / `"invalid_output"` — fix the format; do not resend the same payload.
+
+Agent MCP shortcuts:
+
+- Use `agent_session` to attach your model, `prepare_ai_action` for the inference payload, and `apply_ai_result` with `persist: true` on the completing answer to save validated plans/prompts atomically. Read `result.saved.directorPlanVersionId` or `result.saved.promptVersionId`; never guess IDs or issue an extra save. Repeat the same request ID to recover the same receipt, without creating another version. Default `persist: false` preserves UI draft behavior; it cannot retroactively persist a completed preview request.
+- Use `inspect_ai_requests` for pending work and its next inference step.
+- Use `prepare_take_review` for local media probe, full decode verification, cached filmstrip/scene analysis and a contact sheet. Open `contactSheet.absolutePath`, then inspect the video and listen separately. These are mechanical checks, not creative approval; record picture/audio judgments with `review_take`. No arbitrary file path, shell command, model download or paid provider call is accepted by this tool.
+- Use `inspect_render_jobs` for persistent video jobs and provider task IDs. `inspect_jobs` lists local background work only and cannot establish whether a video render is active.
+- The MCP transport renews a rejected session once (HTTP 401). Network failures, timeouts, provider errors and ambiguous submissions are never automatically retried.
 
 Presence and UI-deferred work:
 

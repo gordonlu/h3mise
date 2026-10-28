@@ -4,6 +4,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/studio' },
+    { path: '/welcome', name: 'welcome', component: () => import('./pages/WelcomePage.vue') },
     { path: '/projects', name: 'projects', component: () => import('./pages/ProjectsPage.vue') },
     { path: '/quick', name: 'quick', component: () => import('./pages/QuickEditPage.vue') },
     { path: '/production', name: 'production', component: () => import('./pages/ProductionPage.vue') },

@@ -138,8 +138,11 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
   const frameIds = new Set([first?.nodeId, last?.nodeId].filter(Boolean));
   const collect = (pred: (n: AiAppProfile['nodes'][number]) => boolean) =>
     nodes.filter((n) => !frameIds.has(n.nodeId)).filter(pred).map((n) => ({ nodeId: n.nodeId, fieldName: n.fieldName }));
-  const isAudioRef = has(/ref.?audio|audio_?\d|参考音频/i);
-  const isImageRef = (n: AiAppProfile['nodes'][number]) => has(/ref.?image|image_?\d|参考图/i)(n) && !isAudioRef(n);
+  const isAudioRef = (n: AiAppProfile['nodes'][number]) =>
+    has(/ref.?audio|audio_?\d|参考音频/i)(n) || /^audio$/i.test(n.fieldType) || /audio_upload/i.test(n.fieldData ?? '');
+  const isImageRef = (n: AiAppProfile['nodes'][number]) =>
+    !isAudioRef(n) && (has(/ref.?image|image_?\d|参考图|参考(?:图片)?\s*\d/i)(n)
+      || /^image$/i.test(n.fieldType) || /image_upload/i.test(n.fieldData ?? ''));
   return {
     prompt: pick(has(/prompt|text|描述|提示词/i), inputs.prompt),
     mode: pick(has(/mode|模式/i), inputs.mode),
@@ -169,7 +172,14 @@ export function inferSupportedModes(inputs: AiAppProfile['inputs'], _nodes: AiAp
   const modes: H3Mode[] = [];
   const hasSlot = (slot: { nodeId: string; fieldName: string } | undefined) => Boolean(slot && slot.nodeId !== '');
   const hasArray = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.length > 0 && slots.every((s) => s.nodeId !== '');
-  if (hasArray(inputs.refVideos ?? [])) return hasSlot(inputs.prompt) ? ['vref2va'] : [];
+  const videoSlots = inputs.refVideos ?? [];
+  const hasVideo = hasArray(videoSlots);
+  // An optional video port on a multimodal image/audio App does not make
+  // video mandatory. Keep dedicated video-reference Apps conservative.
+  const optionalMultimodalVideo = hasArray(inputs.refImages) && hasArray(inputs.refAudios)
+    && videoSlots.every(slot => _nodes.some(node => node.nodeId === slot.nodeId
+      && node.fieldName === slot.fieldName && /["']None["']/i.test(node.fieldData ?? '')));
+  if (hasVideo && !optionalMultimodalVideo) return hasSlot(inputs.prompt) ? ['vref2va'] : [];
   if (hasSlot(inputs.prompt)) modes.push('t2va');
   if (hasSlot(inputs.firstFrame)) modes.push('i2va');
   if (hasSlot(inputs.lastFrame)) modes.push('l2va');
@@ -177,6 +187,7 @@ export function inferSupportedModes(inputs: AiAppProfile['inputs'], _nodes: AiAp
   if (hasArray(inputs.refImages)) {
     modes.push('ref2va');
   }
+  if (hasVideo && hasSlot(inputs.prompt)) modes.push('vref2va');
   return modes;
 }
 
@@ -282,6 +293,7 @@ export class ProviderRegistry {
   }
 
   get(id: string, mode?: H3Mode): VideoProvider | undefined {
+    if (id === 'runninghub' && this.isFrameMode(mode) && this.getFrameProfile()) return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: this.getFrameProfile()! });
     if (id === 'runninghub' && mode === 'vref2va') return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: this.getVideoReferenceProfile() });
     return this.providers.get(id);
   }
@@ -314,6 +326,10 @@ export class ProviderRegistry {
   }
 
   async capabilities(id: string, mode?: H3Mode): Promise<ProviderCapabilities | undefined> {
+    if (id === 'runninghub' && this.isFrameMode(mode) && this.getFrameProfile()) {
+      const profile = this.getFrameProfile()!;
+      return ['nodes_detected', 'verified'].includes(profile.verification.status) ? profile.capabilities : { supportedModes: [] };
+    }
     if (id === 'runninghub' && mode === 'vref2va') {
       const profile = this.getVideoReferenceProfile();
       return ['nodes_detected', 'verified'].includes(profile.verification.status) ? profile.capabilities : { supportedModes: [] };
@@ -343,13 +359,24 @@ export class ProviderRegistry {
     return caps;
   }
 
+  /** Modes the whole RunningHub account can execute, including a separate
+   * frame App. Render/preflight still resolve per mode through get()/
+   * capabilities(id, mode); this union only describes what the UI may offer. */
+  async accountCapabilities(id: string): Promise<ProviderCapabilities | undefined> {
+    const caps = await this.capabilities(id);
+    if (id !== 'runninghub' || !this.getFrameProfile()) return caps;
+    const frame = await this.capabilities(id, 'i2va');
+    const modes = [...new Set([...(caps?.supportedModes ?? []), ...(frame?.supportedModes ?? [])])];
+    return { ...(caps ?? { supportedModes: [] }), supportedModes: modes };
+  }
+
   async statuses(): Promise<ProviderStatus[]> {
-    // Auto-detect in the background when we have a key but no node data yet —
+    // Auto-detect in the background when we have a key but no node data yet �?
     // never blocks the response (the probe can take up to 30s).
     void this.maybeAutoDetect();
     const out: ProviderStatus[] = [];
     for (const [id, prov] of this.providers) {
-      const caps = await this.capabilities(id);
+      const caps = await this.accountCapabilities(id);
       const isRh = prov instanceof RunningHubAiAppProvider;
       const isComfy = prov instanceof ComfyUiProvider;
       const profile = isRh ? this.getProfile() : isComfy ? this.getComfyUiProfile() : null;
@@ -393,6 +420,79 @@ export class ProviderRegistry {
   getProfile(): AiAppProfile | null {
     const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub'");
     return this.sanitizeProfile(row ? jget<unknown>(row.profile_json, defaultAiAppProfile()) : defaultAiAppProfile());
+  }
+
+  private isFrameMode(mode?: H3Mode): boolean {
+    return mode === 'i2va' || mode === 'l2va' || mode === 'fl2va';
+  }
+
+  /** Separate node evidence for the frame App; never borrow the primary App mapping. */
+  getFrameProfile(): AiAppProfile | null {
+    const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub_frames'");
+    if (!row) return null;
+    const profile = this.sanitizeProfile(jget(row.profile_json, {}));
+    const primary = this.getProfile();
+    if (profile.region !== primary?.region) return { ...profile, nodes: [], verification: { status: 'unconfigured', checkedAt: null, note: 'Account region changed; configure and detect the frame App for this region' } };
+    return profile;
+  }
+
+  getProfileForMode(mode?: H3Mode): AiAppProfile | null {
+    if (mode === 'vref2va') return this.getVideoReferenceProfile();
+    if (this.isFrameMode(mode)) return this.getFrameProfile() ?? this.getProfile();
+    return this.getProfile();
+  }
+
+  private persistFrameProfile(profile: AiAppProfile): AiAppProfile {
+    this.getRegistryDb().run('INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at', ['runninghub_frames', j(profile), new Date().toISOString()]);
+    this.refresh();
+    return profile;
+  }
+
+  saveFrameProfile(raw: unknown): AiAppProfile {
+    const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const primary = this.getProfile()!;
+    const previous = this.getFrameProfile();
+    const appId = typeof input.appId === 'string' ? input.appId.trim() : previous?.appId;
+    if (!appId) throw new Error('Frame App ID required');
+    const base = previous ?? { ...defaultAiAppProfile(primary.region), inputs: mapDiscoveredNodes([]), capabilities: { supportedModes: [] } };
+    const profile = this.sanitizeProfile({ ...base, appId, region: primary.region,
+      concurrency: primary.concurrency, apps: [],
+      ...(input.inputs ? { inputs: { ...base.inputs, ...(input.inputs as object) } } : {}),
+    });
+    if (!previous || profile.region !== previous.region || profile.appId !== previous.appId || JSON.stringify(profile.inputs) !== JSON.stringify(previous.inputs)) {
+      profile.nodes = [];
+      profile.capabilities = { supportedModes: [] };
+      profile.verification = { status: 'unconfigured', checkedAt: null, note: 'Frame App changed; detect its own node mapping' };
+    }
+    return this.persistFrameProfile(profile);
+  }
+
+  async detectFrameProfile(): Promise<AiAppProfile> {
+    const profile = this.getFrameProfile();
+    if (!profile) throw new Error('Configure a frame App first');
+    try {
+      const provider = new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile });
+      const nodes = await provider.discoverNodes();
+      const inputs = mapDiscoveredNodes(nodes);
+      const modes = inferSupportedModes(inputs, nodes).filter(mode => this.isFrameMode(mode));
+      if (!inputs.prompt.nodeId || !modes.length) throw new Error('No unambiguous first/last-frame ports found; inspect the App example before mapping');
+      return this.persistFrameProfile({ ...profile, nodes, inputs,
+        capabilities: { ...profile.capabilities, supportedModes: modes,
+          maxImageRefs: Number(Boolean(inputs.firstFrame?.nodeId)) + Number(Boolean(inputs.lastFrame?.nodeId)),
+          maxAudioRefs: 0, maxVideoRefs: 0,
+          maxTotalRefs: Number(Boolean(inputs.firstFrame?.nodeId)) + Number(Boolean(inputs.lastFrame?.nodeId)),
+        }, verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: 'Frame node mapping detected; no paid render yet' },
+      });
+    } catch (error) {
+      return this.persistFrameProfile({ ...profile, capabilities: { supportedModes: [] },
+        verification: { status: 'failed', checkedAt: new Date().toISOString(), note: error instanceof Error ? error.message : String(error) } });
+    }
+  }
+
+  confirmFrameVerified(appId: string): void {
+    const profile = this.getFrameProfile();
+    if (!profile || profile.appId !== appId) return;
+    this.persistFrameProfile({ ...profile, verification: { status: 'verified', checkedAt: new Date().toISOString(), note: 'A real frame-mode submission returned a task ID' } });
   }
 
   getVideoReferenceProfile(): AiAppProfile {
@@ -552,11 +652,19 @@ export class ProviderRegistry {
       const failed = { ...current, verification: { status: 'failed' as const, checkedAt: new Date().toISOString(), note } };
       return this.persistProfile(this.sanitizeProfile(failed));
     }
+    const mapped = mapDiscoveredNodes(nodes);
     const updated: AiAppProfile = {
       ...current,
       nodes,
-      inputs: mapDiscoveredNodes(nodes),
-      capabilities: { ...current.capabilities, supportedModes: inferSupportedModes(mapDiscoveredNodes(nodes), nodes) },
+      inputs: mapped,
+      capabilities: { ...current.capabilities, supportedModes: inferSupportedModes(mapped, nodes),
+        maxImageRefs: mapped.refImages.length || Number(Boolean(mapped.firstFrame?.nodeId)) + Number(Boolean(mapped.lastFrame?.nodeId)),
+        maxAudioRefs: mapped.refAudios.length,
+        maxVideoRefs: (mapped.refVideos ?? []).length,
+        maxTotalRefs: Math.max(mapped.refImages.length, Number(Boolean(mapped.firstFrame?.nodeId)) + Number(Boolean(mapped.lastFrame?.nodeId)))
+          + mapped.refAudios.length + (mapped.refVideos ?? []).length,
+        audioSupported: current.capabilities.audioSupported || mapped.refAudios.length > 0,
+      },
       verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
     };
     return this.persistProfile(this.sanitizeProfile(updated));

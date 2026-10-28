@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   VueFlow,
   useVueFlow,
@@ -341,16 +341,24 @@ async function applyInitialView(): Promise<void> {
   }
 }
 
+const canvasRoot = ref<HTMLElement | null>(null);
+let handleFrame: number | null = null;
+let disposed = false;
 function refreshHandleBounds(): void {
-  updateNodeInternals(store.flowNodes.map((node) => node.id));
+  // Offscreen nodes are virtualized; measuring all canonical nodes defeats it.
+  const ids = Array.from(canvasRoot.value?.querySelectorAll<HTMLElement>('.vue-flow__node[data-id]') ?? [])
+    .map((element) => element.dataset.id!).filter(Boolean);
+  if (ids.length) updateNodeInternals(ids);
 }
 
 /** Handle bounds are measured relative to the node at the current zoom and
  * also disappear when virtualized nodes unmount. Refresh after any viewport or
  * position change so edges never fall back to stale/0,0 coordinates. */
 function scheduleHandleRefresh(): void {
-  void nextTick().then(() => {
-    requestAnimationFrame(() => refreshHandleBounds());
+  if (disposed || handleFrame !== null) return;
+  handleFrame = requestAnimationFrame(() => {
+    handleFrame = null;
+    void nextTick().then(() => { if (!disposed) refreshHandleBounds(); });
   });
 }
 
@@ -382,7 +390,11 @@ onMounted(async () => {
   refreshHandleBounds();
   if (store.focusRequest) await applyFocus(store.focusRequest);
 });
-onUnmounted(() => window.removeEventListener('keydown', onKeydown));
+onUnmounted(() => {
+  disposed = true;
+  if (handleFrame !== null) cancelAnimationFrame(handleFrame);
+  window.removeEventListener('keydown', onKeydown);
+});
 
 function onViewport(viewportTransform: ViewportTransform): void {
   const base = store.layout?.view;
@@ -466,7 +478,7 @@ function onDrop(event: DragEvent): void {
 </script>
 
 <template>
-  <div class="hf-canvas-drop" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
+  <div ref="canvasRoot" class="hf-canvas-drop" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
     <VueFlow
     class="hf-vueflow"
     :nodes="canvasNodes"

@@ -5,8 +5,10 @@
 import { workflowManualTranslations, workflowTranslations } from './workflow';
 import { shotTranslations } from './shot';
 import { studioTranslations } from './studio';
+import { welcomeTranslations } from './welcome';
 
 export const zh = {
+  welcome: welcomeTranslations.zh,
   brand: { mark: 'H3', name: 'Mise' },
   nav: {
     story: '故事', shots: '镜头', assets: '资产', timeline: '时间线', projects: '项目', settings: '设置',
@@ -346,6 +348,7 @@ export const zh = {
 };
 
 export const en: typeof zh = {
+  welcome: welcomeTranslations.en,
   brand: { mark: 'H3', name: 'Mise' },
   nav: {
     story: 'Story', shots: 'Shots', assets: 'Assets', timeline: 'Timeline', projects: 'Projects', settings: 'Settings',
@@ -686,6 +689,7 @@ export const en: typeof zh = {
 
 export const ja: typeof zh = {
   ...zh,
+  welcome: welcomeTranslations.ja,
   nav: {
     story: 'ストーリー', shots: 'Shot', assets: 'アセット', timeline: 'タイムライン', projects: 'プロジェクト', settings: '設定',
     oneClick: 'ワンクリック制作', prepare: '制作準備', professional: 'プロ制作',

@@ -7,6 +7,8 @@ import { after, test } from 'node:test';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import { AIService } from '../src/modules/ai.js';
 import { applyResult, agentStatus, cancelRequest, countPending, detachAgent, getRequest, listRequests, prepareRequest, touchAgent } from '../src/modules/ai-delegation.js';
+import { createPlanVersion, latestPlan, listPlanVersions } from '../src/modules/director.js';
+import { createPrompt, importRawPrompt, listPrompts } from '../src/modules/prompt.js';
 import { createShot } from '../src/modules/shots.js';
 import { listBeats, updateStory } from '../src/modules/story.js';
 import { cleanupTempRoot, makeProject, makeStore, type ProjectContext } from './helpers.js';
@@ -248,4 +250,92 @@ test('pending requests can be cancelled; completed ones cannot', async () => {
   assert.equal(outcome.status, 'applied');
   assert.throws(() => cancelRequest(p, completed.requestId), (error: unknown) => (error as { code?: string }).code === 'not_pending');
   detachAgent();
+});
+
+test('persist saves a validated plan once with a replayable version receipt', async () => {
+  const p = await project('ai-deleg-persist-plan');
+  const ai = offlineAi();
+  const shot = createShot(p, { title: '中景', durationSeconds: 8 });
+  const prepared = await prepareRequest(ai, p, 'plan_shot', { shotId: shot.id }, 'external-agent');
+  const base = emptyDirectorPlan();
+  const plan = {
+    intent: { ...base.intent, visualThesis: '晨光', endState: '望向湖面' },
+    subject: { ...base.subject, action: '缓缓行走' },
+    camera: { ...base.camera, dominantBehavior: '固定机位' },
+  };
+  const outcome = await applyResult(ai, p, prepared.requestId, plan, null, true);
+  assert.equal(outcome.status, 'applied');
+  if (outcome.status !== 'applied') return;
+  const saved = outcome.result as { saved: { directorPlanVersionId: string } };
+  assert.equal(saved.saved.directorPlanVersionId, latestPlan(p, shot.id)?.id);
+  assert.equal(listPlanVersions(p, shot.id).length, 1);
+  const replay = await applyResult(ai, p, prepared.requestId, {}, null, true);
+  assert.deepEqual(replay, outcome);
+  assert.equal(listPlanVersions(p, shot.id).length, 1);
+});
+
+test('persisted prompt retains mode, plan linkage and idempotent receipt', async () => {
+  const p = await project('ai-deleg-persist-prompt');
+  const ai = offlineAi();
+  const shot = createShot(p, { title: '中景', durationSeconds: 8 });
+  importRawPrompt(p, shot.id, 'A singer walks by the lake.', 'ref2va');
+  const prepared = await prepareRequest(ai, p, 'compile_prompt', { shotId: shot.id }, null);
+  const outcome = await applyResult(ai, p, prepared.requestId, 'A singer walks slowly by the lake, medium shot.', null, true);
+  assert.equal(outcome.status, 'applied');
+  if (outcome.status !== 'applied') return;
+  const saved = outcome.result as { saved: { promptVersionId: string } };
+  assert.equal(saved.saved.promptVersionId, listPrompts(p, shot.id).at(-1)?.id);
+  assert.equal(listPrompts(p, shot.id).at(-1)?.h3Mode, 'ref2va');
+  assert.equal(listPrompts(p, shot.id).length, 2);
+  assert.deepEqual(await applyResult(ai, p, prepared.requestId, 'ignored', null, true), outcome);
+  assert.equal(listPrompts(p, shot.id).length, 2);
+});
+
+test('preview-only apply remains compatible and creates no plan version', async () => {
+  const p = await project('ai-deleg-preview');
+  const ai = offlineAi();
+  const shot = createShot(p, { title: '预览', durationSeconds: 5 });
+  const prepared = await prepareRequest(ai, p, 'plan_shot', { shotId: shot.id }, null);
+  const base = emptyDirectorPlan();
+  const outcome = await applyResult(ai, p, prepared.requestId, {
+    intent: { ...base.intent, visualThesis: '晨光', endState: '停步' },
+    subject: { ...base.subject, action: '行走' },
+    camera: { ...base.camera, dominantBehavior: '固定' },
+  }, null);
+  assert.equal(outcome.status, 'applied');
+  assert.equal(listPlanVersions(p, shot.id).length, 0);
+});
+
+test('plan version rolls back if its applied receipt cannot be written', async () => {
+  const p = await project('ai-deleg-rollback');
+  const ai = offlineAi();
+  const shot = createShot(p, { title: '原子保存', durationSeconds: 5 });
+  const prepared = await prepareRequest(ai, p, 'plan_shot', { shotId: shot.id }, null);
+  const base = emptyDirectorPlan();
+  const plan = { intent: { ...base.intent, visualThesis: '湖畔', endState: '停步' },
+    subject: { ...base.subject, action: '行走' }, camera: { ...base.camera, dominantBehavior: '固定' } };
+  p.db.run("CREATE TRIGGER reject_receipt BEFORE UPDATE ON ai_requests WHEN NEW.status = 'applied' BEGIN SELECT RAISE(ABORT, 'test receipt failure'); END");
+  await assert.rejects(applyResult(ai, p, prepared.requestId, plan, null, true), /test receipt failure/);
+  assert.equal(listPlanVersions(p, shot.id).length, 0);
+  assert.equal(getRequest(p, prepared.requestId)?.status, 'pending');
+  p.db.run('DROP TRIGGER reject_receipt');
+  assert.equal((await applyResult(ai, p, prepared.requestId, plan, null, true)).status, 'applied');
+  assert.equal(listPlanVersions(p, shot.id).length, 1);
+});
+
+test('prompt repair preserves the source plan and take revision provenance', async () => {
+  const p = await project('ai-deleg-repair-link');
+  const ai = offlineAi();
+  const shot = createShot(p, { title: '修复', durationSeconds: 5 });
+  const original = createPlanVersion(p, { shotId: shot.id, plan: emptyDirectorPlan(), source: 'external_ai' });
+  const source = createPrompt(p, { shotId: shot.id, text: 'Original prompt', h3Mode: 'i2va', source: 'manual',
+    directorPlanVersionId: original.id, revisionReason: 'Keep the medium framing', preservedAspects: ['wardrobe'] });
+  createPlanVersion(p, { shotId: shot.id, plan: emptyDirectorPlan(), source: 'external_ai' });
+  const prepared = await prepareRequest(ai, p, 'repair_prompt', { promptId: source.id, problems: 'Clarify motion' }, null);
+  assert.equal((await applyResult(ai, p, prepared.requestId, 'Repaired prompt', null, true)).status, 'applied');
+  const repaired = listPrompts(p, shot.id).at(-1)!;
+  assert.equal(repaired.directorPlanVersionId, original.id);
+  assert.equal(repaired.h3Mode, 'i2va');
+  assert.equal(repaired.revisionReason, source.revisionReason);
+  assert.deepEqual(repaired.preservedAspects, ['wardrobe']);
 });

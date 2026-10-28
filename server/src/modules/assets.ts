@@ -463,6 +463,22 @@ export function ensureShotEntityImageBindings(
     if (!item.id) continue;
     const entity = tryGetEntity(p, item.id);
     if (!entity) continue;
+    // An explicit shot image overrides this role's entity default. Otherwise
+    // a revised reference can silently be mixed with an obsolete master image.
+    const explicit = current.some((binding) => !binding.sourceEntityId
+      && binding.type === 'image' && binding.roles.includes(item.role)
+      && !binding.roles.includes('first_frame') && !binding.roles.includes('last_frame'));
+    if (explicit) {
+      for (const binding of current.filter((candidate) => candidate.sourceEntityId === entity.id)) {
+        deleteBinding(p, binding.id);
+      }
+      current = listBindings(p, shot.id);
+      genericAssetIds.clear();
+      for (const binding of current) {
+        if (!binding.roles.includes('first_frame') && !binding.roles.includes('last_frame')) genericAssetIds.add(binding.assetId);
+      }
+      continue;
+    }
     const managed = current.find((binding) => binding.sourceEntityId === entity.id);
     if (managed && managed.assetId !== entity.imageAssetId) {
       deleteBinding(p, managed.id);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { onUnmounted, ref, watch } from 'vue';
 
 const props = defineProps<{
   thumb: string | null;
@@ -33,6 +33,8 @@ function onLeave(): void {
   clearTimer();
   showVideo.value = false;
 }
+
+onUnmounted(clearTimer);
 
 watch(() => props.video, () => {
   clearTimer();

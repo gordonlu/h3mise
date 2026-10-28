@@ -365,7 +365,9 @@ export const useStudioStore = defineStore('studio', () => {
 
   function setView(view: CanvasViewState): void {
     if (!layout.value) return;
-    layout.value.view = view;
+    // Keep view identity stable: a pan changes only viewport, not layout,
+    // lane visibility or the edge/node computed projections.
+    Object.assign(layout.value.view, view);
   }
 
   function setEdgeVisibility(mode: CanvasViewState['edgeVisibility']): CanvasViewState | null {

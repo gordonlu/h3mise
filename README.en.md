@@ -99,7 +99,13 @@ The repo ships a ~40-second sitcom project, **Good Boy**: Olivia shows off Newto
 
 ## Quick start
 
-Requires Node.js ≥ 22 (with `node:sqlite`) and FFmpeg.
+### One-click launch (recommended)
+
+Install [Node.js 22.13+](https://nodejs.org/) with npm and extract the complete project. Windows: double-click **`start.bat`**; macOS: open **`start.command`** (restore execute permission if needed); Linux: run **`sh start.sh`**. Dependencies and the UI are prepared automatically and the browser opens when ready. Keep the launcher window open; Ctrl+C stops it. No global pnpm or `.env` setup is needed. Missing keys open a getting-started guide with free Mock examples and links to local Settings. FFmpeg / FFprobe are required for video processing, but not browsing and planning. See [Getting started and troubleshooting](START_HERE.md).
+
+### Manual developer setup
+
+Requires Node.js ≥ 22.13 (with `node:sqlite`) and FFmpeg.
 
 ```bash
 pnpm install
@@ -115,7 +121,7 @@ pnpm start
 
 ### Windows (PowerShell)
 
-Install [Node.js 22+](https://nodejs.org/) first, then set up pnpm and FFmpeg in PowerShell:
+Install [Node.js 22.13+](https://nodejs.org/) first, then set up pnpm and FFmpeg in PowerShell:
 
 ```powershell
 corepack enable

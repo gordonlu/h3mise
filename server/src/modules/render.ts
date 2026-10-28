@@ -694,7 +694,8 @@ export class RenderQueue {
         // mapping is executable 鈫?profile becomes 'verified'.
         if (job.provider !== 'mock') {
           try {
-            if (job.provider === 'runninghub' && job.requestSnapshot?.mode === 'vref2va') this.registry.confirmVideoReferenceVerified();
+            if (job.provider === 'runninghub' && ['i2va', 'l2va', 'fl2va'].includes(job.requestSnapshot?.mode ?? '') && this.registry.getFrameProfile()) this.registry.confirmFrameVerified(job.requestSnapshot!.aiAppId);
+            else if (job.provider === 'runninghub' && job.requestSnapshot?.mode === 'vref2va') this.registry.confirmVideoReferenceVerified();
             else this.registry.confirmProviderVerified(job.provider);
           } catch {
             /* profile persistence is best-effort here */

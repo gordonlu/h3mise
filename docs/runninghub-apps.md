@@ -42,6 +42,7 @@ node scripts/h3mise.mjs up --json     # 已在运行则不会重复 install/启�
   - 节点：prompt `310`；aspect_ratio/megapixels `308`；image `322`；video `359`。
   - 映射完成后支持 `faceswap` 模式：恰好一张人脸图 + 一个源视频，不接受参考音频，成片保留源音频；视频时长/大小上限可在该 workflow 的 `capabilities.maxVideoSeconds / maxVideoBytes` 中声明。
   - **不要把它设成 primary/frame App**；它是独立 workflow，按模式解析并单独排队。
+  - **2026-10-29 已定位并修复**：`face-swap-2114222` 按 `kind: "faceswap"`、`refImages [322]`、`refVideos [359]`、`refAudios []` 保存并 verify 后，即使视频槽位的 fieldData 含 `None`，也会保留 faceswap 能力；旧数据在读取时自动修复模式列表。重启服务后 `preview mode:"faceswap"` 可正常预览。
 
 > `nodes_detected` 只代表节点已发现，不等于真实渲染已验证。第一次真实提交成功后才能标记 `verified`。
 

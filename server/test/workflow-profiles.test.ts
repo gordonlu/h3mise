@@ -35,6 +35,25 @@ const faceswapNodes = [
   node('359', 'file', '源视频', 'VIDEO'),
 ];
 
+function mainProfile(): AiAppProfile {
+  const inputs = mapDiscoveredNodes(mappedNodes());
+  const capabilities = { supportedModes: ['t2va', 'ref2va'] as H3Mode[], maxImageRefs: 2, maxAudioRefs: 1, maxVideoRefs: 0, maxTotalRefs: 3 };
+  return {
+    ...defaultAiAppProfile(),
+    appId: 'main-app',
+    apps: [{
+      id: 'main', name: '主工作流', appId: 'main-app', inputs, nodes: mappedNodes(),
+      capabilities,
+      verification: { status: 'verified', checkedAt: '2026-01-01', note: 'verified' },
+    }],
+    activeWorkflowId: 'main',
+    inputs,
+    nodes: mappedNodes(),
+    capabilities,
+    verification: { status: 'verified', checkedAt: '2026-01-01', note: 'verified' },
+  };
+}
+
 test('saved apps are self-contained workflows; activation requires their own mapping', async () => {
   const { root, store } = await makeStore('workflow-owns-mapping');
   roots.push(root);
@@ -147,4 +166,45 @@ test('PUT-style profile input ignores read-only fields and keeps appId/apps inva
   assert.equal((saved as unknown as Record<string, unknown>).activeModes, undefined);
   assert.ok(Array.isArray(saved.apps[0]?.readiness), 'server recomputes readiness; client-provided readiness is ignored');
   assert.throws(() => registry.saveProfile({ ...current, activeWorkflowId: 'missing' }), /does not match/);
+});
+
+test('explicit faceswap kind overrides an optional-looking video field', async () => {
+  const { root, store } = await makeStore('workflow-faceswap-kind');
+  roots.push(root);
+  const nodes = faceswapNodes.map((entry) => entry.nodeId === '359'
+    ? { ...entry, fieldData: '["COMBO", {"options": ["None"], "video_upload": true}]' }
+    : entry);
+  const inferred = mapDiscoveredNodes(nodes);
+  assert.ok(!inferSupportedModes(inferred, nodes).includes('faceswap'), 'optional-looking video is not guessed as faceswap');
+  assert.ok(inferSupportedModes(inferred, nodes, 'faceswap').includes('faceswap'), 'explicit kind wins');
+  const registry = registryWithProfile(store, mainProfile());
+  registry.upsertWorkflow({ id: 'face', name: '换脸', appId: 'face-app', kind: 'faceswap' });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 0, data: { nodeInfoList: nodes } }));
+  try {
+    const verified = await registry.verifyWorkflow('face');
+    assert.ok(verified.modes?.includes('faceswap'));
+    assert.equal(verified.readiness?.find((item) => item.mode === 'faceswap')?.ready, true);
+    const preview = registry.previewWorkflow('face', 'faceswap');
+    assert.ok(preview.nodeInfoList.some((item) => item.nodeId === '359'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stored faceswap workflows repair legacy mode lists when read', async () => {
+  const { root, store } = await makeStore('workflow-faceswap-repair');
+  roots.push(root);
+  const inputs = mapDiscoveredNodes(faceswapNodes);
+  const profile = mainProfile();
+  profile.apps.push({
+    id: 'face', name: '换脸', appId: 'face-app', kind: 'faceswap',
+    inputs, nodes: faceswapNodes,
+    capabilities: { supportedModes: ['t2va', 'ref2va', 'vref2va'], maxImageRefs: 1, maxVideoRefs: 1, maxAudioRefs: 0, maxTotalRefs: 2 },
+    verification: { status: 'nodes_detected', checkedAt: '2026-01-01', note: 'legacy evidence' },
+  });
+  const registry = registryWithProfile(store, profile);
+  const face = registry.getProfile()?.apps.find((entry) => entry.id === 'face');
+  assert.ok(face?.modes?.includes('faceswap'));
+  assert.equal(face?.readiness?.find((item) => item.mode === 'faceswap')?.ready, true);
 });

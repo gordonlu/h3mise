@@ -7,7 +7,7 @@
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { H3_MODES } from '@h3mise/shared';
-import type { AiAppInputs, AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, MediaAsset, ProviderCapabilities, ProviderStatus, ProviderVerification, ProviderWorkflowSummary, RunningHubRegion, StoryboardProviderProfile, WorkflowModeReadiness, WorkflowProfile } from '@h3mise/shared';
+import type { AiAppInputs, AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, MediaAsset, ProviderCapabilities, ProviderStatus, ProviderVerification, ProviderWorkflowSummary, RunningHubRegion, StoryboardProviderProfile, WorkflowKind, WorkflowModeReadiness, WorkflowProfile } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -183,7 +183,7 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
  *  - ref2va  needs at least one dedicated RefImages input; audio alone is not
  *            a valid Ref2VA path
  */
-export function inferSupportedModes(inputs: AiAppInputs, nodes: AiAppProfile['nodes']): H3Mode[] {
+export function inferSupportedModes(inputs: AiAppInputs, nodes: AiAppProfile['nodes'], kind?: WorkflowKind): H3Mode[] {
   const modes: H3Mode[] = [];
   const hasSlot = (slot: { nodeId: string; fieldName: string } | undefined) => Boolean(slot && slot.nodeId !== '');
   const hasArray = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.length > 0 && slots.every((s) => s.nodeId !== '');
@@ -192,14 +192,18 @@ export function inferSupportedModes(inputs: AiAppInputs, nodes: AiAppProfile['no
   const hasImages = hasArray(inputs.refImages);
   const videoOptional = videoSlots.length > 0 && videoSlots.every(slot => nodes.some(node => node.nodeId === slot.nodeId
     && node.fieldName === slot.fieldName && /["']None["']/i.test(node.fieldData ?? '')));
-  // A dedicated image+video App (exactly one image slot, one video slot, no
-  // audio) is the faceswap/v2v shape. The same slots can still act as a
+  // A dedicated image+video App is the faceswap/v2v shape. An explicit
+  // `kind: "faceswap"` is authoritative: some workflows expose the source
+  // video as a COMBO/upload field whose default "None" would otherwise look
+  // like an optional video port. The same slots can still act as a
   // conservative video-reference workflow.
   const faceSwapNamed = nodes.some((node) => /换脸|face.?swap|face.?fusion/i.test(`${node.nodeName} ${node.fieldName} ${node.description}`));
-  const faceSwapShape = hasVideo && hasImages && !videoOptional
-    && inputs.refImages.length === 1 && hasSlot(inputs.prompt)
+  const faceSwapShape = hasVideo && hasImages && hasSlot(inputs.prompt)
     && !hasSlot(inputs.firstFrame) && !hasSlot(inputs.lastFrame)
-    && (inputs.refAudios.length === 0 || faceSwapNamed);
+    && (kind === 'faceswap'
+      ? true
+      : !videoOptional && inputs.refImages.length === 1
+        && (inputs.refAudios.length === 0 || faceSwapNamed));
   // An optional video port on a multimodal image/audio App does not make
   // video mandatory. Keep dedicated video-reference Apps conservative.
   const optionalMultimodalVideo = videoOptional && hasImages;
@@ -335,15 +339,26 @@ function sanitizeVerification(raw: unknown, fallback: ProviderVerification): Pro
   };
 }
 
-function sanitizeCapabilities(raw: unknown, inputs: AiAppInputs, nodes: AiAppProfile['nodes']): ProviderCapabilities | undefined {
+const WORKFLOW_KINDS: WorkflowKind[] = ['video', 'frame', 'video_reference', 'faceswap', 'custom'];
+
+function sanitizeKind(raw: unknown): WorkflowKind | undefined {
+  return typeof raw === 'string' && WORKFLOW_KINDS.includes(raw as WorkflowKind) ? raw as WorkflowKind : undefined;
+}
+
+function sanitizeCapabilities(raw: unknown, inputs: AiAppInputs, nodes: AiAppProfile['nodes'], kind?: WorkflowKind): ProviderCapabilities | undefined {
   if (!raw || typeof raw !== 'object') {
     if (!inputs.prompt.nodeId) return undefined;
-    return { supportedModes: inferSupportedModes(inputs, nodes) };
+    return { supportedModes: inferSupportedModes(inputs, nodes, kind) };
   }
   const value = raw as Record<string, unknown>;
-  const modes = Array.isArray(value.supportedModes)
-    ? [...new Set(value.supportedModes.filter((mode): mode is H3Mode => H3_MODES.includes(mode as H3Mode)))]
-    : inferSupportedModes(inputs, nodes);
+  const inferred = inferSupportedModes(inputs, nodes, kind);
+  const declared = Array.isArray(value.supportedModes)
+    ? value.supportedModes.filter((mode): mode is H3Mode => H3_MODES.includes(mode as H3Mode))
+    : inferred;
+  // Repair evidence written before explicit faceswap kinds were honored:
+  // the stored mode list may still say t2va/ref2va/vref2va while the same
+  // nodes + kind prove faceswap. Never drop a declared mode.
+  const modes = [...new Set(kind === 'faceswap' ? [...declared, ...inferred] : declared)];
   return { ...(value as object), supportedModes: modes } as ProviderCapabilities;
 }
 
@@ -369,13 +384,14 @@ function sanitizeWorkflow(raw: unknown): WorkflowProfile | null {
   const hasInputs = value.inputs !== undefined && value.inputs !== null && typeof value.inputs === 'object' && !Array.isArray(value.inputs);
   const inputs = hasInputs ? sanitizeInputs(value.inputs, disabledInputs()) : undefined;
   const nodes = Array.isArray(value.nodes) ? value.nodes as AiAppProfile['nodes'] : [];
-  const capabilities = inputs ? sanitizeCapabilities(value.capabilities, inputs, nodes) : undefined;
+  const kind = sanitizeKind(value.kind);
+  const capabilities = inputs ? sanitizeCapabilities(value.capabilities, inputs, nodes, kind) : undefined;
   return {
     id,
     name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : `AI App ${appId}`,
     appId,
     ...(typeof value.description === 'string' && value.description.trim() ? { description: value.description.trim() } : {}),
-    ...(typeof value.kind === 'string' ? { kind: value.kind as WorkflowProfile['kind'] } : {}),
+    ...(kind ? { kind } : {}),
     ...(inputs ? { inputs } : {}),
     ...(nodes.length ? { nodes } : {}),
     ...(capabilities ? { capabilities } : {}),
@@ -424,8 +440,8 @@ function enrichWorkflow(workflow: WorkflowProfile): WorkflowProfile {
   };
 }
 
-function discoveredCapabilities(mapped: AiAppInputs, nodes: AiAppProfile['nodes'], previous: ProviderCapabilities): ProviderCapabilities {
-  const modes = inferSupportedModes(mapped, nodes);
+function discoveredCapabilities(mapped: AiAppInputs, nodes: AiAppProfile['nodes'], previous: ProviderCapabilities, kind?: WorkflowKind): ProviderCapabilities {
+  const modes = inferSupportedModes(mapped, nodes, kind);
   const faceswap = modes.includes('faceswap');
   return {
     ...previous,
@@ -1159,7 +1175,7 @@ export class ProviderRegistry {
     return this.updateWorkflowEvidence(current, activeId, {
       nodes,
       inputs: mapped,
-      capabilities: discoveredCapabilities(mapped, nodes, current.capabilities),
+      capabilities: discoveredCapabilities(mapped, nodes, current.capabilities, current.apps.find((entry) => entry.id === activeId)?.kind),
       verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
     });
   }
@@ -1173,7 +1189,7 @@ export class ProviderRegistry {
       const provider = new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: workflowAsProfile(workflow, profile) });
       const nodes = await provider.discoverNodes();
       const mapped = mapDiscoveredNodes(nodes);
-      const capabilities = discoveredCapabilities(mapped, nodes, workflow.capabilities ?? { supportedModes: [] });
+      const capabilities = discoveredCapabilities(mapped, nodes, workflow.capabilities ?? { supportedModes: [] }, workflow.kind);
       if (!mapped.prompt.nodeId || !capabilities.supportedModes.length) {
         throw new Error('未识别到可用的 Prompt 或参考输入映射，请检查 apiCallDemo 节点');
       }
@@ -1214,7 +1230,7 @@ export class ProviderRegistry {
       appId,
       name: typeof input.name === 'string' && input.name.trim() ? input.name.trim() : existing?.name ?? `AI App ${appId}`,
       ...(typeof input.description === 'string' ? { description: input.description.trim() } : {}),
-      ...(typeof input.kind === 'string' ? { kind: input.kind as WorkflowProfile['kind'] } : {}),
+      ...(sanitizeKind(input.kind) ? { kind: sanitizeKind(input.kind) } : {}),
       ...(input.inputs !== undefined ? { inputs: sanitizeInputs(input.inputs, disabledInputs()) } : {}),
       ...(input.providerParamBindings !== undefined ? { providerParamBindings: sanitizeBindings(input.providerParamBindings) } : {}),
       verification: existing?.verification ?? emptyVerification(),

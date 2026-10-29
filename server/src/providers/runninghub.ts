@@ -179,7 +179,10 @@ export class RunningHubAiAppProvider implements VideoProvider {
       throw new ProviderError('prompt is empty; refusing to submit a paid task', 'submit');
     }
     const appId = request.aiAppId?.trim() || this.profile.appId;
-    if (request.mode === 'vref2va' && (appId !== this.profile.appId || !['nodes_detected', 'verified'].includes(this.profile.verification.status))) throw new ProviderError('视频参考工作流尚未检测，或 App 与检测配置不一致', 'submit');
+    if ((request.mode === 'vref2va' || request.mode === 'faceswap')
+      && (appId !== this.profile.appId || !['nodes_detected', 'verified'].includes(this.profile.verification.status))) {
+      throw new ProviderError(`${request.mode === 'faceswap' ? '换脸' : '视频参考'}工作流尚未检测，或 App 与检测配置不一致`, 'submit');
+    }
     const allowedAppIds = new Set([
       this.profile.appId,
       ...(this.profile.apps ?? []).map((app) => app.appId),
@@ -239,6 +242,11 @@ export class RunningHubAiAppProvider implements VideoProvider {
     return labels.find((l) => l.startsWith(`${value} `) || l.startsWith(`${value}(`)) ?? value;
   }
 
+  /** Pure, local payload preview. Never contacts RunningHub. */
+  previewNodeInfoList(request: RenderRequestInput): Array<{ nodeId: string; fieldName: string; fieldValue: string }> {
+    return this.buildNodeInfoList(request);
+  }
+
   private buildNodeInfoList(request: RenderRequestInput): Array<{ nodeId: string; fieldName: string; fieldValue: string }> {
     const inputs = this.profile.inputs;
     const out: Array<{ nodeId: string; fieldName: string; fieldValue: string }> = [];
@@ -273,13 +281,26 @@ export class RunningHubAiAppProvider implements VideoProvider {
     const lastFrameRef = request.references.find((r) => r.roles.includes('last_frame'));
     void firstFrameRef;
     void lastFrameRef;
-    if (request.mode === 'vref2va') {
+    if (request.mode === 'faceswap') {
+      const videos = request.references.filter((r) => r.asset.kind === 'video');
+      const images = request.references.filter((r) => r.asset.kind === 'image');
+      const videoSlots = (inputs.refVideos ?? []).filter((s) => s.nodeId && s.fieldName);
+      const imageSlots = inputs.refImages.filter((s) => s.nodeId && s.fieldName);
+      if (videos.length !== 1 || videoSlots.length !== 1) throw new ProviderError('换脸模式必须提供恰好一个源视频和有效视频节点映射', 'submit');
+      if (images.length !== 1 || imageSlots.length !== 1) throw new ProviderError('换脸模式必须提供恰好一张人脸图片和有效图片节点映射', 'submit');
+      if (request.references.some((r) => r.asset.kind === 'audio')) throw new ProviderError('换脸模式不接受参考音频；成片应保留源视频音频', 'submit');
+      if ((this.profile.capabilities.maxVideoRefs ?? 1) < 1) throw new ProviderError('该工作流没有可用视频槽位', 'submit');
+      this.validateVideoLimits(videos[0]!.asset);
+      pushArray(imageSlots, images.map((r) => r.providerRef));
+      pushArray(videoSlots, videos.map((r) => r.providerRef));
+    } else if (request.mode === 'vref2va') {
       const videos = request.references.filter(r => r.asset.kind === 'video');
       const images = request.references.filter(r => r.asset.kind === 'image');
       const videoSlots = (inputs.refVideos ?? []).filter(s => s.nodeId && s.fieldName);
       const imageSlots = inputs.refImages.filter(s => s.nodeId && s.fieldName);
       if (videos.length !== 1 || videoSlots.length !== 1) throw new ProviderError('视频参考模式必须提供一个参考视频和有效视频节点映射', 'submit');
       if (images.length > Math.min(3, imageSlots.length) || request.references.some(r => r.asset.kind === 'audio')) throw new ProviderError('视频参考模式仅接受一个视频及最多三张可选参考图片', 'submit');
+      this.validateVideoLimits(videos[0]!.asset);
       pushArray(videoSlots, videos.map(r => r.providerRef));
       pushArray(imageSlots, images.map(r => r.providerRef));
     } else if (request.mode === 'ref2va') {
@@ -323,9 +344,19 @@ export class RunningHubAiAppProvider implements VideoProvider {
     return out;
   }
 
-  /** RunningHub reference limits: ≤9 images, ≤3 audios, ≤12 total, each
-   * audio 2–15s with combined length ≤15s, and audio can never be the only
-   * reference (needs ≥1 image). (ref_videos was dropped from the API.) */
+  private validateVideoLimits(asset: import('@h3mise/shared').MediaAsset): void {
+    const caps = this.profile.capabilities;
+    if (caps.maxVideoSeconds != null && asset.durationSeconds != null && asset.durationSeconds > caps.maxVideoSeconds) {
+      throw new ProviderError(`源视频 ${asset.durationSeconds.toFixed(1)} 秒，超过该工作流上限 ${caps.maxVideoSeconds} 秒`, 'submit');
+    }
+    if (caps.maxVideoBytes != null && asset.sizeBytes > caps.maxVideoBytes) {
+      throw new ProviderError(`源视频 ${(asset.sizeBytes / 1024 / 1024).toFixed(1)} MB，超过该工作流上限 ${(caps.maxVideoBytes / 1024 / 1024).toFixed(1)} MB`, 'submit');
+    }
+  }
+
+  /** ref2va reference limits: ≤9 images, ≤3 audios, ≤12 total, each audio
+   * 2–15s with combined length ≤15s, and audio can never be the only
+   * reference (needs ≥1 image). Video slots belong to vref2va/faceswap. */
   private validateRefLimits(
     imageCount: number,
     audioCount: number,

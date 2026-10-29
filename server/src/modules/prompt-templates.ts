@@ -62,7 +62,7 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
   // frame inside the prompt (H3 assigns tasks per reference in text).
   const references = ctx.references.filter((reference) => {
     const isFrame = reference.roles.includes('first_frame') || reference.roles.includes('last_frame');
-    if (mode === 'vref2va') return reference.type === 'image' || reference.type === 'video';
+    if (mode === 'vref2va' || mode === 'faceswap') return reference.type === 'image' || reference.type === 'video';
     if (mode === 'ref2va') return reference.type === 'image' || reference.type === 'audio';
     if (mode === 'i2va') return reference.roles.includes('first_frame');
     if (mode === 'l2va') return reference.roles.includes('last_frame');
@@ -79,6 +79,12 @@ export function compileDeterministic(ctx: CompileContext, mode: H3Mode): string 
     return [
       'Video reference: <Video 1> defines the action sequence, timing and camera movement. Optional <Picture N> references define the explicitly bound appearance; do not invent additional subjects.',
       subjectDefinitions(modeCtx, num), summary(modeCtx, num), detailedDescription(modeCtx, num), overallSoundscape(modeCtx),
+    ].filter(Boolean).join('\n\n');
+  }
+  if (mode === 'faceswap') {
+    return [
+      'Face swap: <Picture 1> is the ONLY face/identity reference. Replace the face of the performer in <Video 1> with this identity while preserving <Video 1>\'s performance, timing, camera movement, body and scene. Do not copy hair, clothing, background or lighting from <Picture 1> unless the shot explicitly says so. Preserve the source video\'s audio track.',
+      summary(modeCtx, num), detailedDescription(modeCtx, num), overallSoundscape(modeCtx),
     ].filter(Boolean).join('\n\n');
   }
   if (mode === 'ref2va') {

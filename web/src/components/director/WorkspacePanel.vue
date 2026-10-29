@@ -66,6 +66,10 @@ const referenceSummary = computed(() => {
   const roles = props.bindings.flatMap((binding) => binding.roles);
   const mode = props.shot.h3Mode ?? 't2va';
   if (mode === 'vref2va') return [{ label: '参考视频（必填 1 个）', ready: props.bindings.filter(b => b.type === 'video').length === 1 }];
+  if (mode === 'faceswap') return [
+    { label: '人脸图片（恰好 1 张）', ready: props.bindings.filter(b => b.type === 'image').length === 1 },
+    { label: '源视频（恰好 1 个）', ready: props.bindings.filter(b => b.type === 'video').length === 1 },
+  ];
   if (mode === 'ref2va') {
     const images = props.bindings.filter((binding) => binding.type === 'image' && !binding.roles.some((role) => role === 'first_frame' || role === 'last_frame')).length;
     const audios = props.bindings.filter((binding) => binding.type === 'audio').length;
@@ -88,7 +92,9 @@ const recommendedMode = computed<H3Mode | null>(() => {
   if (!supported) return null;
   const roles = new Set(props.bindings.flatMap((binding) => binding.roles));
   const hasRefImage = props.bindings.some((binding) => binding.type === 'image' && !binding.roles.some((role) => role === 'first_frame' || role === 'last_frame'));
+  const hasVideo = props.bindings.some((binding) => binding.type === 'video');
   const candidates: H3Mode[] = [];
+  if (hasVideo && hasRefImage) candidates.push('faceswap');
   if (roles.has('first_frame') && roles.has('last_frame')) candidates.push('fl2va');
   if (roles.has('first_frame')) candidates.push('i2va');
   if (roles.has('last_frame')) candidates.push('l2va');

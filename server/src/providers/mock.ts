@@ -12,13 +12,13 @@ import type { RenderJobHandle, RenderRequestInput, RenderResult, RenderStatus, U
 import { ProviderError } from './types.js';
 
 const CAPS: ProviderCapabilities = {
-  supportedModes: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'],
+  supportedModes: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', 'faceswap'],
   minDuration: 1,
   maxDuration: 15,
   supportedAspectRatios: ['16:9', '9:16', '4:3', '1:1'],
   supportedResolutions: ['720p', '1080p'],
   maxImageRefs: 3,
-  maxVideoRefs: 0,
+  maxVideoRefs: 1,
   maxAudioRefs: 1,
   audioSupported: true,
 };

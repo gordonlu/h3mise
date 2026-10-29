@@ -237,6 +237,7 @@ export class AutoProduceService {
     const refReady = mode === 't2va' || bindings.some((binding) => {
       const roles = jget<string[]>(binding.roles_json, []);
       if (mode === 'ref2va') return binding.type === 'image' || binding.type === 'audio';
+      if (mode === 'vref2va' || mode === 'faceswap') return binding.type === 'image' || binding.type === 'video';
       if (mode === 'i2va') return roles.includes('first_frame');
       if (mode === 'l2va') return roles.includes('last_frame');
       return roles.includes('first_frame') || roles.includes('last_frame');

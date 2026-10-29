@@ -27,17 +27,21 @@ async function detectVideoProfile() {
 const route = useRoute();
 const pickAsset = ref('');
 const pickGroup = ref('');
-const slots = ref<{ firstFrame: boolean; lastFrame: boolean; images: number; audios: number; total: number }>({
-  firstFrame: false, lastFrame: false, images: 0, audios: 0, total: 0,
-});
+type SlotSet = { firstFrame: boolean; lastFrame: boolean; images: number; audios: number; videos: number; total: number };
+const emptySlots: SlotSet = { firstFrame: false, lastFrame: false, images: 0, audios: 0, videos: 0, total: 0 };
+const slotsByMode = ref<Record<string, SlotSet> | null>(null);
+const fallbackSlots = ref<SlotSet>(emptySlots);
+const slots = computed(() => slotsByMode.value?.[props.currentMode] ?? fallbackSlots.value);
 const slotsLoaded = ref(false);
 
 onMounted(async () => {
   try {
-    const profile = await get<{ bindingSlots?: typeof slots.value } | null>('/api/providers/runninghub/profile');
-    if (profile?.bindingSlots) slots.value = profile.bindingSlots;
+    const profile = await get<{ bindingSlots?: SlotSet; slotsByMode?: Record<string, SlotSet> } | null>('/api/providers/runninghub/profile');
+    if (profile?.slotsByMode) slotsByMode.value = profile.slotsByMode;
+    if (profile?.bindingSlots) fallbackSlots.value = profile.bindingSlots;
   } catch {
-    slots.value = { firstFrame: false, lastFrame: false, images: 0, audios: 0, total: 0 };
+    slotsByMode.value = null;
+    fallbackSlots.value = emptySlots;
   }
   slotsLoaded.value = true;
 });
@@ -50,6 +54,10 @@ const groups = computed<RefGroup[]>(() => {
   const audios = props.media.filter((m) => m.kind === 'audio');
   const videos = props.media.filter((m) => m.kind === 'video');
   const out: RefGroup[] = [];
+  if (props.currentMode === 'faceswap') return [
+    { id: 'faceimg', label: '人脸图片（1 张）', limit: 1, items: images, role: 'identity' },
+    { id: 'srcvideo', label: '源视频（1 个）', limit: 1, items: videos, role: 'motion' },
+  ];
   if (props.currentMode === 'vref2va') return [
     { id: 'refvideo', label: t('shot.references.vrefGroupVideo'), limit: 1, items: videos, role: 'motion' },
     { id: 'refimg', label: t('shot.references.vrefGroupImages'), limit: 3, items: images },
@@ -58,8 +66,8 @@ const groups = computed<RefGroup[]>(() => {
     if (slots.value.images > 0) out.push({ id: 'refimg', label: t('shot.references.refImages'), limit: slots.value.images, items: images });
     if (slots.value.audios > 0) out.push({ id: 'refaudio', label: t('shot.references.refAudio'), limit: slots.value.audios, items: audios });
     // Camera-motion reference clips are real consumable inputs where the
-    // workflow supports video references (ComfyUI). RunningHub has no video
-    // slots — preflight reports that honestly, instead of hiding the bind.
+    // active workflow declares video slots. Unsupported workflows are reported
+    // honestly by preflight instead of hiding the bind.
     if (videos.length) out.push({ id: 'refvideo', label: t('shot.references.refVideo'), limit: 12, items: videos, role: 'camera_motion' });
     return out;
   }
@@ -74,6 +82,20 @@ const groups = computed<RefGroup[]>(() => {
 
 const hasSlots = computed(() => groups.value.length > 0);
 const videosAvailable = computed(() => props.media.some((m) => m.kind === 'video'));
+const safetyWarnings = computed(() => {
+  const out: string[] = [];
+  const images = props.bindings.filter((binding) => binding.type === 'image');
+  const identity = images.filter((binding) => binding.roles.includes('identity'));
+  if (props.currentMode === 'faceswap' && images.length > 1) {
+    out.push('换脸建议只用一张正面人脸图；当前绑定了多张图片，容易产生复制人或身份冲突。');
+  } else if (props.currentMode === 'ref2va' && identity.length > 1) {
+    out.push('检测到多张身份参考图：一个角色只用一张正面图，避免生成复制人。');
+  }
+  if (images.some((binding) => /四宫格|服装|costume|outfit/i.test(binding.label ?? ''))) {
+    out.push('检测到服装/四宫格参考：请确保四宫格不露脸，否则会与人物身份互相干扰。');
+  }
+  return out;
+});
 const modeHint = computed(() => props.currentMode === 'vref2va' ? t('shot.references.vrefModeHint') : t(`shot.references.modeHint.${props.currentMode}`));
 /** Ref2VA is slower and pricier — if the shot only has frame images and no
  * other references, the dedicated frame modes do the same job for less. */
@@ -149,6 +171,7 @@ function selectAsset(group: RefGroup, assetId: string) {
     <div v-if="suggestFrameMode" class="note">
       {{ t('shot.references.frameModeSuggestionBefore') }} <strong>{{ suggestFrameMode.toUpperCase() }}</strong>{{ t('shot.references.frameModeSuggestionAfter') }}
     </div>
+    <div v-for="warning in safetyWarnings" :key="warning" class="note warning-note">注意：{{ warning }}</div>
 
     <div v-if="pickerOpen" class="panel picker">
       <div class="panel-title">{{ t('shot.references.bindByWorkflowSlot') }}</div>
@@ -225,6 +248,7 @@ function selectAsset(group: RefGroup, assetId: string) {
 </template>
 
 <style scoped>
+.warning-note { border-color: var(--warn-line, var(--line-2)); color: var(--warn, inherit); }
 .wrap { flex-wrap: wrap; }
 .upload-link { display: inline-flex; align-items: center; text-decoration: none; }
 .picker { border-color: var(--accent); }

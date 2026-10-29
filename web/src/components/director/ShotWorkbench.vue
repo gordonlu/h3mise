@@ -192,10 +192,7 @@ async function correctToRef2va() {
 
 /** PRD §15: UI only opens modes the current provider profile actually supports.
  * Unknown capability = nothing offered (P1), never a theoretical fallback. */
-const availableModes = computed(() => {
-  const caps = activeProvider.value?.capabilities;
-  return activeProvider.value?.id === 'runninghub' ? [...new Set([...(caps?.supportedModes ?? []), 'vref2va' as const])] : caps?.supportedModes ?? [];
-});
+const availableModes = computed(() => activeProvider.value?.capabilities?.supportedModes ?? []);
 const canCorrectReferenceMode = computed(() =>
   sShot.value?.h3Mode === 'i2va'
   && missingFrameRole.value === 'first_frame'
@@ -452,7 +449,7 @@ async function doRender(promptId: string) {
     const submittedBindings = (sDetail.value?.bindings ?? []).filter((binding: ReferenceBinding) => {
       const first = binding.roles.includes('first_frame');
       const last = binding.roles.includes('last_frame');
-      if (mode === 'vref2va') return binding.type === 'video' || binding.type === 'image';
+      if (mode === 'vref2va' || mode === 'faceswap') return binding.type === 'video' || binding.type === 'image';
       if (mode === 'ref2va') return !first && !last;
       if (mode === 'i2va') return first;
       if (mode === 'l2va') return last;

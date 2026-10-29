@@ -6,7 +6,8 @@
 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, ProviderCapabilities, ProviderStatus, RunningHubRegion, StoryboardProviderProfile } from '@h3mise/shared';
+import { H3_MODES } from '@h3mise/shared';
+import type { AiAppInputs, AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, MediaAsset, ProviderCapabilities, ProviderStatus, ProviderVerification, ProviderWorkflowSummary, RunningHubRegion, StoryboardProviderProfile, WorkflowModeReadiness, WorkflowProfile } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -81,6 +82,30 @@ export function mapStoryboardProviderNodes(
 /** Default profile for the fixed v0.1 AI App (PRD §25.3). Node layout is a
  * heuristic until the user runs "detect & verify" with a real key. */
 export function defaultAiAppProfile(region: RunningHubRegion = 'cn'): AiAppProfile {
+  const inputs: AiAppInputs = {
+    prompt: { nodeId: 'node_1', fieldName: 'prompt' },
+    mode: { nodeId: 'node_1', fieldName: 'mode' },
+    firstFrame: { nodeId: 'node_1', fieldName: 'first_frame' },
+    lastFrame: { nodeId: 'node_1', fieldName: 'last_frame' },
+    refImages: [],
+    refAudios: [],
+    refVideos: [],
+    duration: { nodeId: 'node_1', fieldName: 'duration' },
+    resolution: { nodeId: 'node_1', fieldName: 'resolution' },
+    megapixels: { nodeId: '', fieldName: 'megapixels' },
+    steps: { nodeId: 'node_1', fieldName: 'steps' },
+  };
+  const capabilities: ProviderCapabilities = {
+    // Unknown until verified (P0-6): a heuristic default must not be
+    // trusted as executable capability in front of a paid render.
+    supportedModes: [],
+    maxImageRefs: 9,
+    maxVideoRefs: 0,
+    maxAudioRefs: 3,
+    maxTotalRefs: 12,
+    audioSupported: true,
+  };
+  const verification = { status: 'unconfigured' as const, checkedAt: null, note: 'run "detect nodes" in Settings, then confirm with a real render' };
   return {
     provider: 'runninghub',
     region,
@@ -88,31 +113,21 @@ export function defaultAiAppProfile(region: RunningHubRegion = 'cn'): AiAppProfi
     appId: H3_AI_APP_ID,
     invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${H3_AI_APP_ID}`,
     protocolVersion: 'observed',
-    capabilities: {
-      // Unknown until verified (P0-6): a heuristic default must not be
-      // trusted as executable capability in front of a paid render.
-      supportedModes: [],
-      maxImageRefs: 9,
-      maxVideoRefs: 0,
-      maxAudioRefs: 3,
-      maxTotalRefs: 12,
-      audioSupported: true,
-    },
+    capabilities,
     nodes: [],
-    inputs: {
-      prompt: { nodeId: 'node_1', fieldName: 'prompt' },
-      mode: { nodeId: 'node_1', fieldName: 'mode' },
-      firstFrame: { nodeId: 'node_1', fieldName: 'first_frame' },
-      lastFrame: { nodeId: 'node_1', fieldName: 'last_frame' },
-      refImages: [],
-      refAudios: [],
-      refVideos: [],
-      duration: { nodeId: 'node_1', fieldName: 'duration' },
-      resolution: { nodeId: 'node_1', fieldName: 'resolution' },
-      megapixels: { nodeId: '', fieldName: 'megapixels' },
-      steps: { nodeId: 'node_1', fieldName: 'steps' },
-    },
-    verification: { status: 'unconfigured', checkedAt: null, note: 'run "detect nodes" in Settings, then confirm with a real render' },
+    inputs,
+    apps: [{
+      id: 'primary',
+      name: '主视频生成',
+      appId: H3_AI_APP_ID,
+      description: '默认 H3 视频生成 App',
+      inputs,
+      nodes: [],
+      capabilities,
+      verification,
+    }],
+    activeWorkflowId: 'primary',
+    verification,
   };
 }
 
@@ -141,8 +156,8 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
   const isAudioRef = (n: AiAppProfile['nodes'][number]) =>
     has(/ref.?audio|audio_?\d|参考音频/i)(n) || /^audio$/i.test(n.fieldType) || /audio_upload/i.test(n.fieldData ?? '');
   const isImageRef = (n: AiAppProfile['nodes'][number]) =>
-    !isAudioRef(n) && (has(/ref.?image|image_?\d|参考图|参考(?:图片)?\s*\d/i)(n)
-      || /^image$/i.test(n.fieldType) || /image_upload/i.test(n.fieldData ?? ''));
+    !isAudioRef(n) && (has(/ref.?image|image_?\d|参考图|参考(?:图片)?\s*\d|人脸|face.?image/i)(n)
+      || /^image$/i.test(n.fieldName) || /^image$/i.test(n.fieldType) || /image_upload/i.test(n.fieldData ?? ''));
   return {
     prompt: pick(has(/prompt|text|描述|提示词/i), inputs.prompt),
     mode: pick(has(/mode|模式/i), inputs.mode),
@@ -150,7 +165,7 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
     lastFrame: last ? { nodeId: last.nodeId, fieldName: last.fieldName } : { nodeId: '', fieldName: 'last_frame' },
     refImages: collect(isImageRef),
     refAudios: collect(isAudioRef),
-    refVideos: collect(n => /^video$/i.test(n.fieldType) || /video_upload/i.test(n.fieldData ?? '') || /参考视频|ref.?video/i.test(`${n.fieldName} ${n.description}`)),
+    refVideos: collect(n => /^video$/i.test(n.fieldType) || /video_upload/i.test(n.fieldData ?? '') || /参考视频|源视频|换脸|ref.?video|face.?swap/i.test(`${n.fieldName} ${n.nodeName} ${n.description}`)),
     duration: pick(has(/duration|时长/i), inputs.duration),
     resolution: pick(has(/resolution|分辨率|比例/i), inputs.resolution),
     megapixels: pick(has(/^megapixels$|megapixel|百万像素/i), inputs.megapixels),
@@ -168,27 +183,70 @@ export function mapDiscoveredNodes(nodes: AiAppProfile['nodes']): AiAppProfile['
  *  - ref2va  needs at least one dedicated RefImages input; audio alone is not
  *            a valid Ref2VA path
  */
-export function inferSupportedModes(inputs: AiAppProfile['inputs'], _nodes: AiAppProfile['nodes']): H3Mode[] {
+export function inferSupportedModes(inputs: AiAppInputs, nodes: AiAppProfile['nodes']): H3Mode[] {
   const modes: H3Mode[] = [];
   const hasSlot = (slot: { nodeId: string; fieldName: string } | undefined) => Boolean(slot && slot.nodeId !== '');
   const hasArray = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.length > 0 && slots.every((s) => s.nodeId !== '');
   const videoSlots = inputs.refVideos ?? [];
   const hasVideo = hasArray(videoSlots);
+  const hasImages = hasArray(inputs.refImages);
+  const videoOptional = videoSlots.length > 0 && videoSlots.every(slot => nodes.some(node => node.nodeId === slot.nodeId
+    && node.fieldName === slot.fieldName && /["']None["']/i.test(node.fieldData ?? '')));
+  // A dedicated image+video App (exactly one image slot, one video slot, no
+  // audio) is the faceswap/v2v shape. The same slots can still act as a
+  // conservative video-reference workflow.
+  const faceSwapNamed = nodes.some((node) => /换脸|face.?swap|face.?fusion/i.test(`${node.nodeName} ${node.fieldName} ${node.description}`));
+  const faceSwapShape = hasVideo && hasImages && !videoOptional
+    && inputs.refImages.length === 1 && hasSlot(inputs.prompt)
+    && !hasSlot(inputs.firstFrame) && !hasSlot(inputs.lastFrame)
+    && (inputs.refAudios.length === 0 || faceSwapNamed);
   // An optional video port on a multimodal image/audio App does not make
   // video mandatory. Keep dedicated video-reference Apps conservative.
-  const optionalMultimodalVideo = hasArray(inputs.refImages) && hasArray(inputs.refAudios)
-    && videoSlots.every(slot => _nodes.some(node => node.nodeId === slot.nodeId
-      && node.fieldName === slot.fieldName && /["']None["']/i.test(node.fieldData ?? '')));
+  const optionalMultimodalVideo = videoOptional && hasImages;
+  if (faceSwapShape) return ['faceswap', 'vref2va'];
   if (hasVideo && !optionalMultimodalVideo) return hasSlot(inputs.prompt) ? ['vref2va'] : [];
   if (hasSlot(inputs.prompt)) modes.push('t2va');
   if (hasSlot(inputs.firstFrame)) modes.push('i2va');
   if (hasSlot(inputs.lastFrame)) modes.push('l2va');
   if (hasSlot(inputs.firstFrame) && hasSlot(inputs.lastFrame)) modes.push('fl2va');
-  if (hasArray(inputs.refImages)) {
+  if (hasImages) {
     modes.push('ref2va');
   }
   if (hasVideo && hasSlot(inputs.prompt)) modes.push('vref2va');
   return modes;
+}
+
+/** Concrete missing requirement per mode. Supports both supported and
+ * unsupported modes so the UI can explain what a workflow still needs. */
+export function workflowModeReadiness(profile: AiAppProfile): WorkflowModeReadiness[] {
+  const inputs = profile.inputs;
+  const has = (slot: { nodeId: string; fieldName: string } | undefined) => Boolean(slot?.nodeId);
+  const supportedModes = profile.capabilities.supportedModes;
+  return H3_MODES.map((mode) => {
+    const missing: string[] = [];
+    if (!has(inputs.prompt)) missing.push('prompt 输入节点');
+    if (mode === 'i2va' && !has(inputs.firstFrame)) missing.push('首帧节点');
+    if (mode === 'l2va' && !has(inputs.lastFrame)) missing.push('尾帧节点');
+    if (mode === 'fl2va') {
+      if (!has(inputs.firstFrame)) missing.push('首帧节点');
+      if (!has(inputs.lastFrame)) missing.push('尾帧节点');
+    }
+    if (mode === 'ref2va' && !inputs.refImages.some(has)) missing.push('至少一个参考图槽位');
+    if (mode === 'vref2va') {
+      if (!(inputs.refVideos ?? []).some(has)) missing.push('视频输入槽位');
+    }
+    if (mode === 'faceswap') {
+      if (!(inputs.refVideos ?? []).some(has)) missing.push('源视频输入槽位');
+      if (!inputs.refImages.some(has)) missing.push('人脸图片输入槽位');
+      if (inputs.refAudios.length > 0) missing.push('该模式不接受音频槽位（应保留源视频音频）');
+    }
+    const supported = supportedModes.includes(mode);
+    if (!supported && !missing.length) missing.push('工作流未声明该模式');
+    if (!['nodes_detected', 'verified'].includes(profile.verification.status)) {
+      missing.push(profile.verification.status === 'failed' ? '节点检测失败，请重新检测' : '尚未检测节点映射');
+    }
+    return { mode, supported, ready: supported && missing.length === 0, missing };
+  });
 }
 
 /** Binding roles that actually reach the API, derived from the workflow's
@@ -199,21 +257,215 @@ export interface BindingSlots {
   lastFrame: boolean;
   images: number;
   audios: number;
+  videos: number;
   total: number;
 }
 /** Slot availability derived from the workflow's enabled input slots.
  * Frame mode (firstFrame+lastFrame) and reference-image mode (refImages)
- * are mutually exclusive; audios expose their capacity. (ref_videos was
- * dropped from the RunningHub API.) */
+ * are mutually exclusive; audios/videos expose their own capacities. */
 export function enabledBindingSlots(profile: AiAppProfile | undefined): BindingSlots {
-  if (!profile) return { firstFrame: false, lastFrame: false, images: 0, audios: 0, total: 0 };
+  if (!profile) return { firstFrame: false, lastFrame: false, images: 0, audios: 0, videos: 0, total: 0 };
   const count = (slots: Array<{ nodeId: string; fieldName: string }>) => slots.filter((s) => s.nodeId !== '').length;
   const firstFrame = Boolean(profile.inputs.firstFrame && profile.inputs.firstFrame.nodeId !== '');
   const lastFrame = Boolean(profile.inputs.lastFrame && profile.inputs.lastFrame.nodeId !== '');
   const images = count(profile.inputs.refImages);
   const audios = count(profile.inputs.refAudios);
-  const total = images + audios;
-  return { firstFrame, lastFrame, images, audios, total };
+  const videos = count(profile.inputs.refVideos ?? []);
+  const total = images + audios + videos;
+  return { firstFrame, lastFrame, images, audios, videos, total };
+}
+
+function emptyVerification(note = '等待检测节点映射'): ProviderVerification {
+  return { status: 'unconfigured', checkedAt: null, note };
+}
+
+function disabledInputs(): AiAppInputs {
+  const slot = { nodeId: '', fieldName: '' };
+  return {
+    prompt: slot,
+    mode: slot,
+    firstFrame: slot,
+    lastFrame: slot,
+    refImages: [],
+    refAudios: [],
+    refVideos: [],
+    duration: slot,
+    resolution: slot,
+    megapixels: { nodeId: '', fieldName: 'megapixels' },
+    steps: slot,
+  };
+}
+
+function slotOf(value: unknown): { nodeId: string; fieldName: string } {
+  const slot = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  return {
+    nodeId: typeof slot.nodeId === 'string' ? slot.nodeId.trim() : '',
+    fieldName: typeof slot.fieldName === 'string' ? slot.fieldName.trim() : '',
+  };
+}
+
+function sanitizeInputs(raw: unknown, defaults: AiAppInputs): AiAppInputs {
+  const inputsIn = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(defaults) as Array<keyof AiAppInputs>) {
+    const def = defaults[key];
+    const value = inputsIn[key];
+    if (Array.isArray(def)) {
+      out[key] = (Array.isArray(value) ? value : []).map(slotOf);
+    } else {
+      const slot = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+      out[key] = {
+        nodeId: typeof slot.nodeId === 'string' ? slot.nodeId.trim() : def?.nodeId ?? '',
+        fieldName: typeof slot.fieldName === 'string' && slot.fieldName.trim() ? slot.fieldName.trim() : def?.fieldName ?? '',
+      };
+    }
+  }
+  return out as unknown as AiAppInputs;
+}
+
+function sanitizeVerification(raw: unknown, fallback: ProviderVerification): ProviderVerification {
+  const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const status = ['unconfigured', 'nodes_detected', 'verified', 'failed'].includes(String(value.status))
+    ? value.status as ProviderVerification['status']
+    : fallback.status;
+  return {
+    status,
+    checkedAt: typeof value.checkedAt === 'string' ? value.checkedAt : fallback.checkedAt,
+    note: typeof value.note === 'string' ? value.note : fallback.note,
+  };
+}
+
+function sanitizeCapabilities(raw: unknown, inputs: AiAppInputs, nodes: AiAppProfile['nodes']): ProviderCapabilities | undefined {
+  if (!raw || typeof raw !== 'object') {
+    if (!inputs.prompt.nodeId) return undefined;
+    return { supportedModes: inferSupportedModes(inputs, nodes) };
+  }
+  const value = raw as Record<string, unknown>;
+  const modes = Array.isArray(value.supportedModes)
+    ? [...new Set(value.supportedModes.filter((mode): mode is H3Mode => H3_MODES.includes(mode as H3Mode)))]
+    : inferSupportedModes(inputs, nodes);
+  return { ...(value as object), supportedModes: modes } as ProviderCapabilities;
+}
+
+function sanitizeBindings(raw: unknown): Record<string, { nodeId: string; fieldName: string }> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const entries = Object.entries(raw as Record<string, unknown>).map(([key, value]) => {
+    const slot = slotOf(value);
+    return slot.nodeId ? [key, slot] as const : null;
+  }).filter((entry): entry is readonly [string, { nodeId: string; fieldName: string }] => Boolean(entry));
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function hasUsableInputs(inputs: AiAppInputs): boolean {
+  return Boolean(inputs.prompt.nodeId);
+}
+
+function sanitizeWorkflow(raw: unknown): WorkflowProfile | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const appId = typeof value.appId === 'string' ? value.appId.trim() : '';
+  if (!appId) return null;
+  const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : appId;
+  const hasInputs = value.inputs !== undefined && value.inputs !== null && typeof value.inputs === 'object' && !Array.isArray(value.inputs);
+  const inputs = hasInputs ? sanitizeInputs(value.inputs, disabledInputs()) : undefined;
+  const nodes = Array.isArray(value.nodes) ? value.nodes as AiAppProfile['nodes'] : [];
+  const capabilities = inputs ? sanitizeCapabilities(value.capabilities, inputs, nodes) : undefined;
+  return {
+    id,
+    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : `AI App ${appId}`,
+    appId,
+    ...(typeof value.description === 'string' && value.description.trim() ? { description: value.description.trim() } : {}),
+    ...(typeof value.kind === 'string' ? { kind: value.kind as WorkflowProfile['kind'] } : {}),
+    ...(inputs ? { inputs } : {}),
+    ...(nodes.length ? { nodes } : {}),
+    ...(capabilities ? { capabilities } : {}),
+    verification: sanitizeVerification(value.verification, emptyVerification()),
+    ...(sanitizeBindings(value.providerParamBindings) ? { providerParamBindings: sanitizeBindings(value.providerParamBindings) } : {}),
+  };
+}
+
+function workflowAsProfile(workflow: WorkflowProfile, account: AiAppProfile): AiAppProfile {
+  return {
+    provider: 'runninghub',
+    region: account.region,
+    concurrency: account.concurrency,
+    appId: workflow.appId,
+    invokeUrl: `${runningHubOrigin(account.region)}/openapi/v2/run/ai-app/${workflow.appId}`,
+    protocolVersion: 'observed',
+    capabilities: workflow.capabilities ?? { supportedModes: [] },
+    nodes: workflow.nodes ?? [],
+    inputs: workflow.inputs ?? disabledInputs(),
+    providerParamBindings: workflow.providerParamBindings,
+    refVideoAppId: account.refVideoAppId,
+    apps: [],
+    activeWorkflowId: workflow.id,
+    verification: workflow.verification ?? emptyVerification(),
+  };
+}
+
+function enrichWorkflow(workflow: WorkflowProfile): WorkflowProfile {
+  const inputs = workflow.inputs;
+  const capabilities = workflow.capabilities;
+  const runnable = Boolean(inputs?.prompt.nodeId && capabilities?.supportedModes.length);
+  const base: AiAppProfile = {
+    ...defaultAiAppProfile(),
+    appId: workflow.appId,
+    inputs: inputs ?? disabledInputs(),
+    nodes: workflow.nodes ?? [],
+    capabilities: capabilities ?? { supportedModes: [] },
+    verification: workflow.verification ?? emptyVerification(),
+    apps: [],
+  };
+  return {
+    ...workflow,
+    runnable,
+    modes: capabilities?.supportedModes ?? [],
+    readiness: workflowModeReadiness(base),
+  };
+}
+
+function discoveredCapabilities(mapped: AiAppInputs, nodes: AiAppProfile['nodes'], previous: ProviderCapabilities): ProviderCapabilities {
+  const modes = inferSupportedModes(mapped, nodes);
+  const faceswap = modes.includes('faceswap');
+  return {
+    ...previous,
+    supportedModes: modes,
+    maxImageRefs: faceswap ? 1 : (mapped.refImages.length || Number(Boolean(mapped.firstFrame?.nodeId)) + Number(Boolean(mapped.lastFrame?.nodeId))),
+    maxAudioRefs: faceswap ? 0 : mapped.refAudios.length,
+    maxVideoRefs: faceswap ? 1 : (mapped.refVideos ?? []).length,
+    maxTotalRefs: faceswap ? 2 : Math.max(mapped.refImages.length, Number(Boolean(mapped.firstFrame?.nodeId)) + Number(Boolean(mapped.lastFrame?.nodeId)))
+      + mapped.refAudios.length + (mapped.refVideos ?? []).length,
+    audioSupported: faceswap ? false : previous.audioSupported || mapped.refAudios.length > 0,
+    ...(faceswap ? { preservesSourceAudio: true } : {}),
+  };
+}
+
+function previewAsset(kind: 'image' | 'video' | 'audio', n: number): MediaAsset {
+  return {
+    id: `preview-${kind}-${n}`,
+    kind,
+    fileName: `preview-${kind}-${n}`,
+    mimeType: kind === 'image' ? 'image/png' : kind === 'video' ? 'video/mp4' : 'audio/mpeg',
+    sizeBytes: 0,
+    source: 'other',
+    label: `preview-${kind}-${n}`,
+    tags: [],
+    createdAt: '1970-01-01T00:00:00.000Z',
+  };
+}
+
+function previewReferences(mode: H3Mode): Array<{ asset: MediaAsset; roles: import('@h3mise/shared').ReferenceRole[]; providerRef: string; label: string }> {
+  const image = (n: number) => ({ asset: previewAsset('image', n), roles: [], label: `preview-image-${n}`, providerRef: `{{upload:image-${n}}}` });
+  const video = (n: number) => ({ asset: previewAsset('video', n), roles: [], label: `preview-video-${n}`, providerRef: `{{upload:video-${n}}}` });
+  switch (mode) {
+    case 'i2va': return [{ ...image(1), roles: ['first_frame'] }];
+    case 'l2va': return [{ ...image(1), roles: ['last_frame'] }];
+    case 'fl2va': return [{ ...image(1), roles: ['first_frame'] }, { ...image(2), roles: ['last_frame'] }];
+    case 'ref2va': return [image(1)];
+    case 'vref2va': return [video(1), image(1)];
+    case 'faceswap': return [image(1), video(1)];
+    default: return [];
+  }
 }
 
 export class ProviderRegistry {
@@ -293,9 +545,30 @@ export class ProviderRegistry {
   }
 
   get(id: string, mode?: H3Mode): VideoProvider | undefined {
-    if (id === 'runninghub' && this.isFrameMode(mode) && this.getFrameProfile()) return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: this.getFrameProfile()! });
-    if (id === 'runninghub' && mode === 'vref2va') return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: this.getVideoReferenceProfile() });
+    if (id === 'runninghub' && mode) {
+      const profile = this.getProfileForMode(mode);
+      if (profile) return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile });
+    }
     return this.providers.get(id);
+  }
+
+  /** Resolve the provider for a persisted render snapshot. The snapshot's
+   * App ID wins over the current active workflow so a queued paid job can
+   * never silently switch Apps after the user changes Settings mid-queue. */
+  getForSubmission(id: string, mode: H3Mode | undefined, appId?: string | null): VideoProvider | undefined {
+    if (id !== 'runninghub') return this.get(id, mode);
+    const resolved = this.getProfileForMode(mode);
+    if (!appId || resolved?.appId === appId) return this.get(id, mode);
+    const profile = this.getProfile();
+    if (profile) {
+      const workflow = profile.apps.find((entry) => entry.appId === appId);
+      if (workflow) return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: workflowAsProfile(workflow, profile) });
+      const frame = this.getFrameProfile();
+      if (frame?.appId === appId) return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: frame });
+      const legacyVideo = this.getVideoReferenceProfile();
+      if (legacyVideo.appId === appId) return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: legacyVideo });
+    }
+    return undefined;
   }
 
   /** Scheduler limit. Unknown/invalid values always collapse to the safest
@@ -326,13 +599,13 @@ export class ProviderRegistry {
   }
 
   async capabilities(id: string, mode?: H3Mode): Promise<ProviderCapabilities | undefined> {
-    if (id === 'runninghub' && this.isFrameMode(mode) && this.getFrameProfile()) {
-      const profile = this.getFrameProfile()!;
-      return ['nodes_detected', 'verified'].includes(profile.verification.status) ? profile.capabilities : { supportedModes: [] };
-    }
-    if (id === 'runninghub' && mode === 'vref2va') {
-      const profile = this.getVideoReferenceProfile();
-      return ['nodes_detected', 'verified'].includes(profile.verification.status) ? profile.capabilities : { supportedModes: [] };
+    if (id === 'runninghub' && mode) {
+      const profile = this.getProfileForMode(mode);
+      if (!profile) return undefined;
+      // P0-6: only node-detected or verified evidence is executable.
+      return ['nodes_detected', 'verified'].includes(profile.verification.status)
+        ? profile.capabilities
+        : { supportedModes: [] };
     }
     const prov = this.providers.get(id);
     if (!prov) return undefined;
@@ -364,14 +637,23 @@ export class ProviderRegistry {
    * capabilities(id, mode); this union only describes what the UI may offer. */
   async accountCapabilities(id: string): Promise<ProviderCapabilities | undefined> {
     const caps = await this.capabilities(id);
-    if (id !== 'runninghub' || !this.getFrameProfile()) return caps;
-    const frame = await this.capabilities(id, 'i2va');
-    const modes = [...new Set([...(caps?.supportedModes ?? []), ...(frame?.supportedModes ?? [])])];
-    return { ...(caps ?? { supportedModes: [] }), supportedModes: modes };
+    if (id !== 'runninghub') return caps;
+    const modes = new Set<H3Mode>(caps?.supportedModes ?? []);
+    const add = (profile: AiAppProfile | null | undefined) => {
+      if (!profile || !['nodes_detected', 'verified'].includes(profile.verification.status)) return;
+      for (const mode of profile.capabilities.supportedModes) modes.add(mode);
+    };
+    const profile = this.getProfile();
+    add(profile);
+    for (const workflow of profile?.apps ?? []) add(workflowAsProfile(workflow, profile!));
+    add(this.getFrameProfile());
+    const legacyVideo = this.getVideoReferenceProfile();
+    if (['nodes_detected', 'verified'].includes(legacyVideo.verification.status)) add(legacyVideo);
+    return { ...(caps ?? { supportedModes: [] }), supportedModes: H3_MODES.filter((mode) => modes.has(mode)) };
   }
 
   async statuses(): Promise<ProviderStatus[]> {
-    // Auto-detect in the background when we have a key but no node data yet �?
+    // Auto-detect in the background when we have a key but no node data yet —
     // never blocks the response (the probe can take up to 30s).
     void this.maybeAutoDetect();
     const out: ProviderStatus[] = [];
@@ -379,14 +661,35 @@ export class ProviderRegistry {
       const caps = await this.accountCapabilities(id);
       const isRh = prov instanceof RunningHubAiAppProvider;
       const isComfy = prov instanceof ComfyUiProvider;
-      const profile = isRh ? this.getProfile() : isComfy ? this.getComfyUiProfile() : null;
+      const rhProfile = isRh ? this.getProfile() : null;
+      const comfyProfile = isComfy ? this.getComfyUiProfile() : null;
+      const workflows: ProviderWorkflowSummary[] | undefined = rhProfile
+        ? rhProfile.apps.map((workflow) => ({
+            id: workflow.id,
+            name: workflow.name,
+            appId: workflow.appId,
+            description: workflow.description,
+            active: workflow.id === rhProfile.activeWorkflowId,
+            runnable: Boolean(workflow.runnable),
+            verification: workflow.verification ?? emptyVerification(),
+            modes: workflow.modes ?? [],
+            readiness: workflow.readiness ?? [],
+          }))
+        : undefined;
       out.push({
         id,
         name: prov.name,
         kind: isRh ? 'runninghub_ai_app' : isComfy ? 'comfyui_local' : 'mock',
         configured: prov.configured,
-        verification: profile?.verification ?? { status: 'unconfigured', checkedAt: null, note: 'mock provider' },
+        verification: rhProfile?.verification ?? comfyProfile?.verification ?? { status: 'unconfigured', checkedAt: null, note: 'mock provider' },
         capabilities: caps ?? null,
+        ...(rhProfile ? {
+          activeWorkflowId: rhProfile.activeWorkflowId ?? null,
+          activeModes: ['nodes_detected', 'verified'].includes(rhProfile.verification.status)
+            ? rhProfile.capabilities.supportedModes
+            : [],
+          workflows,
+        } : {}),
       });
     }
     return out;
@@ -436,16 +739,51 @@ export class ProviderRegistry {
     return profile;
   }
 
+  /** Resolve the workflow that owns a mode. Frame modes keep their separate
+   * App evidence; every other mode picks the active workflow when it declares
+   * the mode, otherwise the first saved workflow that does. Never falls back
+   * to an unrelated App's node mapping. */
   getProfileForMode(mode?: H3Mode): AiAppProfile | null {
-    if (mode === 'vref2va') return this.getVideoReferenceProfile();
-    if (this.isFrameMode(mode)) return this.getFrameProfile() ?? this.getProfile();
-    return this.getProfile();
+    const primary = this.getProfile();
+    if (!primary) return null;
+    if (this.isFrameMode(mode)) return this.getFrameProfile() ?? primary;
+    if (mode === 'vref2va') {
+      const active = this.activeWorkflowAsProfile(primary);
+      if (active.capabilities.supportedModes.includes(mode)) return active;
+      const workflow = this.findWorkflowForMode(primary, mode);
+      if (workflow) return workflowAsProfile(workflow, primary);
+      const legacy = this.getVideoReferenceProfile();
+      if (['nodes_detected', 'verified'].includes(legacy.verification.status)
+        && legacy.capabilities.supportedModes.includes(mode)) return legacy;
+      return primary;
+    }
+    const active = this.activeWorkflowAsProfile(primary);
+    if (!mode || active.capabilities.supportedModes.includes(mode)) return active;
+    const workflow = this.findWorkflowForMode(primary, mode);
+    return workflow ? workflowAsProfile(workflow, primary) : active;
+  }
+
+  private activeWorkflowAsProfile(profile: AiAppProfile): AiAppProfile {
+    const active = profile.apps.find((workflow) => workflow.id === profile.activeWorkflowId);
+    return active ? workflowAsProfile(active, profile) : profile;
+  }
+
+  private findWorkflowForMode(profile: AiAppProfile, mode: H3Mode): WorkflowProfile | null {
+    const usable = (workflow: WorkflowProfile) =>
+      Boolean(workflow.inputs?.prompt.nodeId && workflow.capabilities?.supportedModes.includes(mode));
+    const active = profile.apps.find((workflow) => workflow.id === profile.activeWorkflowId);
+    if (active && usable(active)) return active;
+    return profile.apps.find(usable) ?? null;
   }
 
   private persistFrameProfile(profile: AiAppProfile): AiAppProfile {
-    this.getRegistryDb().run('INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at', ['runninghub_frames', j(profile), new Date().toISOString()]);
+    // A frame profile has no secondary workflow list; synthesize its single
+    // entry from the top-level evidence so a later verification confirmation
+    // cannot be shadowed by a stale `apps[]` mirror.
+    const clean = this.sanitizeProfile({ ...profile, apps: [] });
+    this.getRegistryDb().run('INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at', ['runninghub_frames', j(clean), new Date().toISOString()]);
     this.refresh();
-    return profile;
+    return clean;
   }
 
   saveFrameProfile(raw: unknown): AiAppProfile {
@@ -505,15 +843,16 @@ export class ProviderRegistry {
   }
 
   private persistVideoReferenceProfile(profile: AiAppProfile): AiAppProfile {
-    this.getRegistryDb().run('INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at', ['runninghub_video_reference', j(profile), new Date().toISOString()]);
+    const clean = this.sanitizeProfile({ ...profile, apps: [] });
+    this.getRegistryDb().run('INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at', ['runninghub_video_reference', j(clean), new Date().toISOString()]);
     this.refresh();
-    return profile;
+    return clean;
   }
 
   async detectVideoReference(): Promise<AiAppProfile> {
     const profile = this.getVideoReferenceProfile();
     try {
-      const provider = this.get('runninghub', 'vref2va') as RunningHubAiAppProvider;
+      const provider = new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile });
       const nodes = await provider.discoverNodes();
       const inputs = mapDiscoveredNodes(nodes);
       if (inputs.refVideos?.length !== 1 || !inputs.prompt.nodeId || inputs.refImages.length > 3) throw new Error('需要明确的一个视频输入、提示词输入及至多三个参考图片输入，请检查 apiCallDemo 映射');
@@ -528,8 +867,11 @@ export class ProviderRegistry {
     return this.persistVideoReferenceProfile({ ...profile, verification: { status: 'verified', checkedAt: new Date().toISOString(), note: '真实视频参考任务已提交' } });
   }
 
-  /** Merge a user-edited profile over defaults: appId must be non-empty,
-   * every input slot needs a nodeId/fieldName, verification falls back. */
+  /**
+   * Upgrade every saved AI App entry into a self-contained workflow profile.
+   * A bare `{ id, name, appId }` reference remains executable only when it can
+   * inherit the legacy top-level mapping; otherwise it is saved but blocked.
+   */
   private sanitizeProfile(raw: unknown): AiAppProfile {
     const base = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const region: RunningHubRegion = base.region === 'global'
@@ -540,63 +882,206 @@ export class ProviderRegistry {
           ? 'global'
           : 'cn';
     const d = defaultAiAppProfile(region);
-    const appId = typeof base.appId === 'string' && base.appId.trim() ? base.appId.trim() : d.appId;
-    const inputsIn = (base.inputs && typeof base.inputs === 'object' ? base.inputs : {}) as Record<string, unknown>;
-    const slotOf = (v: unknown): { nodeId: string; fieldName: string } => {
-      const s = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
-      return {
-        nodeId: typeof s.nodeId === 'string' ? s.nodeId.trim() : '',
-        fieldName: typeof s.fieldName === 'string' ? s.fieldName.trim() : '',
-      };
-    };
-    const inputsRaw: Record<string, unknown> = {};
-    for (const key of Object.keys(d.inputs) as Array<keyof AiAppProfile['inputs']>) {
-      const def = d.inputs[key];
-      const raw = inputsIn[key];
-      if (Array.isArray(def)) {
-        // Array slot (refImages etc.): keep user's list if present, else empty.
-        inputsRaw[key] = (Array.isArray(raw) ? raw : []).map(slotOf);
-      } else {
-        // Empty nodeId = explicitly disabled slot; keep it disabled (user intent).
-        const slot = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-        const nodeId = typeof slot.nodeId === 'string' ? slot.nodeId.trim() : def?.nodeId ?? '';
-        inputsRaw[key] = {
-          nodeId,
-          fieldName: typeof slot.fieldName === 'string' && slot.fieldName.trim() ? slot.fieldName.trim() : def?.fieldName ?? '',
-        };
-      }
+    const topAppId = typeof base.appId === 'string' && base.appId.trim() ? base.appId.trim() : d.appId;
+    const topNodes = Array.isArray(base.nodes) ? base.nodes as AiAppProfile['nodes'] : [];
+    const topInputs = sanitizeInputs(base.inputs, d.inputs);
+    const topCapabilities = sanitizeCapabilities(base.capabilities, topInputs, topNodes) ?? d.capabilities;
+    const topVerification = sanitizeVerification(base.verification, d.verification);
+    const explicitActive = typeof base.activeWorkflowId === 'string' && base.activeWorkflowId.trim()
+      ? base.activeWorkflowId.trim()
+      : '';
+    let apps = Array.isArray(base.apps)
+      ? base.apps.map((entry) => sanitizeWorkflow(entry)).filter((entry): entry is WorkflowProfile => Boolean(entry))
+      : [];
+    if (!apps.length) {
+      apps = [{
+        id: 'primary',
+        name: '主视频生成',
+        appId: topAppId,
+        description: '默认 H3 视频生成 App',
+        inputs: topInputs,
+        nodes: topNodes,
+        capabilities: topCapabilities,
+        verification: topVerification,
+        providerParamBindings: sanitizeBindings(base.providerParamBindings),
+      }];
     }
-    const inputs = inputsRaw as AiAppProfile['inputs'];
-    const verification = base.verification && typeof base.verification === 'object'
-      ? base.verification
-      : d.verification;
-    return {
+    const ids = new Map<string, number>();
+    apps = apps.map((entry) => {
+      const n = ids.get(entry.id) ?? 0;
+      ids.set(entry.id, n + 1);
+      return n === 0 ? entry : { ...entry, id: `${entry.id}-${n + 1}` };
+    });
+    let active = explicitActive ? apps.find((entry) => entry.id === explicitActive) : undefined;
+    if (!active) active = apps.find((entry) => entry.appId === topAppId);
+    const appIdMismatch = !apps.some((entry) => entry.appId === topAppId);
+    const legacyTopLevel = (appIdMismatch && (!explicitActive || active?.appId !== topAppId))
+      || (active?.appId === topAppId && (!active.inputs || active.verification?.status === 'unconfigured'));
+    if (legacyTopLevel) {
+      // Older profiles stored the real primary App at the top level while
+      // `apps[]` still contained secondary/stale entries. Promote the
+      // top-level mapping into the active entry once; later saves mirror the
+      // active entry, so an explicitly selected unmapped workflow stays blocked.
+      const id = explicitActive || active?.id || apps[0]?.id || 'primary';
+      const promoted: WorkflowProfile = {
+        id,
+        name: active?.name ?? '主视频生成',
+        appId: topAppId,
+        ...(active?.description ? { description: active.description } : {}),
+        inputs: topInputs,
+        nodes: topNodes,
+        capabilities: topCapabilities,
+        verification: topVerification,
+        providerParamBindings: sanitizeBindings(base.providerParamBindings),
+      };
+      apps = [promoted, ...apps.filter((entry) => entry.id !== id)];
+      active = promoted;
+    }
+    if (!active) active = apps[0]!;
+    const activeId = active.id;
+    const ordered = [active, ...apps.filter((entry) => entry.id !== activeId)].map(enrichWorkflow);
+    const inputs = active.inputs ?? disabledInputs();
+    const capabilities = active.capabilities ?? { supportedModes: [] };
+    const verification = active.verification ?? emptyVerification();
+    const profile: AiAppProfile = {
       ...d,
       ...base,
       region,
-      appId,
       concurrency: Number.isInteger(Number(base.concurrency))
         ? Math.min(4, Math.max(1, Number(base.concurrency)))
         : d.concurrency,
-      invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${appId}`,
-      nodes: Array.isArray(base.nodes) ? base.nodes : d.nodes,
+      appId: active.appId,
+      invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${active.appId}`,
+      nodes: active.nodes ?? [],
       inputs,
-      verification: { ...d.verification, ...(verification as object) },
-    } as AiAppProfile;
+      capabilities,
+      verification,
+      apps: ordered,
+      activeWorkflowId: activeId,
+      providerParamBindings: active.providerParamBindings,
+    };
+    delete (profile as unknown as Record<string, unknown>).bindingSlots;
+    delete (profile as unknown as Record<string, unknown>).slotsByMode;
+    delete (profile as unknown as Record<string, unknown>).workflowReadiness;
+    delete (profile as unknown as Record<string, unknown>).workflowSummaries;
+    delete (profile as unknown as Record<string, unknown>).activeModes;
+    return profile;
   }
 
   saveProfile(raw: unknown): AiAppProfile {
     const previous = this.getProfile() ?? defaultAiAppProfile();
-    let profile = this.sanitizeProfile(raw);
+    const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const explicitActive = typeof input.activeWorkflowId === 'string' && input.activeWorkflowId.trim()
+      ? input.activeWorkflowId.trim()
+      : undefined;
+    if (explicitActive && !previous.apps.some((entry) => entry.id === explicitActive)
+      && !(Array.isArray(input.apps) && input.apps.some((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).id === explicitActive))) {
+      throw new Error(`activeWorkflowId "${explicitActive}" does not match any saved workflow`);
+    }
+    let appsRaw: unknown[] | null = Array.isArray(input.apps) ? input.apps : null;
+    if (!appsRaw) {
+      // Legacy PUTs without apps update only the active workflow.
+      const activeId = previous.activeWorkflowId ?? previous.apps[0]?.id;
+      appsRaw = previous.apps.map((entry) => {
+        if (entry.id !== activeId) return entry;
+        return {
+          ...entry,
+          ...(input.appId === undefined ? {} : { appId: input.appId }),
+          ...(input.inputs === undefined ? {} : { inputs: input.inputs }),
+          ...(input.nodes === undefined ? {} : { nodes: input.nodes }),
+          ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
+          ...(input.verification === undefined ? {} : { verification: input.verification }),
+          ...(input.providerParamBindings === undefined ? {} : { providerParamBindings: input.providerParamBindings }),
+        };
+      });
+    }
+    const mergedApps = appsRaw.map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const rec = entry as Record<string, unknown>;
+      const id = typeof rec.id === 'string' && rec.id.trim() ? rec.id.trim() : '';
+      const appId = typeof rec.appId === 'string' ? rec.appId.trim() : '';
+      const prior = previous.apps.find((item) => item.id === id)
+        ?? previous.apps.find((item) => item.appId === appId);
+      if (!prior) return rec;
+      const declaresMapping = Object.prototype.hasOwnProperty.call(rec, 'inputs')
+        || Object.prototype.hasOwnProperty.call(rec, 'nodes')
+        || Object.prototype.hasOwnProperty.call(rec, 'capabilities')
+        || Object.prototype.hasOwnProperty.call(rec, 'verification');
+      if (declaresMapping) return rec;
+      if (appId && appId !== prior.appId) {
+        return { ...prior, ...rec, appId, inputs: undefined, nodes: [], capabilities: { supportedModes: [] }, verification: emptyVerification('AI App 已修改；请检测新 App 的节点映射') };
+      }
+      return { ...prior, ...rec };
+    });
+    const requestedActive = explicitActive ?? previous.activeWorkflowId;
+    // A truly explicit switch (activation) takes its mapping from the target;
+    // a PUT that merely echoes the existing activeWorkflowId is a legacy
+    // top-level update and must keep its submitted evidence.
+    const activeSwitch = Boolean(explicitActive && explicitActive !== previous.activeWorkflowId);
+    const activeRaw = requestedActive
+      ? mergedApps.find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).id === requestedActive)
+      : undefined;
+    const activeEntry = activeRaw && typeof activeRaw === 'object' ? activeRaw as Record<string, unknown> : null;
+    let profile = this.sanitizeProfile({
+      ...previous,
+      ...input,
+      apps: mergedApps,
+      activeWorkflowId: requestedActive,
+      // These fields mirror the active workflow only; never let a stale PUT
+      // body override the workflow evidence. An explicit active switch takes
+      // its App ID and mapping from that workflow, not from the old mirror.
+      appId: activeSwitch ? (typeof activeEntry?.appId === 'string' ? activeEntry.appId : input.appId ?? previous.appId) : input.appId ?? previous.appId,
+      inputs: activeSwitch ? (activeEntry?.inputs ?? input.inputs ?? previous.inputs) : input.inputs ?? previous.inputs,
+      nodes: activeSwitch ? (activeEntry?.nodes ?? input.nodes ?? previous.nodes) : input.nodes ?? previous.nodes,
+      capabilities: activeSwitch ? (activeEntry?.capabilities ?? input.capabilities ?? previous.capabilities) : input.capabilities ?? previous.capabilities,
+      verification: activeSwitch ? (activeEntry?.verification ?? input.verification ?? previous.verification) : input.verification ?? previous.verification,
+    });
     const regionChanged = profile.region !== previous.region;
-    const mappingChanged = profile.region !== previous.region || profile.appId !== previous.appId || JSON.stringify(profile.inputs) !== JSON.stringify(previous.inputs);
-    if (mappingChanged) {
+    const changed = new Set<string>();
+    for (const entry of profile.apps) {
+      const prior = previous.apps.find((item) => item.id === entry.id);
+      if (!prior || prior.appId !== entry.appId || JSON.stringify(prior.inputs) !== JSON.stringify(entry.inputs)) {
+        changed.add(entry.id);
+      }
+    }
+    if (regionChanged) {
       profile = {
         ...profile,
-        nodes: [],
-        verification: { status: 'unconfigured', checkedAt: null, note: 'RunningHub 站点、AI App 或节点映射已修改，请重新检测' },
+        apps: profile.apps.map((entry) => ({
+          ...entry,
+          nodes: [],
+          capabilities: { ...(entry.capabilities ?? { supportedModes: [] }), supportedModes: [] },
+          verification: emptyVerification('RunningHub 站点已修改；请重新检测该 App 的节点映射'),
+        })),
+      };
+    } else if (changed.size) {
+      profile = {
+        ...profile,
+        apps: profile.apps.map((entry) => changed.has(entry.id)
+          ? {
+              ...entry,
+              nodes: [],
+              capabilities: { ...(entry.capabilities ?? { supportedModes: [] }), supportedModes: [] },
+              verification: emptyVerification('AI App 或节点映射已修改；请重新检测'),
+            }
+          : entry),
       };
     }
+    // Re-mirror the active workflow after evidence resets. Reset the
+    // top-level mirror too, otherwise sanitize would promote stale verified
+    // top-level evidence back into the freshly invalidated workflow.
+    const mirrored = profile.apps.find((entry) => entry.id === profile.activeWorkflowId);
+    if (mirrored) {
+      profile = {
+        ...profile,
+        appId: mirrored.appId,
+        inputs: mirrored.inputs ?? disabledInputs(),
+        nodes: mirrored.nodes ?? [],
+        capabilities: mirrored.capabilities ?? { supportedModes: [] },
+        verification: mirrored.verification ?? emptyVerification(),
+      };
+    }
+    profile = this.sanitizeProfile(profile);
     const saved = this.persistProfile(profile);
     if (regionChanged) {
       const storyboard = this.getStoryboardProfile();
@@ -633,6 +1118,20 @@ export class ProviderRegistry {
    * is heuristic until a real submission succeeds against it, so the status
    * becomes 'nodes_detected', not 'verified'.
    */
+  private updateWorkflowEvidence(profile: AiAppProfile, id: string, patch: Partial<WorkflowProfile>): AiAppProfile {
+    const apps = profile.apps.map((entry) => entry.id === id ? { ...entry, ...patch } : entry);
+    return this.persistProfile(this.sanitizeProfile({
+      ...profile,
+      apps,
+      activeWorkflowId: profile.activeWorkflowId ?? apps[0]?.id,
+      appId: profile.appId,
+      inputs: profile.inputs,
+      nodes: profile.nodes,
+      capabilities: profile.capabilities,
+      verification: profile.verification,
+    }));
+  }
+
   async detectAndVerify(): Promise<AiAppProfile> {
     const p = this.getProject();
     if (!p) throw new Error('no project open');
@@ -641,6 +1140,7 @@ export class ProviderRegistry {
     if (!provider || !(provider instanceof RunningHubAiAppProvider)) {
       throw new Error('runninghub provider not active (mock mode?)');
     }
+    const activeId = current.activeWorkflowId ?? current.apps[0]?.id ?? 'primary';
     let nodes: AiAppProfile['nodes'];
     let note: string;
     try {
@@ -649,25 +1149,151 @@ export class ProviderRegistry {
     } catch (e) {
       nodes = current.nodes;
       note = `detection failed: ${e instanceof Error ? e.message : e}`;
-      const failed = { ...current, verification: { status: 'failed' as const, checkedAt: new Date().toISOString(), note } };
-      return this.persistProfile(this.sanitizeProfile(failed));
+      return this.updateWorkflowEvidence(current, activeId, {
+        nodes: [],
+        capabilities: { supportedModes: [] },
+        verification: { status: 'failed', checkedAt: new Date().toISOString(), note },
+      });
     }
     const mapped = mapDiscoveredNodes(nodes);
-    const updated: AiAppProfile = {
-      ...current,
+    return this.updateWorkflowEvidence(current, activeId, {
       nodes,
       inputs: mapped,
-      capabilities: { ...current.capabilities, supportedModes: inferSupportedModes(mapped, nodes),
-        maxImageRefs: mapped.refImages.length || Number(Boolean(mapped.firstFrame?.nodeId)) + Number(Boolean(mapped.lastFrame?.nodeId)),
-        maxAudioRefs: mapped.refAudios.length,
-        maxVideoRefs: (mapped.refVideos ?? []).length,
-        maxTotalRefs: Math.max(mapped.refImages.length, Number(Boolean(mapped.firstFrame?.nodeId)) + Number(Boolean(mapped.lastFrame?.nodeId)))
-          + mapped.refAudios.length + (mapped.refVideos ?? []).length,
-        audioSupported: current.capabilities.audioSupported || mapped.refAudios.length > 0,
-      },
+      capabilities: discoveredCapabilities(mapped, nodes, current.capabilities),
       verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
+    });
+  }
+
+  /** Verify one saved workflow without changing which workflow is active. */
+  async verifyWorkflow(id: string): Promise<WorkflowProfile> {
+    const profile = this.getProfile() ?? defaultAiAppProfile();
+    const workflow = profile.apps.find((entry) => entry.id === id);
+    if (!workflow) throw new Error(`workflow not found: ${id}`);
+    try {
+      const provider = new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: workflowAsProfile(workflow, profile) });
+      const nodes = await provider.discoverNodes();
+      const mapped = mapDiscoveredNodes(nodes);
+      const capabilities = discoveredCapabilities(mapped, nodes, workflow.capabilities ?? { supportedModes: [] });
+      if (!mapped.prompt.nodeId || !capabilities.supportedModes.length) {
+        throw new Error('未识别到可用的 Prompt 或参考输入映射，请检查 apiCallDemo 节点');
+      }
+      if (capabilities.supportedModes.includes('faceswap') && ((mapped.refVideos ?? []).filter((slot) => slot.nodeId).length !== 1 || mapped.refImages.filter((slot) => slot.nodeId).length !== 1)) {
+        throw new Error('换脸模式需要恰好一个人脸图片槽位和一个源视频槽位');
+      }
+      const updated = this.updateWorkflowEvidence(profile, id, {
+        nodes,
+        inputs: mapped,
+        capabilities,
+        verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: `已检测 ${nodes.length} 个节点；真实提交成功后才标记为已验证` },
+      });
+      return updated.apps.find((entry) => entry.id === id)!;
+    } catch (error) {
+      const updated = this.updateWorkflowEvidence(profile, id, {
+        nodes: [],
+        capabilities: { supportedModes: [] },
+        verification: { status: 'failed', checkedAt: new Date().toISOString(), note: error instanceof Error ? error.message : String(error) },
+      });
+      const failed = updated.apps.find((entry) => entry.id === id)!;
+      throw Object.assign(new Error(failed.verification?.note ?? 'workflow verification failed'), { workflow: failed });
+    }
+  }
+
+  /** Create or update a workflow entry. Renaming preserves evidence; changing
+   * the App ID or node mapping invalidates it. */
+  upsertWorkflow(raw: unknown): WorkflowProfile {
+    const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const profile = this.getProfile() ?? defaultAiAppProfile();
+    const requestedId = typeof input.id === 'string' && input.id.trim() ? input.id.trim() : '';
+    const appId = typeof input.appId === 'string' ? input.appId.trim() : '';
+    if (!appId) throw new Error('appId is required');
+    const existing = profile.apps.find((entry) => (requestedId && entry.id === requestedId) || entry.appId === appId) ?? null;
+    const id = requestedId || existing?.id || `wf-${appId}`;
+    const next: WorkflowProfile = {
+      ...(existing ?? {}),
+      id,
+      appId,
+      name: typeof input.name === 'string' && input.name.trim() ? input.name.trim() : existing?.name ?? `AI App ${appId}`,
+      ...(typeof input.description === 'string' ? { description: input.description.trim() } : {}),
+      ...(typeof input.kind === 'string' ? { kind: input.kind as WorkflowProfile['kind'] } : {}),
+      ...(input.inputs !== undefined ? { inputs: sanitizeInputs(input.inputs, disabledInputs()) } : {}),
+      ...(input.providerParamBindings !== undefined ? { providerParamBindings: sanitizeBindings(input.providerParamBindings) } : {}),
+      verification: existing?.verification ?? emptyVerification(),
     };
-    return this.persistProfile(this.sanitizeProfile(updated));
+    delete next.runnable;
+    delete next.modes;
+    delete next.readiness;
+    const apps = existing
+      ? profile.apps.map((entry) => entry.id === existing.id ? next : entry)
+      : [...profile.apps, next];
+    const saved = this.saveProfile({
+      ...profile,
+      apps,
+      activeWorkflowId: profile.activeWorkflowId,
+      appId: profile.appId,
+      inputs: profile.inputs,
+      nodes: profile.nodes,
+      capabilities: profile.capabilities,
+      verification: profile.verification,
+    });
+    return saved.apps.find((entry) => entry.id === id)!;
+  }
+
+  /** Active workflow selection is explicit and requires a real node mapping. */
+  activateWorkflow(id: string): AiAppProfile {
+    const profile = this.getProfile() ?? defaultAiAppProfile();
+    const workflow = profile.apps.find((entry) => entry.id === id);
+    if (!workflow) throw new Error(`workflow not found: ${id}`);
+    if (!workflow.inputs?.prompt.nodeId || !workflow.capabilities?.supportedModes.length) {
+      throw new Error('该 AI App 还没有节点映射，不能设为当前工作流；请先检测节点');
+    }
+    if (workflow.verification?.status === 'failed') {
+      throw new Error('该 AI App 节点检测失败，请重新检测后再设为当前工作流');
+    }
+    return this.saveProfile({
+      ...profile,
+      activeWorkflowId: id,
+      appId: profile.appId,
+      inputs: profile.inputs,
+      nodes: profile.nodes,
+      capabilities: profile.capabilities,
+      verification: profile.verification,
+    });
+  }
+
+  /** Render the exact nodeInfoList a mode WOULD submit. Local and free. */
+  previewWorkflow(id: string, mode: H3Mode, overrides: { durationSeconds?: number; aspectRatio?: string; megapixels?: number } = {}): {
+    workflowId: string;
+    appId: string;
+    mode: H3Mode;
+    nodeInfoList: Array<{ nodeId: string; fieldName: string; fieldValue: string }>;
+    note: string;
+  } {
+    const profile = this.getProfile() ?? defaultAiAppProfile();
+    const workflow = profile.apps.find((entry) => entry.id === id);
+    if (!workflow) throw new Error(`workflow not found: ${id}`);
+    if (!workflow.inputs?.prompt.nodeId) throw new Error('该工作流还没有节点映射');
+    if (!workflow.capabilities?.supportedModes.includes(mode)) throw new Error(`该工作流未声明 ${mode} 模式`);
+    if (!['nodes_detected', 'verified'].includes(workflow.verification?.status ?? '')) {
+      throw new Error('该工作流尚未通过节点检测，不能预览提交载荷');
+    }
+    const provider = new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile: workflowAsProfile(workflow, profile) });
+    const references = previewReferences(mode);
+    const nodeInfoList = provider.previewNodeInfoList({
+      mode,
+      prompt: '<compiled prompt>',
+      durationSeconds: overrides.durationSeconds ?? 5,
+      aspectRatio: overrides.aspectRatio ?? '16:9',
+      megapixels: overrides.megapixels,
+      references,
+      providerParams: {},
+    });
+    return {
+      workflowId: id,
+      appId: workflow.appId,
+      mode,
+      nodeInfoList,
+      note: '这是不联网、不提交的本地载荷预览；上传文件名以上传后的真实值为准。',
+    };
   }
 
   /**
@@ -676,11 +1302,40 @@ export class ProviderRegistry {
    */
   confirmVerified(): AiAppProfile {
     const profile = this.getProfile() ?? defaultAiAppProfile();
-    const updated: AiAppProfile = {
-      ...profile,
+    const id = profile.activeWorkflowId ?? profile.apps[0]?.id;
+    if (!id) return profile;
+    return this.updateWorkflowEvidence(profile, id, {
       verification: { status: 'verified', checkedAt: new Date().toISOString(), note: 'a real render submission succeeded against this profile' },
-    };
-    return this.persistProfile(this.sanitizeProfile(updated));
+    });
+  }
+
+  /** Confirm the workflow that actually produced a task ID (which may not be
+   * the active one, e.g. faceswap or a frame App). */
+  confirmSubmission(appId: string, mode?: H3Mode): void {
+    try {
+      if (this.isFrameMode(mode) && this.getFrameProfile()?.appId === appId) {
+        this.confirmFrameVerified(appId);
+        return;
+      }
+      if (mode === 'vref2va') {
+        const legacy = this.getVideoReferenceProfile();
+        if (legacy.appId === appId) {
+          this.confirmVideoReferenceVerified();
+          return;
+        }
+      }
+      const profile = this.getProfile() ?? defaultAiAppProfile();
+      const workflow = profile.apps.find((entry) => entry.appId === appId);
+      if (workflow) {
+        this.updateWorkflowEvidence(profile, workflow.id, {
+          verification: { status: 'verified', checkedAt: new Date().toISOString(), note: 'a real render submission succeeded against this workflow' },
+        });
+        return;
+      }
+      this.confirmVerified();
+    } catch {
+      /* profile persistence is best-effort after a paid submit */
+    }
   }
 
   getStoryboardProfile(): StoryboardProviderProfile {

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { RenderJob, RenderJobStatus, RenderRequest } from '@h3mise/shared';
+import type { H3Mode, RenderJob, RenderJobStatus, RenderRequest } from '@h3mise/shared';
 import type { ProjectContext, ProjectStore } from '../project-store.js';
 import { j, jget, jgetOrNull } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
@@ -107,6 +107,18 @@ export class RenderQueue {
     private readonly capacityRetryBaseMs = 30_000,
   ) {
     this.pollMs = pollMs;
+  }
+
+  /** Test doubles may only implement get(); production uses the snapshot-aware
+   * resolver so a queued App can never change mid-flight. */
+  private providerFor(job: RenderJob) {
+    const registry = this.registry as ProviderRegistry & {
+      getForSubmission?: (id: string, mode: H3Mode | undefined, appId?: string | null) => import('../providers/types.js').VideoProvider | undefined;
+    };
+    if (typeof registry.getForSubmission === 'function') {
+      return registry.getForSubmission(job.provider, job.requestSnapshot?.mode, job.requestSnapshot?.aiAppId);
+    }
+    return this.registry.get(job.provider, job.requestSnapshot?.mode);
   }
 
   private providerLimit(provider: string): number {
@@ -453,7 +465,7 @@ export class RenderQueue {
       this.capacityRetries.delete(key);
       const handle = this.handles.get(key);
       if (handle) {
-        const provider = this.registry.get(job.provider, job.requestSnapshot?.mode);
+        const provider = this.providerFor(job);
         if (provider) provider.cancel(handle).catch(() => undefined);
       }
       this.handles.delete(key);
@@ -644,7 +656,7 @@ export class RenderQueue {
     // ctxFor() returns null after the switch and silently dropped the job.
     const p = await this.pipelineCtx(job.projectId);
     if (!p) return;
-    const provider = this.registry.get(job.provider, job.requestSnapshot?.mode);
+    const provider = this.providerFor(job);
     if (!provider) {
       await this.fail(job, 'provider not found: ' + job.provider);
       return;
@@ -693,12 +705,14 @@ export class RenderQueue {
         // P0-6: a real submission that returned a taskId confirms the node
         // mapping is executable 鈫?profile becomes 'verified'.
         if (job.provider !== 'mock') {
-          try {
-            if (job.provider === 'runninghub' && ['i2va', 'l2va', 'fl2va'].includes(job.requestSnapshot?.mode ?? '') && this.registry.getFrameProfile()) this.registry.confirmFrameVerified(job.requestSnapshot!.aiAppId);
-            else if (job.provider === 'runninghub' && job.requestSnapshot?.mode === 'vref2va') this.registry.confirmVideoReferenceVerified();
-            else this.registry.confirmProviderVerified(job.provider);
-          } catch {
-            /* profile persistence is best-effort here */
+          if (job.provider === 'runninghub') {
+            this.registry.confirmSubmission(job.requestSnapshot!.aiAppId, job.requestSnapshot?.mode);
+          } else {
+            try {
+              this.registry.confirmProviderVerified(job.provider);
+            } catch {
+              /* profile persistence is best-effort here */
+            }
           }
         }
         this.bus.emit({ type: 'render.job.queued', projectId: job.projectId, jobId: job.id, shotId: job.shotId });
@@ -754,7 +768,7 @@ export class RenderQueue {
     // re-read the row the worker itself persisted so polling actually starts.
     const fresh = (await this.getJobEnsured(job.projectId, job.id)) ?? job;
     if (!fresh.providerTaskId) return;
-    const provider = this.registry.get(job.provider, job.requestSnapshot?.mode);
+    const provider = this.providerFor(job);
     if (!provider) {
       await this.fail(job, 'provider not found');
       return;

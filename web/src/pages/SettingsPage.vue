@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
 import { locale, t } from '../stores/locale';
-import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, ProjectConfig, RunningHubRegion, StoryboardProviderProfile } from '@h3mise/shared';
+import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, ProjectConfig, RunningHubRegion, StoryboardProviderProfile, WorkflowProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
 const route = useRoute();
@@ -37,8 +37,13 @@ const verifyingComfy = ref(false);
 const storyboardProfile = ref<StoryboardProviderProfile | null>(null);
 const verifyingStoryboard = ref(false);
 const savingRegion = ref(false);
-const aiApps = ref<Array<{ id: string; name: string; appId: string; description?: string }>>([]);
+const aiApps = ref<WorkflowProfile[]>([]);
 const savingAiApps = ref(false);
+const payloadPreview = ref('');
+const frameProfile = ref<AiAppProfile | null>(null);
+const frameAppIdInput = ref('');
+const savingFrame = ref(false);
+const verifyingFrame = ref(false);
 const directorStyles = ref<DirectorStylePreset[]>([]);
 const projectConfigForm = ref<Pick<ProjectConfig, 'title' | 'default_provider' | 'default_aspect_ratio' | 'default_duration_seconds' | 'visual_style'>>({
   title: '',
@@ -132,13 +137,19 @@ async function load() {
     profileJson.value = JSON.stringify(profile.value, null, 2);
     // Sync AI Apps list from profile
     aiApps.value = profile.value?.apps?.length
-      ? [...profile.value.apps]
+      ? profile.value.apps.map((app) => ({ ...app }))
       : [{ id: 'app-primary', name: '主视频生成', appId: profile.value?.appId ?? '', description: '默认 H3 视频生成 App' }];
   } catch {
     /* profile stays null */
   }
   try {
     apiKeyInfo.value = await get<{ source: 'settings' | 'env' | 'none'; configured: boolean }>('/api/providers/runninghub/apikey');
+  } catch {
+    /* keep null */
+  }
+  try {
+    frameProfile.value = await get<AiAppProfile | null>('/api/providers/runninghub/frame-profile');
+    frameAppIdInput.value = frameProfile.value?.appId ?? '';
   } catch {
     /* keep null */
   }
@@ -255,7 +266,9 @@ function addAiApp() {
 }
 
 function removeAiApp(id: string) {
+  const removedActive = profile.value?.activeWorkflowId === id;
   aiApps.value = aiApps.value.filter((a) => a.id !== id);
+  if (removedActive && profile.value) profile.value.activeWorkflowId = aiApps.value[0]?.id;
 }
 
 async function saveAiApps() {
@@ -264,15 +277,104 @@ async function saveAiApps() {
     const updated = await put<AiAppProfile>('/api/providers/runninghub/profile', {
       ...profile.value,
       apps: aiApps.value,
-      // Keep primary appId in sync with apps[0]
-      appId: aiApps.value[0]?.appId ?? profile.value?.appId ?? '',
     });
     profile.value = updated;
+    profileJson.value = JSON.stringify(updated, null, 2);
+    aiApps.value = updated.apps.map((app) => ({ ...app }));
     notice.value = t('pages.settings.aiAppsSaved');
+    await project.refreshProviders();
   } catch (e) {
     notice.value = t('pages.settings.aiAppsSaveFailed', { msg: errorMessage(e) });
   } finally {
     savingAiApps.value = false;
+  }
+}
+
+async function activateAiApp(app: WorkflowProfile) {
+  if (!app.inputs?.prompt?.nodeId) {
+    notice.value = '该 App 还没有节点映射：请先保存，再检测节点，之后才能设为当前工作流。';
+    return;
+  }
+  try {
+    profile.value = await post<AiAppProfile>(`/api/providers/runninghub/workflows/${encodeURIComponent(app.id)}/activate`, {});
+    profileJson.value = JSON.stringify(profile.value, null, 2);
+    aiApps.value = profile.value.apps.map((entry) => ({ ...entry }));
+    notice.value = `已切换到 ${app.name || app.appId}`;
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = errorMessage(e);
+  }
+}
+
+async function verifyAiApp(app: WorkflowProfile) {
+  if (!profile.value?.apps?.some((entry) => entry.id === app.id)) {
+    notice.value = '请先保存 AI App 列表，再检测节点。';
+    return;
+  }
+  notice.value = '正在检测节点…';
+  try {
+    const workflow = await post<WorkflowProfile>(`/api/providers/runninghub/workflows/${encodeURIComponent(app.id)}/verify`, {});
+    profile.value = await get<AiAppProfile | null>('/api/providers/runninghub/profile');
+    if (profile.value) {
+      profileJson.value = JSON.stringify(profile.value, null, 2);
+      aiApps.value = profile.value.apps.map((entry) => ({ ...entry }));
+    }
+    notice.value = workflow.verification?.note ?? '节点检测完成';
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = errorMessage(e);
+    profile.value = await get<AiAppProfile | null>('/api/providers/runninghub/profile').catch(() => profile.value);
+    if (profile.value) {
+      profileJson.value = JSON.stringify(profile.value, null, 2);
+      aiApps.value = profile.value.apps.map((entry) => ({ ...entry }));
+    }
+  }
+}
+
+async function previewAiApp(app: WorkflowProfile) {
+  const mode = app.modes?.[0];
+  if (!mode) {
+    payloadPreview.value = '该工作流还没有可预览的模式。';
+    return;
+  }
+  try {
+    const result = await post<{ nodeInfoList: Array<{ nodeId: string; fieldName: string; fieldValue: string }> }>(
+      `/api/providers/runninghub/workflows/${encodeURIComponent(app.id)}/preview`,
+      { mode },
+    );
+    payloadPreview.value = JSON.stringify(result.nodeInfoList, null, 2);
+  } catch (e) {
+    payloadPreview.value = errorMessage(e);
+  }
+}
+
+async function saveFrameApp() {
+  savingFrame.value = true;
+  try {
+    frameProfile.value = await put<AiAppProfile>('/api/providers/runninghub/frame-profile', {
+      ...(frameProfile.value ?? {}),
+      appId: frameAppIdInput.value.trim(),
+    });
+    frameAppIdInput.value = frameProfile.value.appId;
+    notice.value = 'Frame App 已保存；现在可以检测节点。';
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = `Frame App 保存失败：${errorMessage(e)}`;
+  } finally {
+    savingFrame.value = false;
+  }
+}
+
+async function verifyFrameApp() {
+  verifyingFrame.value = true;
+  try {
+    frameProfile.value = await post<AiAppProfile>('/api/providers/runninghub/frame-profile/verify', {});
+    notice.value = localizedProviderNote(frameProfile.value.verification.note);
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = `Frame 节点检测失败：${errorMessage(e)}`;
+  } finally {
+    verifyingFrame.value = false;
   }
 }
 
@@ -446,19 +548,56 @@ watch(() => route.hash, async (hash) => {
           </div>
           <p class="muted">{{ t('pages.settings.aiAppHelp') }}</p>
           <div class="ai-apps">
-            <div v-for="(app, idx) in aiApps" :key="app.id" class="ai-app-card">
+            <div v-for="app in aiApps" :key="app.id" class="ai-app-card">
               <div class="ai-app-header row">
-                <span class="badge" :class="idx === 0 ? 'ok' : 'muted'">{{ idx === 0 ? t('pages.settings.primaryApp') : t('pages.settings.secondaryApp') }}</span>
+                <span class="badge" :class="profile?.activeWorkflowId === app.id ? 'ok' : 'muted'">{{ profile?.activeWorkflowId === app.id ? t('pages.settings.primaryApp') : t('pages.settings.secondaryApp') }}</span>
+                <span class="badge" :class="app.runnable ? 'ok' : 'warn'">{{ app.runnable ? '已映射' : '无映射' }}</span>
+                <span class="badge" :class="verifClass(app.verification?.status)">{{ verifLabel(app.verification?.status) }}</span>
                 <button v-if="aiApps.length > 1" class="sm danger" @click="removeAiApp(app.id)">{{ t('pages.settings.deleteApp') }}</button>
               </div>
               <label class="field">{{ t('pages.settings.appName') }}<input v-model="app.name" /></label>
               <label class="field">{{ t('pages.settings.appIdLabel') }}<input v-model="app.appId" class="mono" /></label>
               <label class="field">{{ t('pages.settings.appDescription') }}<input v-model="app.description" :placeholder="t('pages.settings.appDescriptionPlaceholder')" /></label>
+              <div class="muted mono app-mapping">
+                prompt {{ app.inputs?.prompt?.nodeId || '—' }} · images {{ app.inputs?.refImages?.filter((slot) => slot.nodeId).length ?? 0 }} · audio {{ app.inputs?.refAudios?.filter((slot) => slot.nodeId).length ?? 0 }} · video {{ app.inputs?.refVideos?.filter((slot) => slot.nodeId).length ?? 0 }}
+                <template v-if="app.modes?.length"> · {{ app.modes.join(', ') }}</template>
+              </div>
+              <div v-if="app.readiness?.some((item) => item.supported)" class="readiness">
+                <span v-for="item in app.readiness.filter((entry) => entry.supported)" :key="item.mode" class="badge" :class="item.ready ? 'ok' : 'warn'">
+                  {{ item.mode }}{{ item.ready ? ' ✓' : ` 缺：${item.missing.join('、')}` }}
+                </span>
+              </div>
+              <div class="row wrap">
+                <button class="sm" :disabled="!app.runnable || profile?.activeWorkflowId === app.id" @click="activateAiApp(app)">设为当前</button>
+                <button class="sm" :disabled="!profile?.apps?.some((entry) => entry.id === app.id)" @click="verifyAiApp(app)">检测节点</button>
+                <button class="sm" :disabled="!app.runnable" @click="previewAiApp(app)">预览载荷</button>
+                <span v-if="!profile?.apps?.some((entry) => entry.id === app.id)" class="muted">先保存再检测</span>
+              </div>
             </div>
             <div class="row">
               <button class="sm" @click="addAiApp">+ {{ t('pages.settings.addApp') }}</button>
               <button class="sm primary" :disabled="savingAiApps" @click="saveAiApps">{{ savingAiApps ? t('pages.settings.saving') : t('pages.settings.saveAiApps') }}</button>
             </div>
+          </div>
+          <details class="frame-app" :open="Boolean(frameProfile)">
+            <summary>Frame App（首帧 / 尾帧，I2VA / L2VA / FL2VA）</summary>
+            <p class="muted">先保存 App ID，再点检测节点；Frame App 的映射与主工作流完全独立。</p>
+            <label class="field">Frame AI App ID
+              <input v-model="frameAppIdInput" class="mono" placeholder="填写发布后的 Frame App ID" />
+            </label>
+            <div class="row wrap">
+              <button class="sm" :disabled="savingFrame || !frameAppIdInput.trim()" @click="saveFrameApp">{{ savingFrame ? t('pages.settings.saving') : t('common.save') }}</button>
+              <button class="sm" :disabled="verifyingFrame || !frameProfile" @click="verifyFrameApp">{{ verifyingFrame ? t('pages.settings.detecting') : '保存后检测节点' }}</button>
+              <span v-if="frameProfile" class="badge" :class="verifClass(frameProfile.verification.status)">{{ verifLabel(frameProfile.verification.status) }}</span>
+            </div>
+            <div v-if="frameProfile" class="muted mono app-mapping">
+              first {{ frameProfile.inputs.firstFrame?.nodeId || '—' }} · last {{ frameProfile.inputs.lastFrame?.nodeId || '—' }} · prompt {{ frameProfile.inputs.prompt.nodeId || '—' }}
+            </div>
+            <div v-if="frameProfile?.verification.note" class="muted">{{ localizedProviderNote(frameProfile.verification.note) }}</div>
+          </details>
+          <div v-if="payloadPreview" class="col">
+            <div class="row"><strong>不提交的载荷预览</strong><button class="sm ghost" @click="payloadPreview = ''">关闭</button></div>
+            <pre class="payload-preview mono">{{ payloadPreview }}</pre>
           </div>
           <label class="field">
             {{ t('pages.settings.concurrency') }}
@@ -617,6 +756,12 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .file-button:hover, .button-link:hover { background: var(--accent-soft); border-color: var(--accent-line); text-decoration: none; }
 .ai-apps { display: flex; flex-direction: column; gap: 10px; }
 .ai-app-card { border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--bg-2); }
+.app-mapping { font-size: 11px; margin: 4px 0 8px; }
+.readiness { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.readiness .badge { font-size: 10.5px; }
+.frame-app { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--bg-subtle); }
+.frame-app summary { cursor: pointer; font-weight: 600; font-size: 12.5px; margin-bottom: 8px; }
+.payload-preview { max-height: 260px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); font-size: 11px; white-space: pre-wrap; }
 .ai-app-header { justify-content: space-between; margin-bottom: 6px; }
 .project-save-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 .danger { color: var(--err); border-color: var(--err-line); }

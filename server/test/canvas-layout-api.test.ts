@@ -160,7 +160,9 @@ test('canvas mutations require a session cookie', async () => {
       body: JSON.stringify({ nodes: [] }),
     });
 
-  assert.equal((await put()).status, 401);
+  const denied = await put();
+  assert.equal(denied.status, 401);
+  assert.equal((await denied.json() as { code?: string }).code, 'session_required');
   const token = sessions.issue();
   const allowed = await put(`h3mise_session=${token}`);
   assert.equal(allowed.status, 200);

@@ -138,3 +138,19 @@ test('AI continuity result is attached to the existing preflight report', async 
   assert.equal(combined.semantic?.[0]?.label, 'AI 连续性');
   assert.equal(combined.semantic?.[0]?.status, 'ok');
 });
+
+test('faceswap preflight requires exactly one face image and one source video', async () => {
+  const { root, store } = await makeStore('preflight-faceswap');
+  roots.push(root);
+  const p = await makeProject(store, 'faceswap');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 'faceswap');
+  const registry = makeRegistry(store.registry);
+
+  const intent = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', mode: 'faceswap' });
+  const report = await runBasicPreflightIntent(p, registry, intent);
+  const keys = report.basic.flatMap((section) => section.checks).map((check) => check.key);
+  assert.equal(report.blocked, true);
+  assert.ok(keys.includes('ref.video.required'));
+  assert.ok(keys.includes('ref.image.required'));
+  assert.ok(keys.includes('provider.mode.ok'), 'mock declares faceswap for offline testing');
+});

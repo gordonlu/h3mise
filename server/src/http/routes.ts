@@ -6,7 +6,7 @@ import type { Context } from 'hono';
 import { createReadStream, statSync } from 'node:fs';
 import { stream, streamSSE } from 'hono/streaming';
 import { Readable } from 'node:stream';
-import { emptyDirectorPlan } from '@h3mise/shared';
+import { H3_MODES, emptyDirectorPlan } from '@h3mise/shared';
 import type { AppEvent, H3Mode, CanvasConnectRequest } from '@h3mise/shared';
 import type { ProjectStore } from '../project-store.js';
 import type { EventBus } from '../events.js';
@@ -115,6 +115,7 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/health', async (c) => {
     const caps = await services.ffmpeg.capabilityCheck();
     const comfyVerification = services.providers.getComfyUiProfile().verification.status;
+    const rhProfile = services.providers.getProfile();
     return c.json({
       ok: true,
       app: 'h3mise',
@@ -122,8 +123,14 @@ export function buildRoutes(services: AppServices): App {
       runningHubConfigured: services.providers.runningHubKeyPresent,
       comfyUiConfigured: comfyVerification === 'nodes_detected' || comfyVerification === 'verified',
       providerMode: services.providers.providerMode,
+      runningHubActiveWorkflowId: rhProfile?.activeWorkflowId ?? null,
+      runningHubActiveModes: rhProfile && ['nodes_detected', 'verified'].includes(rhProfile.verification.status)
+        ? rhProfile.capabilities.supportedModes
+        : [],
+      runningHubVerification: rhProfile?.verification.status ?? 'unconfigured',
       aiConfigured: services.ai.status.configured,
       projectOpen: Boolean(services.store.current),
+      projectProvider: services.store.current?.config.default_provider ?? null,
       time: new Date().toISOString(),
     });
   });
@@ -810,7 +817,9 @@ export function buildRoutes(services: AppServices): App {
       const intentHash = preflightMod.renderIntentHash(intent, profileRef);
       const request = {
         provider: providerId,
-        aiAppId: providerId === 'runninghub' ? (intent.mode === 'vref2va' ? runningHubProfile!.appId : body.aiAppId ?? runningHubProfile?.appId ?? '2089265538441764866') : 'comfyui-local',
+        // Resolve the App from the mode's workflow profile. A client-supplied
+        // aiAppId must never silently switch to an unmapped primary App.
+        aiAppId: providerId === 'runninghub' ? (runningHubProfile?.appId ?? '2089265538441764866') : 'comfyui-local',
         mode: intent.mode,
         promptVersionId,
         durationSeconds: intent.durationSeconds,
@@ -1130,9 +1139,78 @@ export function buildRoutes(services: AppServices): App {
     services.bus.emit({ type: 'project.updated' });
     return c.json({ concurrency });
   });
+  const runningHubProfileView = (profile: NonNullable<ReturnType<typeof services.providers.getProfile>>) => ({
+    ...profile,
+    bindingSlots: enabledBindingSlots(profile),
+    slotsByMode: Object.fromEntries(H3_MODES.map((mode) => [mode, enabledBindingSlots(services.providers.getProfileForMode(mode) ?? undefined)])),
+    activeModes: ['nodes_detected', 'verified'].includes(profile.verification.status)
+      ? profile.capabilities.supportedModes
+      : [],
+  });
   app.get('/api/providers/runninghub/profile', (c) => {
     const profile = services.providers.getProfile();
-    return c.json(profile ? { ...profile, bindingSlots: enabledBindingSlots(profile) } : null);
+    return c.json(profile ? runningHubProfileView(profile) : null);
+  });
+  app.get('/api/providers/runninghub/workflows', (c) => {
+    const profile = services.providers.getProfile();
+    return c.json(profile ? {
+      activeWorkflowId: profile.activeWorkflowId ?? null,
+      workflows: profile.apps,
+    } : { activeWorkflowId: null, workflows: [] });
+  });
+  app.post('/api/providers/runninghub/workflows', async (c) => {
+    const workflow = services.providers.upsertWorkflow(await c.req.json());
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(workflow, 201);
+  });
+  app.put('/api/providers/runninghub/workflows/:id', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const workflow = services.providers.upsertWorkflow({ ...body, id: c.req.param('id') });
+    services.queue.reschedule();
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(workflow);
+  });
+  app.post('/api/providers/runninghub/workflows/:id/verify', async (c) => {
+    try {
+      const workflow = await services.providers.verifyWorkflow(c.req.param('id'));
+      services.bus.emit({ type: 'project.updated' });
+      return c.json(workflow);
+    } catch (error) {
+      const workflow = (error as { workflow?: unknown }).workflow ?? null;
+      services.bus.emit({ type: 'project.updated' });
+      return c.json({
+        code: 'workflow_unmapped',
+        error: error instanceof Error ? error.message : String(error),
+        workflow,
+      }, 422);
+    }
+  });
+  app.post('/api/providers/runninghub/workflows/:id/activate', async (c) => {
+    try {
+      const profile = services.providers.activateWorkflow(c.req.param('id'));
+      services.queue.reschedule();
+      services.bus.emit({ type: 'project.updated' });
+      return c.json(runningHubProfileView(profile));
+    } catch (error) {
+      return c.json({
+        code: 'workflow_not_runnable',
+        error: error instanceof Error ? error.message : String(error),
+      }, 409);
+    }
+  });
+  app.post('/api/providers/runninghub/workflows/:id/preview', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { mode?: unknown; durationSeconds?: unknown; aspectRatio?: unknown; megapixels?: unknown };
+    const mode = body.mode as H3Mode;
+    if (!H3_MODES.includes(mode)) return c.json({ error: 'invalid mode' }, 400);
+    try {
+      return c.json(services.providers.previewWorkflow(c.req.param('id'), mode, {
+        ...(body.durationSeconds === undefined ? {} : { durationSeconds: Number(body.durationSeconds) }),
+        ...(body.aspectRatio === undefined ? {} : { aspectRatio: String(body.aspectRatio) }),
+        ...(body.megapixels === undefined ? {} : { megapixels: Number(body.megapixels) }),
+      }));
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 422);
+    }
   });
   app.get('/api/providers/runninghub/frame-profile', (c) => c.json(services.providers.getFrameProfile()));
   const activeFrameJobs = async () => (await services.queue.listAll()).some(job =>

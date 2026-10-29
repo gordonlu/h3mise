@@ -38,6 +38,11 @@ export function referenceCountViolations(
       out.push({ key: 'ref.image.limit', message: '参考图片超过视频工作流可用槽位（最多三张，图片可不提供）' });
     }
   }
+  if (mode === 'faceswap') {
+    if (nVideo !== 1) out.push({ key: 'ref.video.required', message: '换脸模式必须绑定恰好一个源视频' });
+    if (nImage !== 1) out.push({ key: 'ref.image.required', message: '换脸模式必须绑定恰好一张人脸图片' });
+    if (nAudio > 0) out.push({ key: 'ref.audio.unsupported', message: '换脸模式不接受参考音频，成片保留源视频音频' });
+  }
   if (mode === 'ref2va') {
     if (nImage === 0) out.push({ key: 'ref.image.required', message: 'Ref2VA 至少需要一张参考图' });
     if (nVideo > 0 && caps && caps.maxVideoRefs === 0) {
@@ -138,7 +143,7 @@ export async function intentFromInput(
       // designations ride along as numbered references and are pinned to the
       // timeline via prompt declarations. Filtering them here desyncs the
       // submitted media from the compiled prompt's <Picture N> tags.
-      if (mode === 'vref2va') return row.type === 'image' || row.type === 'video';
+      if (mode === 'vref2va' || mode === 'faceswap') return row.type === 'image' || row.type === 'video';
       if (mode === 'ref2va') return row.type === 'image' || row.type === 'audio';
       if (mode === 'i2va') return first;
       if (mode === 'l2va') return last;
@@ -331,6 +336,30 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   if (caps) {
     for (const violation of referenceCountViolations(intent.mode, bindings, caps)) {
       sections[3]!.checks.push({ key: violation.key, severity: 'error', message: violation.message });
+    }
+  }
+  if (caps && intent.mode === 'faceswap') {
+    const videoBinding = bindings.find((binding) => binding.kind === 'video');
+    if (videoBinding) {
+      try {
+        const video = getMedia(p, videoBinding.assetId);
+        if (caps.maxVideoSeconds != null && video.durationSeconds != null && video.durationSeconds > caps.maxVideoSeconds) {
+          sections[3]!.checks.push({ key: `ref.video.duration.${videoBinding.bindingId}`, severity: 'error', message: `源视频 ${video.durationSeconds.toFixed(1)} 秒，超过工作流上限 ${caps.maxVideoSeconds} 秒` });
+        }
+        if (caps.maxVideoBytes != null && video.sizeBytes > caps.maxVideoBytes) {
+          sections[3]!.checks.push({ key: `ref.video.size.${videoBinding.bindingId}`, severity: 'error', message: `源视频 ${(video.sizeBytes / 1024 / 1024).toFixed(1)} MB，超过工作流上限 ${(caps.maxVideoBytes / 1024 / 1024).toFixed(1)} MB` });
+        }
+      } catch {
+        // The general asset-integrity pass below reports the missing asset.
+      }
+    }
+    const identityImages = bindingRows.filter((row) => (jget<string[]>(row.roles_json ?? '[]', []) as string[]).includes('identity'));
+    if (identityImages.length > 1) {
+      sections[3]!.checks.push({ key: 'ref.faceswap.multiple_identity', severity: 'warning', message: '检测到多张身份参考图；换脸建议只使用一张正面人脸图，避免复制人或换脸失败' });
+    }
+    const costumeSheet = bindingRows.find((row) => /四宫格|服装|costume/i.test(row.label ?? ''));
+    if (costumeSheet) {
+      sections[3]!.checks.push({ key: 'ref.faceswap.costume_face', severity: 'warning', message: '检测到服装/四宫格参考；服装板不要露脸，否则容易与换脸身份冲突' });
     }
   }
   if (caps && intent.mode === 'ref2va') {

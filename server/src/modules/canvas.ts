@@ -1259,7 +1259,11 @@ export async function connectCanvas(
       let mode = options.switchMode ?? shot.h3Mode;
       const suggested = suggestedModeForPort(request.target.port);
       if (suggested && mode !== suggested && !options.switchMode) {
-        const accepts = request.target.port === 'refs' ? mode === 'ref2va' || mode === 'vref2va' : mode === suggested;
+        const accepts = request.target.port === 'refs'
+          ? mode === 'ref2va' || mode === 'vref2va' || mode === 'faceswap'
+          : request.target.port === 'video_ref'
+            ? mode === suggested || mode === 'faceswap'
+            : mode === suggested;
         if (!accepts) throw new CanvasError('needs_mode_switch', '当前模式不接受该参考端口', { suggestedMode: suggested });
       }
       mode = mode ?? 't2va';

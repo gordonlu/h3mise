@@ -17,15 +17,77 @@ export interface ProviderCapabilities {
   supportedModes: H3Mode[];
   minDuration?: number;
   maxDuration?: number;
+  /** Optional source-video limits for v2v/faceswap workflows. */
+  maxVideoSeconds?: number;
+  maxVideoBytes?: number;
   supportedAspectRatios?: string[];
   supportedResolutions?: string[];
-  /** RunningHub reference limits: ≤9 images, no video references, ≤3 audios,
-   * ≤12 total; audio is 2–15s each / ≤15s combined and requires an image. */
+  /** RunningHub reference limits: ≤9 images, ≤3 audios, ≤12 total.
+   * A video-reference or faceswap workflow must declare its own video slots. */
   maxImageRefs?: number;
   maxVideoRefs?: number;
   maxAudioRefs?: number;
   maxTotalRefs?: number;
   audioSupported?: boolean;
+  /** v2v/faceswap workflows normally keep the source video's audio track. */
+  preservesSourceAudio?: boolean;
+}
+
+export interface AiAppNode {
+  nodeId: string;
+  nodeName: string;
+  fieldName: string;
+  fieldType: string;
+  fieldData: string | null;
+  description: string;
+}
+
+export interface AiAppInputs {
+  prompt: { nodeId: string; fieldName: string };
+  mode?: { nodeId: string; fieldName: string };
+  firstFrame?: { nodeId: string; fieldName: string };
+  lastFrame?: { nodeId: string; fieldName: string };
+  /** Reference-image slots; a faceswap workflow uses exactly one. */
+  refImages: Array<{ nodeId: string; fieldName: string }>;
+  refAudios: Array<{ nodeId: string; fieldName: string }>;
+  /** Dedicated video slots used by vref2va and faceswap workflows. */
+  refVideos?: Array<{ nodeId: string; fieldName: string }>;
+  duration?: { nodeId: string; fieldName: string };
+  resolution?: { nodeId: string; fieldName: string };
+  megapixels?: { nodeId: string; fieldName: string };
+  steps?: { nodeId: string; fieldName: string };
+  extra?: { nodeId: string; fieldName: string };
+}
+
+export type WorkflowKind = 'video' | 'frame' | 'video_reference' | 'faceswap' | 'custom';
+
+export interface WorkflowModeReadiness {
+  mode: H3Mode;
+  supported: boolean;
+  ready: boolean;
+  missing: string[];
+}
+
+/** One executable RunningHub AI App workflow. It owns its node layout,
+ * business-input mapping, capability declaration and verification receipt.
+ * A bare `{ id, name, appId }` entry is only a saved reference and is not
+ * executable until it is mapped and verified. */
+export interface WorkflowProfile {
+  id: string;
+  name: string;
+  appId: string;
+  description?: string;
+  /** Optional UI hint; mode support is always derived from `capabilities`. */
+  kind?: WorkflowKind;
+  nodes?: AiAppNode[];
+  inputs?: AiAppInputs;
+  capabilities?: ProviderCapabilities;
+  verification?: ProviderVerification;
+  providerParamBindings?: Record<string, { nodeId: string; fieldName: string }>;
+  /** Server-computed convenience fields; ignored by PUT. */
+  runnable?: boolean;
+  modes?: H3Mode[];
+  readiness?: WorkflowModeReadiness[];
 }
 
 export interface AiAppProfile {
@@ -35,39 +97,16 @@ export interface AiAppProfile {
   /** Maximum active remote tasks for this account/workflow. Defaults to 1
    * because a wrong value can create several paid tasks at once. */
   concurrency?: number;
+  /** Active workflow's App ID. Kept as a compatibility mirror of
+   * `apps[activeWorkflowId]`; submit resolves the actual App per mode. */
   appId: string;
   invokeUrl: string;
   protocolVersion: 'observed';
   capabilities: ProviderCapabilities;
-  /** Discovered (apiCallDemo) or default node layout of the AI App. */
-  nodes: Array<{
-    nodeId: string;
-    nodeName: string;
-    fieldName: string;
-    fieldType: string;
-    fieldData: string | null;
-    description: string;
-  }>;
-  /** Business input → app node slot mapping. Array slots (refImages etc.)
-   * list one entry per physical slot; submit fills them by order.
-   * Two mutually exclusive image modes: firstFrame+lastFrame (2 slots) or
-   * refImages (reference-image mode, ≤9); never both.
-   * ref_videos was dropped from the RunningHub API — no video slots. */
-  inputs: {
-    prompt: { nodeId: string; fieldName: string };
-    mode?: { nodeId: string; fieldName: string };
-    firstFrame?: { nodeId: string; fieldName: string };
-    lastFrame?: { nodeId: string; fieldName: string };
-    refImages: Array<{ nodeId: string; fieldName: string }>;
-    refAudios: Array<{ nodeId: string; fieldName: string }>;
-    refVideos?: Array<{ nodeId: string; fieldName: string }>;
-    duration?: { nodeId: string; fieldName: string };
-    resolution?: { nodeId: string; fieldName: string };
-    megapixels?: { nodeId: string; fieldName: string };
-    steps?: { nodeId: string; fieldName: string };
-    extra?: { nodeId: string; fieldName: string };
-  };
-  /** Verified via live invoke example — null until verified. */
+  /** Discovered (apiCallDemo) or default node layout of the active App. */
+  nodes: AiAppNode[];
+  /** Business input → app node slot mapping of the active workflow. */
+  inputs: AiAppInputs;
   /** Per-key node bindings for providerParams (P0-4): unknown params are
    * rejected, never guessed into an arbitrary node. */
   providerParamBindings?: Record<string, { nodeId: string; fieldName: string }>;
@@ -75,16 +114,12 @@ export interface AiAppProfile {
    * the Camera Planner can submit the source image to this app instead of
    * using local FFmpeg zoompan. The app must accept an image input node. */
   refVideoAppId?: string;
-  /** User-managed list of AI Apps. The primary appId is always apps[0].
-   * Additional entries let the user bind different workflows (e.g. reference
-   * video generation) without losing the main generation app. */
-  apps?: Array<{
-    id: string;
-    name: string;
-    appId: string;
-    /** Optional description shown in the UI (e.g. "参考视频生成"). */
-    description?: string;
-  }>;
+  /** Every saved AI App workflow. The active entry is mirrored into the
+   * top-level appId/inputs/capabilities/verification fields for backward
+   * compatibility, but each entry keeps its own independent evidence. */
+  apps: WorkflowProfile[];
+  /** Explicit active workflow. Never inferred from array position alone. */
+  activeWorkflowId?: string;
   verification: ProviderVerification;
 }
 
@@ -129,6 +164,18 @@ export interface ComfyUiWorkflowProfile {
   verification: ProviderVerification;
 }
 
+export interface ProviderWorkflowSummary {
+  id: string;
+  name: string;
+  appId: string;
+  description?: string;
+  active: boolean;
+  runnable: boolean;
+  verification: ProviderVerification;
+  modes: H3Mode[];
+  readiness: WorkflowModeReadiness[];
+}
+
 export interface ProviderStatus {
   id: string;
   name: string;
@@ -136,6 +183,10 @@ export interface ProviderStatus {
   configured: boolean;
   verification: ProviderVerification;
   capabilities: ProviderCapabilities | null;
+  /** RunningHub-only: the workflow selected for non-frame modes. */
+  activeWorkflowId?: string | null;
+  activeModes?: H3Mode[];
+  workflows?: ProviderWorkflowSummary[];
 }
 
 export interface AIConfigStatus {

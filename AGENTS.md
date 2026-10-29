@@ -17,7 +17,7 @@ This file tells coding assistants how to help a user run and configure H3Mise sa
 
 Prefer the Settings UI over editing JSON or environment files.
 
-1. Start H3Mise and confirm the UI and `GET /api/health` are available.
+1. Start H3Mise and confirm the UI and `GET /api/health` are available. `node scripts/h3mise.mjs up --json` is idempotent (already healthy → returns immediately) and `H3MISE_SKIP_INSTALL=1` avoids a registry install when dependencies exist. Prefer it over repeatedly running `sh start.sh`; `node scripts/h3mise.mjs status --json` is read-only.
 2. If the user only wants to explore, keep RunningHub unconfigured and use Mock. Do not push them into paid rendering.
 3. For real rendering, explain that the user needs:
    - a RunningHub API Key from their own account;
@@ -64,6 +64,15 @@ RunningHub AI Apps are not assumed to share fixed node IDs or field names. Treat
 7. Save the profile through `PUT /api/providers/runninghub/profile`, rerun Preflight, and make one minimal user-approved real submission. Only that successful submission may promote the profile to `verified`.
 
 If detection fails or the workflow cannot express a requested H3 mode, keep that mode disabled and fall back to Mock or a supported mode. Do not bypass capability checks.
+
+## Workflow profiles and faceswap
+
+- `apps[]` entries are workflows, not just metadata: each has its own `appId`, `inputs`, `nodes`, `capabilities`, and `verification`. A bare App reference is saved but `runnable: false` and must never inherit the active/primary node mapping.
+- `activeWorkflowId` selects the workflow for non-frame modes. It is explicit; do not infer it from array position. Activating an unmapped or failed workflow is rejected.
+- Resolve by mode before a paid submit: frame modes use the frame App, `vref2va`/`faceswap` use a workflow that declares that mode, other modes use the active workflow. A client-supplied `aiAppId` must not override this.
+- `faceswap` needs exactly one face image and exactly one source video, rejects reference audio, and preserves the source video audio. The workflow may declare `maxVideoSeconds`/`maxVideoBytes`; Preflight enforces them.
+- Use `GET /api/providers/runninghub/profile` (per-mode `slotsByMode`, `activeWorkflowId`, readiness), `POST /api/providers/runninghub/workflows` (upsert), `POST .../workflows/:id/verify` (apiCallDemo), `POST .../activate`, and `POST .../preview` (local no-submit nodeInfoList). MCP equivalents: `get_provider_profile`, `upsert_workflow`, `verify_workflow`, `set_active_workflow`, `preview_workflow_payload`.
+- GET responses include read-only `bindingSlots`, `slotsByMode`, `readiness`; PUT ignores them. State-changing requests without a session return 401 `{ code: "session_required" }`.
 
 ## Separate frame App
 

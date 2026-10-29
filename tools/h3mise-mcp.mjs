@@ -5,10 +5,16 @@
 // Take selection remain explicit decisions in the H3Mise UI.
 
 import { createInterface } from 'node:readline';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createApiClient } from './h3mise-api.mjs';
 
 const API_BASE = (process.env.H3MISE_API_URL ?? 'http://127.0.0.1:4789').replace(/\/$/, '');
 const api = createApiClient(API_BASE);
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const execFileAsync = promisify(execFile);
 
 const objectSchema = (properties = {}, required = []) => ({
   type: 'object',
@@ -41,7 +47,7 @@ const tools = [
   {
     name: 'create_shot',
     description: 'Create one planned Shot without inference or rendering. For story-wide materialization prefer materialize_story_shots to avoid duplicates.',
-    inputSchema: objectSchema({ title: stringProp('Shot title.'), durationSeconds: { type: 'integer', minimum: 1, maximum: 15 }, storyBeatId: { type: 'string' }, sequenceId: { type: 'string' }, purpose: { type: 'string' }, aspectRatio: { type: 'string' }, h3Mode: { type: 'string', enum: ['t2va', 'i2va', 'l2va', 'fl2va', 'ref2va'] } }, ['title']),
+    inputSchema: objectSchema({ title: stringProp('Shot title.'), durationSeconds: { type: 'integer', minimum: 1, maximum: 15 }, storyBeatId: { type: 'string' }, sequenceId: { type: 'string' }, purpose: { type: 'string' }, aspectRatio: { type: 'string' }, h3Mode: { type: 'string', enum: ['t2va', 'i2va', 'l2va', 'fl2va', 'ref2va', 'vref2va', 'faceswap'] } }, ['title']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
@@ -392,7 +398,6 @@ const tools = [
       shotId: stringProp('Exact Shot ID to render.'),
       promptVersionId: stringProp('Exact immutable PromptVersion to render.'),
       providerId: { type: 'string', enum: ['runninghub', 'comfyui'], description: 'Paid or local generation provider.' },
-      aiAppId: { type: 'string', description: 'Optional exact RunningHub AI App ID. Omit to use the verified primary App.' },
       durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
       aspectRatio: { type: 'string' },
       resolution: { type: 'string' },
@@ -406,6 +411,56 @@ const tools = [
     name: 'inspect_jobs',
     description: 'List current local background jobs. This does not retry or cancel jobs.',
     inputSchema: objectSchema(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'ensure_service',
+    description: 'Ensure the local H3Mise service is healthy. If it is already running this returns immediately; otherwise it starts the normal launcher (which may build the UI) and waits for /api/health. Never configures providers or submits renders.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'get_provider_profile',
+    description: 'Read the RunningHub active workflow profile with per-mode binding slots and all saved workflow summaries. Never returns an API key.',
+    inputSchema: objectSchema(),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'upsert_workflow',
+    description: 'Create or update one RunningHub workflow entry (appId + its own inputs). A new or changed workflow must be verified before activation. Does not render.',
+    inputSchema: objectSchema({
+      id: { type: 'string', description: 'Stable workflow ID. Reuse it to update an existing entry.' },
+      name: { type: 'string' },
+      appId: stringProp('Exact RunningHub AI App ID for the selected region.'),
+      description: { type: 'string' },
+      kind: { type: 'string', enum: ['video', 'frame', 'video_reference', 'faceswap', 'custom'] },
+      inputs: { type: 'object', additionalProperties: true, description: 'Optional business-input to node mapping; omit to keep an existing mapping.' },
+      providerParamBindings: { type: 'object', additionalProperties: true },
+    }, ['appId']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'verify_workflow',
+    description: 'Run apiCallDemo for one saved workflow and store its own node mapping/evidence. This is not a render and cannot mark the workflow verified.',
+    inputSchema: objectSchema({ workflowId: stringProp('Saved workflow ID.') }, ['workflowId']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  {
+    name: 'set_active_workflow',
+    description: 'Select a mapped workflow for non-frame modes. Refuses an App with no node mapping or failed detection.',
+    inputSchema: objectSchema({ workflowId: stringProp('Saved workflow ID with an existing node mapping.') }, ['workflowId']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'preview_workflow_payload',
+    description: 'Show the exact nodeInfoList a workflow WOULD submit for a mode, using placeholder upload names. Local and free; never contacts RunningHub or submits a task.',
+    inputSchema: objectSchema({
+      workflowId: stringProp('Saved workflow ID.'),
+      mode: { type: 'string', enum: ['t2va', 'i2va', 'l2va', 'fl2va', 'ref2va', 'vref2va', 'faceswap'] },
+      durationSeconds: { type: 'number' },
+      aspectRatio: { type: 'string' },
+      megapixels: { type: 'number' },
+    }, ['workflowId', 'mode']),
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
@@ -604,7 +659,6 @@ async function callTool(name, args = {}) {
         shotId: requireString(args, 'shotId'),
         promptVersionId: requireString(args, 'promptVersionId'),
         providerId: requireString(args, 'providerId'),
-        ...(args.aiAppId === undefined ? {} : { aiAppId: args.aiAppId }),
         ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
         ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),
         ...(args.resolution === undefined ? {} : { resolution: args.resolution }),
@@ -613,6 +667,40 @@ async function callTool(name, args = {}) {
       });
     }
     case 'inspect_jobs': return api('GET', '/api/jobs');
+    case 'ensure_service': {
+      const url = new URL(API_BASE);
+      const argsForCli = [join(ROOT, 'scripts/h3mise.mjs'), 'up', '--json'];
+      if (url.port) argsForCli.push('--port', url.port);
+      const { stdout } = await execFileAsync(process.execPath, argsForCli, {
+        cwd: ROOT,
+        timeout: 200_000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, H3MISE_SKIP_INSTALL: process.env.H3MISE_SKIP_INSTALL ?? '0' },
+      }).catch((error) => {
+        throw new Error(error?.stdout || error?.stderr || error?.message || 'H3Mise service did not start');
+      });
+      const health = await api('GET', '/api/health');
+      return { service: JSON.parse(stdout.trim() || '{}'), health };
+    }
+    case 'get_provider_profile': {
+      const [profile, workflows] = await Promise.all([
+        api('GET', '/api/providers/runninghub/profile'),
+        api('GET', '/api/providers/runninghub/workflows'),
+      ]);
+      return { profile, workflows };
+    }
+    case 'upsert_workflow': return api('POST', '/api/providers/runninghub/workflows', args);
+    case 'verify_workflow': return api('POST', `/api/providers/runninghub/workflows/${encodeURIComponent(requireString(args, 'workflowId'))}/verify`, {});
+    case 'set_active_workflow': return api('POST', `/api/providers/runninghub/workflows/${encodeURIComponent(requireString(args, 'workflowId'))}/activate`, {});
+    case 'preview_workflow_payload': {
+      const mode = requireString(args, 'mode');
+      return api('POST', `/api/providers/runninghub/workflows/${encodeURIComponent(requireString(args, 'workflowId'))}/preview`, {
+        mode,
+        ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
+        ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),
+        ...(args.megapixels === undefined ? {} : { megapixels: args.megapixels }),
+      });
+    }
     case 'get_runninghub_config': {
       const [apiKey, videoProfile, storyboardProfile, frameProfile] = await Promise.all([
         api('GET', '/api/providers/runninghub/apikey'),

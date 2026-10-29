@@ -39,7 +39,7 @@ test('MCP exposes agent inference and compact render tracking without paid calls
   const call = (name, args) => rpc('tools/call', { name, arguments: args });
   try {
     const listed = await rpc('tools/list');
-    for (const name of ['prepare_take_review', 'inspect_render_jobs', 'prepare_ai_action', 'apply_ai_result', 'agent_session', 'inspect_ai_requests', 'create_shot'])
+    for (const name of ['prepare_take_review', 'inspect_render_jobs', 'prepare_ai_action', 'apply_ai_result', 'agent_session', 'inspect_ai_requests', 'create_shot', 'ensure_service', 'get_provider_profile', 'upsert_workflow', 'verify_workflow', 'set_active_workflow', 'preview_workflow_payload'])
       assert.ok(listed.tools.some(tool => tool.name === name));
     const status = JSON.parse((await call('inspect_render_jobs', { jobId: 'job-1' })).content[0].text);
     assert.equal(status.providerTaskId, 'remote-1');

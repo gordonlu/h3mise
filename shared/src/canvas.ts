@@ -333,7 +333,7 @@ function port(
 /** Shot ports. `last_frame` shows only in fl2va/l2va, `video_ref` only in vref2va. */
 export function shotNodePorts(h3Mode: H3Mode | null): CanvasPort[] {
   const frameMode = h3Mode === 'fl2va' || h3Mode === 'l2va';
-  const videoMode = h3Mode === 'vref2va';
+  const videoMode = h3Mode === 'vref2va' || h3Mode === 'faceswap';
   return [
     port('beat', 'BEAT', 'in', '归属节拍'),
     port('cast', 'ENTITY', 'in', '角色/场景'),

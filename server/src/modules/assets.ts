@@ -573,6 +573,12 @@ export function shotAssetRequirements(p: ProjectContext, shot: Shot, context: Sh
 
   const mode = shot.h3Mode;
   if (mode === 'vref2va') out.push({ level: bindings.filter(b => b.type === 'video').length === 1 ? 'ok' : 'required', kind: 'video', label: '参考视频', detail: '必须绑定一个视频；图片可选，最多三张' });
+  if (mode === 'faceswap') {
+    const videos = bindings.filter((binding) => binding.type === 'video').length;
+    const images = bindings.filter((binding) => binding.type === 'image').length;
+    out.push({ level: videos === 1 ? 'ok' : 'required', kind: 'video', label: '源视频', detail: '换脸模式必须绑定恰好一个源视频，并保留其音频' });
+    out.push({ level: images === 1 ? 'ok' : 'required', kind: 'ref_images', label: '人脸图片', detail: '换脸模式必须绑定恰好一张正面人脸图' });
+  }
   if (mode === 'i2va' || mode === 'fl2va') {
     out.push(
       hasFirst

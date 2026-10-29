@@ -209,6 +209,7 @@ async function associateWithSourceShot(asset: MediaAsset): Promise<boolean> {
   let roles: ReferenceBinding['roles'] | null = null;
   if (asset.kind === 'image' && ctx.role) roles = [ctx.role];
   else if (ctx.mode === 'vref2va' && (asset.kind === 'video' || asset.kind === 'image')) roles = asset.kind === 'video' ? ['motion'] : [];
+  else if (ctx.mode === 'faceswap' && (asset.kind === 'video' || asset.kind === 'image')) roles = asset.kind === 'image' ? ['identity'] : ['motion'];
   else if (ctx.mode === 'ref2va' && (asset.kind === 'image' || asset.kind === 'audio')) roles = [];
   if (!roles) return false;
   await post('/api/assets/bindings', { assetId: asset.id, roles, label: asset.label, shotId: ctx.shotId });

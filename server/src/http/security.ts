@@ -52,7 +52,10 @@ export function sessionGuard(sessions: SessionManager): MiddlewareHandler {
   return async (c, next) => {
     const token = c.req.header('cookie')?.match(/h3mise_session=([^;]+)/)?.[1];
     if (!sessions.valid(token)) {
-      return c.json({ error: 'invalid or missing session — call GET /api/session first' }, 401);
+      return c.json({
+        error: 'invalid or missing session — call GET /api/session first',
+        code: 'session_required',
+      }, 401);
     }
     await next();
   };

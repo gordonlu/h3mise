@@ -179,6 +179,9 @@ export async function main(args = process.argv.slice(2)) {
     const loader = join(ROOT, 'server/node_modules/tsx/dist/loader.mjs');
     const vite = join(ROOT, 'web/node_modules/vite/bin/vite.js');
     if (stamp.deps !== depsHash || !existsSync(loader) || !existsSync(vite)) {
+      if (env.H3MISE_SKIP_INSTALL === '1') {
+        throw new Error('依赖尚未安装或无更新，但已设置 H3MISE_SKIP_INSTALL=1。请先手动运行 pnpm install，或去掉该变量后重试。 / Dependencies are missing or stale, but H3MISE_SKIP_INSTALL=1 is set. Run pnpm install first or unset it.');
+      }
       say('首次启动或依赖有更新，正在安装。首次需要联网，请保持窗口打开。', 'Installing dependencies. The first launch needs internet; keep this window open.');
       await run(pnpmCommand(version, ['install', '--frozen-lockfile', '--prod=false']), setupEnv);
       stamp = { deps: depsHash };

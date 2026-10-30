@@ -14,6 +14,8 @@ import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import { getShot, advanceShotStatus, advanceTo, renderReadiness } from './shots.js';
 import type { Shot } from '@h3mise/shared';
+import { lintPrompt } from './prompt-lint.js';
+import { shotAudioLineContext } from './audio-lines.js';
 
 export interface ReferenceCountViolation {
   key: string;
@@ -117,6 +119,10 @@ export interface BasicPreflightInput {
   promptVersionId: string;
   providerId: string;
   megapixels?: number;
+  durationSeconds?: number;
+  aspectRatio?: string;
+  resolution?: string;
+  providerParams?: Record<string, unknown>;
 }
 
 export async function runBasicPreflight(p: ProjectContext, registry: ProviderRegistry, input: BasicPreflightInput): Promise<PreflightReport> {
@@ -176,6 +182,8 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     { key: 'credential', label: '访问凭证', checks: [] },
     { key: 'duplicate', label: '重复任务', checks: [] },
     { key: 'continuity', label: '方向连续性', checks: [] },
+    { key: 'prompt_lint', label: '提示词 Lint', checks: [] },
+    { key: 'audio_line', label: 'Audio Line', checks: [] },
   ];
 
   // Prompt
@@ -235,6 +243,13 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     sections[1]!.checks.push({ key: 'duration.min', severity: 'error', message: `时长 ${intent.durationSeconds} 秒低于生成服务下限 ${caps.minDuration} 秒` });
   } else {
     sections[1]!.checks.push({ key: 'duration.ok', severity: 'info', message: `时长 ${intent.durationSeconds} 秒有效` });
+  }
+  if (intent.durationSeconds !== shot.durationSeconds) {
+    sections[1]!.checks.push({
+      key: 'duration.override',
+      severity: 'info',
+      message: `镜头默认 ${shot.durationSeconds} 秒，本次请求 ${intent.durationSeconds} 秒`,
+    });
   }
 
   // Provider + mode + aspect (unknown capability = blocked, P0-6)
@@ -380,6 +395,27 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       sections[3]!.checks.push({ key: 'ref.audio.duration.total', severity: 'error', message: `参考音频总时长 ${totalAudioSeconds.toFixed(1)} 秒，超过 15 秒上限` });
     }
   }
+  if (caps && intent.mode === 'ref2va' && bindings.some((binding) => binding.kind === 'audio')) {
+    const reuse = caps.audioReuse ?? 'unknown';
+    const wantsExactCopy = /fully_copy|1\s*[:：]\s*1|原唱|原音|same\s+vocal|lip.?sync/i.test(prompt.text);
+    if (reuse === 'copy') {
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.copy', severity: 'info', message: '该工作流声明会保留源音频' });
+    } else if (wantsExactCopy) {
+      sections[3]!.checks.push({
+        key: 'ref.audio.reuse.exact',
+        severity: 'error',
+        message: reuse === 'resings'
+          ? '提示词要求原唱/原音 1:1，但该工作流会重新演唱；需要原唱请改用 lip-sync 或换脸工作流'
+          : '提示词要求原唱/原音 1:1，但该工作流未声明音频复制能力；参考音频不能被当作原音轨锁定',
+      });
+    } else if (reuse === 'resings') {
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.resings', severity: 'warning', message: '该工作流的参考音频会驱动重新演唱，不是原唱 1:1 复制' });
+    } else if (reuse === 'reference_only') {
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.reference', severity: 'warning', message: '参考音频仅作为音色/节奏参考，不能保证 1:1 原唱' });
+    } else {
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.unknown', severity: 'warning', message: '该工作流未声明音频复用能力；不要假设参考音频会 1:1 保留原唱' });
+    }
+  }
   for (const b of bindingRows) {
     try {
       const asset = getMedia(p, b.asset_id);
@@ -460,13 +496,21 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     sections[5]!.checks.push({ key: 'credential.ok', severity: 'info', message: `生成服务“${provider?.name ?? intent.providerId}”配置可用` });
   }
 
-  // Duplicate: an active render is a hard error (PRD: no duplicate paid submit)
-  const active = p.db.get<{ id: string }>(
-    "SELECT id FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING') LIMIT 1",
+  // Duplicate: one running task plus at most one queued revision is allowed.
+  // An active job is a queue state, not a prompt defect — it must not make the
+  // prompt risk HIGH or block a revision from being queued.
+  const jobs = p.db.all<{ id: string; status: string }>(
+    "SELECT id, status FROM render_jobs WHERE shot_id = ? AND status IN ('LOCAL_QUEUED','UPLOADING','SUBMITTING','QUEUED','RUNNING','DOWNLOADING') ORDER BY created_at",
     [shot.id],
   );
-  if (active) {
-    sections[6]!.checks.push({ key: 'duplicate.active', severity: 'error', message: `当前镜头已有进行中的生成任务（${active.id}）` });
+  const running = jobs.filter((job) => job.status !== 'LOCAL_QUEUED');
+  const queued = jobs.filter((job) => job.status === 'LOCAL_QUEUED');
+  if (running.length && queued.length) {
+    sections[6]!.checks.push({ key: 'duplicate.revision', severity: 'error', message: `当前镜头已有进行中任务（${running[0]!.id}）和排队修订（${queued[0]!.id}）；请等待或取消一个任务` });
+  } else if (running.length) {
+    sections[6]!.checks.push({ key: 'duplicate.active', severity: 'warning', message: `当前镜头已有进行中任务（${running[0]!.id}）；本次提交会排队，待前一个任务结束后自动开始` });
+  } else if (queued.length) {
+    sections[6]!.checks.push({ key: 'duplicate.queued', severity: 'warning', message: `当前镜头已有排队任务（${queued[0]!.id}）；请等待它开始或先取消` });
   } else {
     sections[6]!.checks.push({ key: 'duplicate.ok', severity: 'info', message: '没有重复的生成任务' });
   }
@@ -511,6 +555,49 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
           severity: 'warning',
           message: `相机计划：${[...new Set(warnings.map((w) => w.message))].join('；')}`,
         });
+      }
+    }
+  }
+
+  {
+    const hasAudioRefs = bindings.some((binding) => binding.kind === 'audio');
+    const issues = lintPrompt(prompt.text, {
+      mode: intent.mode,
+      hasAudioRefs,
+      hasDialogue: /["“”」』]|唱|说|歌词|lyrics|dialogue/i.test(prompt.text),
+    });
+    for (const issue of issues) {
+      sections[8]!.checks.push({
+        key: issue.key,
+        severity: issue.severity,
+        message: issue.suggestion ? `${issue.message}——建议：${issue.suggestion}` : issue.message,
+      });
+    }
+    if (!issues.length) sections[8]!.checks.push({ key: 'prompt_lint.ok', severity: 'info', message: '未发现常见否定词、缺失字段或半句问题' });
+  }
+
+  {
+    const audioLine = shotAudioLineContext(p, shot.id);
+    if (!audioLine) {
+      sections[9]!.checks.push({ key: 'audio_line.none', severity: 'info', message: '当前镜头没有绑定 Audio Line 切片' });
+    } else {
+      try {
+        getMedia(p, audioLine.line.assetId);
+      } catch {
+        sections[9]!.checks.push({ key: 'audio_line.asset', severity: 'error', message: 'Audio Line 引用的音频素材不存在' });
+      }
+      for (const segment of audioLine.segments) {
+        if (!segment.text.trim()) {
+          sections[9]!.checks.push({ key: `audio_line.text.${segment.id}`, severity: 'error', message: `第 ${segment.order} 句缺少实际歌词/台词文本` });
+        } else if (!prompt.text.includes(segment.text.trim())) {
+          sections[9]!.checks.push({ key: `audio_line.prompt.${segment.id}`, severity: 'error', message: `提示词没有包含第 ${segment.order} 句的完整文本：“${segment.text.trim()}”` });
+        }
+        if (segment.endSeconds - segment.startSeconds > shot.durationSeconds + 0.05) {
+          sections[9]!.checks.push({ key: `audio_line.duration.${segment.id}`, severity: 'warning', message: `第 ${segment.order} 句 ${(segment.endSeconds - segment.startSeconds).toFixed(1)}s 超过镜头 ${shot.durationSeconds}s，可能被压缩或截断` });
+        }
+      }
+      if (sections[9]!.checks.every((check) => check.severity === 'info')) {
+        sections[9]!.checks.push({ key: 'audio_line.ok', severity: 'info', message: `已绑定 ${audioLine.segments.length} 句，提示词包含全部实际文本` });
       }
     }
   }

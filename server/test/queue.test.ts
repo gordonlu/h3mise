@@ -102,7 +102,7 @@ test('jobs live in the owning project DB and submit in the open project', async 
   pB.close();
 });
 
-test('submit allows only one active job per shot even when intent changes', async () => {
+test('submit deduplicates identical intent and queues one revision per shot', async () => {
   const { root, store } = await makeStore('queue');
   roots.push(root);
   const p = await makeProjectDetached(store, 'dupP');
@@ -114,18 +114,25 @@ test('submit allows only one active job per shot even when intent changes', asyn
   p.close();
 
   const request = { provider: 'mock', aiAppId: 'x', mode: 't2va' as const, promptVersionId, durationSeconds: 1, aspectRatio: '16:9', references: [], providerParams: {} };
-  queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request, intentHash: 'same' });
-  // exact same intent while the first job is active -> rejected (no double cost)
+  const first = queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request, intentHash: 'same' });
+  // Exact same intent while the first job is active -> rejected (no double cost)
   assert.throws(() =>
     queue.submit({ projectId: p.meta.id, shotId, promptVersionId, provider: 'mock', request, intentHash: 'same' }),
     /already active/,
   );
-  // A different intent is still the same Shot and must not create a second
-  // paid task while the first is active.
-  assert.throws(() => queue.submit({
+  // A different intent becomes a queued revision; it may not start until the
+  // first job reaches a terminal state.
+  const revision = queue.submit({
     projectId: p.meta.id, shotId, promptVersionId, provider: 'mock',
     request: { ...request, durationSeconds: 2 }, intentHash: 'other',
-  }), /already active/);
+  });
+  assert.equal(cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [revision.id])?.status, 'LOCAL_QUEUED');
+  // A third submission is blocked while the revision is already queued.
+  assert.throws(() => queue.submit({
+    projectId: p.meta.id, shotId, promptVersionId, provider: 'mock',
+    request: { ...request, durationSeconds: 3 }, intentHash: 'third',
+  }), /queued task/);
+  assert.ok(first.id);
   queue.forgetProject(p.meta.id);
   cur.close();
 });
@@ -221,6 +228,7 @@ test('end-to-end mock render: upload -> success -> take created once', async () 
   await waitFor(() => cur.db.get<{ status: string }>('SELECT status FROM render_jobs WHERE id = ?', [job.id])?.status === 'LOCAL_READY', 30_000);
   const takes = cur.db.all<{ id: string }>('SELECT id FROM takes');
   assert.equal(takes.length, 1); // exactly one take for one job
+  assert.equal(queue.get(job.id)?.take?.id, takes[0]!.id, 'job responses join the created Take');
   // createTake idempotency: calling it again with the same render job returns
   // the SAME take (crash-window double-create must not double rows)
   const { createTake } = await import('../src/modules/takes.js');

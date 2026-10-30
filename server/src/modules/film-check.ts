@@ -1,4 +1,5 @@
 import { access } from 'node:fs/promises';
+import { timelineDurationSeconds } from '@h3mise/shared';
 import type { FilmCheckIssue, FilmCheckResult } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { listShots } from './shots.js';
@@ -36,6 +37,7 @@ export async function runFilmCheck(p: ProjectContext): Promise<FilmCheckResult> 
 
   if (!timeline.clips.length) add('error', 'timeline.empty', '时间线为空，无法导出成片', { kind: 'timeline' });
   let duration = 0;
+  const takeDurations = new Map<string, number>();
   const timelineShots = new Set<string>();
   for (const clip of timeline.clips) {
     timelineShots.add(clip.shotId);
@@ -54,7 +56,9 @@ export async function runFilmCheck(p: ProjectContext): Promise<FilmCheckResult> 
       continue;
     }
     duration += end - clip.trimIn;
+    takeDurations.set(clip.takeId, take.duration);
   }
+  duration = timelineDurationSeconds(timeline.clips, (clip) => takeDurations.get(clip.takeId) ?? 0);
   for (const shot of shots) {
     if (listTakes(p, shot.id).some((take) => take.status === 'selected') && !timelineShots.has(shot.id)) {
       add('error', 'shot.not-on-timeline', `「${shot.title}」已选片但未加入时间线`, { kind: 'shot', shotId: shot.id });

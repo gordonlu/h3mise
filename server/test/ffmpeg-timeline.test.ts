@@ -1,9 +1,10 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { makeTempRoot, cleanupTempRoot } from './helpers.js';
 import { Ffmpeg, parseLoudnessMeasurement, parseSceneCutTimestamps } from '../src/ffmpeg.js';
+import { timelineLookFilters } from '../src/modules/timeline-looks.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -165,4 +166,32 @@ test('scene detection runs locally on a video without requiring AI', async () =>
   await ffmpeg.syntheticVideo(source, 0.8, 'Scene analysis', '640x360');
   const cuts = await ffmpeg.detectSceneCuts(source, 0.35);
   assert.ok(cuts.every((cut) => cut > 0.02));
+});
+
+test('bundled timeline looks render frames and trimmed clips', async () => {
+  const root = makeTempRoot('ffmpeg-looks');
+  roots.push(root);
+  const ffmpeg = new Ffmpeg();
+  const source = join(root, 'source.mp4');
+  await ffmpeg.syntheticVideo(source, 1, 'Looks', '640x360');
+  const original = join(root, 'original.jpg');
+  await ffmpeg.previewFrame(source, original, 0.5);
+  const originalBytes = await readFile(original);
+  for (const look of ['cinematic', 'warm_film', 'bleach_bypass'] as const) {
+    const frame = join(root, `${look}.jpg`);
+    await ffmpeg.previewFrame(source, frame, 0.5, timelineLookFilters(look));
+    const bytes = await readFile(frame);
+    assert.ok(bytes.length > 0);
+    assert.notDeepEqual(bytes, originalBytes, `${look} must change the picture`);
+
+    const clip = join(root, `${look}.mp4`);
+    await ffmpeg.trim(source, clip, 0, 1, {
+      audio: { volume: 1, mute: false, normalize: false },
+      ensureAudio: true,
+      videoFilters: timelineLookFilters(look),
+    });
+    const info = await ffmpeg.probe(clip);
+    assert.equal(info.hasAudio, true);
+    assert.ok(Math.abs((info.durationSeconds ?? 0) - 1) < 0.2);
+  }
 });

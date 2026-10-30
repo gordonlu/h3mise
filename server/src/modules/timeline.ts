@@ -3,12 +3,14 @@
 
 import { join, relative, sep } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
-import type { TimelineClip, TimelineDoc } from '@h3mise/shared';
+import { effectiveTransitionDuration, effectiveTransitions, isHardTransition, isTimelineLook, timelineClipDuration, timelineDurationSeconds } from '@h3mise/shared';
+import type { TimelineClip, TimelineDoc, TimelineLookId } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 import { getShot } from './shots.js';
+import { timelineLookFilters } from './timeline-looks.js';
 import { getTake } from './takes.js';
 import { activeEpisodeId } from './story.js';
 
@@ -21,6 +23,7 @@ interface ClipRow {
   trim_out: number | null;
   transition: string;
   transition_duration: number;
+  look: string;
   audio_json: string;
   created_at: string;
   updated_at: string;
@@ -37,6 +40,7 @@ function clipFromRow(r: ClipRow): TimelineClip {
     trimOut: r.trim_out,
     transition: r.transition as TimelineClip['transition'],
     transitionDuration: r.transition_duration,
+    look: isTimelineLook(r.look) ? r.look : 'none',
     audio: {
       volume: typeof storedAudio.volume === 'number' && Number.isFinite(storedAudio.volume) ? storedAudio.volume : 1,
       mute: storedAudio.mute === true,
@@ -71,8 +75,8 @@ export function addClip(p: ProjectContext, input: { shotId: string; takeId: stri
   const ord = p.db.get<{ m: number }>('SELECT COALESCE(MAX(tc.ord), 0) + 1 as m FROM timeline_clips tc JOIN shots s ON s.id = tc.shot_id WHERE s.story_id = ?', [activeEpisodeId(p)])!.m;
   const trimOut = input.trimOut ?? null;
   p.db.run(
-    'INSERT INTO timeline_clips (id, ord, shot_id, take_id, trim_in, trim_out, transition, transition_duration, audio_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, ord, input.shotId, input.takeId, input.trimIn ?? 0, trimOut, 'cut', 0, j({ volume: 1, mute: false, normalize: true }), now, now],
+    'INSERT INTO timeline_clips (id, ord, shot_id, take_id, trim_in, trim_out, transition, transition_duration, look, audio_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, ord, input.shotId, input.takeId, input.trimIn ?? 0, trimOut, 'cut', 0, 'none', j({ volume: 1, mute: false, normalize: true }), now, now],
   );
   p.db.run('UPDATE timeline SET updated_at = ?', [now]);
   return getTimeline(p).clips.find((c) => c.id === id)!;
@@ -100,27 +104,62 @@ export function addMissingSelectedTakes(p: ProjectContext): { clips: TimelineCli
   return { clips: getTimeline(p).clips, added };
 }
 
-export function updateClip(p: ProjectContext, id: string, patch: Partial<Pick<TimelineClip, 'trimIn' | 'trimOut' | 'transition' | 'transitionDuration' | 'audio'>>): TimelineClip {
-  const current = getTimeline(p).clips.find((c) => c.id === id);
+export function updateClip(p: ProjectContext, id: string, patch: Partial<Pick<TimelineClip, 'trimIn' | 'trimOut' | 'transition' | 'transitionDuration' | 'look' | 'audio'>>): TimelineClip {
+  const clips = getTimeline(p).clips;
+  const index = clips.findIndex((c) => c.id === id);
+  const current = clips[index];
   if (!current) throw new Error('timeline clip not found');
   const take = getTake(p, current.takeId);
-  validateTrim(patch.trimIn ?? current.trimIn, patch.trimOut === undefined ? current.trimOut : patch.trimOut, take.duration);
+  const nextTrimIn = patch.trimIn ?? current.trimIn;
+  const nextTrimOut = patch.trimOut === undefined ? current.trimOut : patch.trimOut;
+  validateTrim(nextTrimIn, nextTrimOut, take.duration);
   if (patch.transition !== undefined && !['cut', 'fade', 'dissolve', 'none'].includes(patch.transition)) throw new Error('invalid transition');
   if (patch.transitionDuration !== undefined && (!Number.isFinite(patch.transitionDuration) || patch.transitionDuration < 0)) throw new Error('invalid transitionDuration');
+  if (patch.look !== undefined && !isTimelineLook(patch.look)) throw new Error('invalid look');
   if (patch.audio !== undefined) {
     if (!Number.isFinite(patch.audio.volume) || patch.audio.volume < 0 || patch.audio.volume > 2) throw new Error('invalid audio volume');
     if (typeof patch.audio.mute !== 'boolean' || typeof patch.audio.normalize !== 'boolean') throw new Error('invalid audio settings');
   }
+  // Keep the stored transition within what both neighbours can absorb. This
+  // also re-clamps an existing transition when a trim shortens its clip, so
+  // the UI and every duration calculation agree with the exported film.
+  const previous = index > 0 ? clips[index - 1] : null;
+  const previousDuration = previous
+    ? timelineClipDuration(previous, getTake(p, previous.takeId).duration)
+    : 0;
+  const currentDuration = timelineClipDuration({
+    ...current,
+    trimIn: nextTrimIn,
+    trimOut: nextTrimOut,
+  }, take.duration);
+  const nextTransition = patch.transition ?? current.transition;
+  const requestedTransitionDuration = patch.transitionDuration
+    ?? (patch.transition !== undefined && !isHardTransition(patch.transition) && isHardTransition(current.transition)
+      ? 0.5
+      : current.transitionDuration);
+  const effectiveDuration = effectiveTransitionDuration(
+    nextTransition,
+    requestedTransitionDuration,
+    previousDuration,
+    currentDuration,
+  );
+  const effectivePatch: typeof patch = {
+    ...patch,
+    ...(patch.transition !== undefined || patch.transitionDuration !== undefined || patch.trimIn !== undefined || patch.trimOut !== undefined
+      ? { transitionDuration: effectiveDuration }
+      : {}),
+  };
   const colMap: Record<string, string> = {
     trimIn: 'trim_in',
     trimOut: 'trim_out',
     transition: 'transition',
     transitionDuration: 'transition_duration',
+    look: 'look',
     audio: 'audio_json',
   };
   const cols: string[] = [];
   const vals: unknown[] = [];
-  for (const [k, v] of Object.entries(patch)) {
+  for (const [k, v] of Object.entries(effectivePatch)) {
     if (v === undefined) continue;
     const col = colMap[k];
     if (!col) continue;
@@ -155,6 +194,59 @@ export function invalidateShotClips(p: ProjectContext, shotId: string): number {
   const r = p.db.run('DELETE FROM timeline_clips WHERE shot_id = ?', [shotId]);
   if (Number(r.changes ?? 0) > 0) p.db.run('UPDATE timeline SET updated_at = ?', [new Date().toISOString()]);
   return Number(r.changes ?? 0);
+}
+
+/** Apply one look to every clip in the active episode. */
+export function setTimelineLook(p: ProjectContext, raw: unknown): TimelineClip[] {
+  if (!isTimelineLook(raw)) throw new Error('invalid look');
+  const now = new Date().toISOString();
+  p.db.run(
+    'UPDATE timeline_clips SET look = ?, updated_at = ? WHERE shot_id IN (SELECT id FROM shots WHERE story_id = ?)',
+    [raw, now, activeEpisodeId(p)],
+  );
+  p.db.run('UPDATE timeline SET updated_at = ?', [now]);
+  return getTimeline(p).clips;
+}
+
+export interface TimelineLookPreview {
+  clipId: string;
+  look: TimelineLookId;
+  timeSeconds: number;
+  relPath: string;
+}
+
+/** Local still-frame preview of a look. No provider call and no new Take. */
+export async function renderLookPreview(
+  p: ProjectContext,
+  ffmpeg: Ffmpeg,
+  clipId: string,
+  lookRaw?: unknown,
+  timeRaw?: unknown,
+): Promise<TimelineLookPreview> {
+  const clip = getTimeline(p).clips.find((item) => item.id === clipId);
+  if (!clip) throw new Error('timeline clip not found');
+  if (lookRaw !== undefined && !isTimelineLook(lookRaw)) throw new Error('invalid look');
+  const look = lookRaw === undefined ? clip.look : lookRaw;
+  const take = getTake(p, clip.takeId);
+  const abs = p.resolveProjectPath(take.localVideoPath);
+  const start = clip.trimIn;
+  const end = clip.trimOut ?? take.duration;
+  const requested = Number(timeRaw);
+  const timeSeconds = Number.isFinite(requested)
+    ? Math.min(Math.max(start, requested), Math.max(start, end - 0.05))
+    : (start + end) / 2;
+  const outPath = join(
+    p.paths.cache,
+    'look-previews',
+    `${clip.id}-${look}-${timeSeconds.toFixed(1).replace('.', '_')}.jpg`,
+  );
+  await ffmpeg.previewFrame(abs, outPath, timeSeconds, timelineLookFilters(look));
+  return {
+    clipId,
+    look,
+    timeSeconds,
+    relPath: relative(p.root, outPath).split(sep).join('/'),
+  };
 }
 
 export interface TimelineExportResult {
@@ -219,7 +311,6 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
   const outName = `${sanitize(title ?? tl.title ?? 'timeline')}-${new Date().toISOString().slice(0, 23).replace(/[:T.]/g, '-')}.mp4`;
   const outPath = join(p.paths.exports, outName);
   const clips: string[] = [];
-  let total = 0;
   for (const clip of tl.clips) {
     const take = getTake(p, clip.takeId);
     // P1: the timeline only ever exports SELECTED takes. A reselect removes
@@ -231,24 +322,22 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
     const trimOut = clip.trimOut ?? take.duration;
     if (trimOut - clip.trimIn < 0.1) throw new Error(`clip ${clip.id}: invalid trim`);
     const tmp = join(p.paths.cache, `clip-${clip.id}.mp4`);
-    await ffmpeg.trim(abs, tmp, clip.trimIn, trimOut, { audio: clip.audio, ensureAudio: true });
+    await ffmpeg.trim(abs, tmp, clip.trimIn, trimOut, {
+      audio: clip.audio,
+      ensureAudio: true,
+      videoFilters: timelineLookFilters(clip.look),
+    });
     clips.push(tmp);
-    total += trimOut - clip.trimIn;
     onProgress?.(clips.length, tl.clips.length);
   }
-  const transitions = tl.clips.slice(1).map((clip, index) => {
-    const previousDuration = (tl.clips[index]!.trimOut ?? getTake(p, tl.clips[index]!.takeId).duration) - tl.clips[index]!.trimIn;
-    const nextDuration = (clip.trimOut ?? getTake(p, clip.takeId).duration) - clip.trimIn;
-    const duration = clip.transition === 'cut' || clip.transition === 'none'
-      ? 0
-      : Math.min(Math.max(0, clip.transitionDuration), previousDuration / 2, nextDuration / 2);
-    return { type: clip.transition, duration };
-  });
+  const transitions = effectiveTransitions(tl.clips, (clip) => getTake(p, clip.takeId).duration).map((transition) => ({
+    type: transition.type,
+    duration: transition.duration,
+  }));
   await ffmpeg.concat(clips, outPath, { transitions });
-  const overlap = transitions.reduce((sum, transition) => sum + transition.duration, 0);
   // Forward slashes: stored rel paths must be OS-independent.
   const relPath = relative(p.root, outPath).split(sep).join('/');
-  const durationSeconds = Math.max(0, total - overlap);
+  const durationSeconds = timelineDurationSeconds(tl.clips, (clip) => getTake(p, clip.takeId).duration);
   const id = nextId(p.db, 'export');
   const createdAt = new Date().toISOString();
   p.db.run(

@@ -13,6 +13,7 @@ import { ensureShotEntityImageBindings, listBindings } from './assets.js';
 import { directorStyleAiContext, directorStylePromptDirective } from './director-styles.js';
 import { getBeat, getStory } from './story.js';
 import { getShotComposer } from './shot-composer.js';
+import { shotAudioLineContext } from './audio-lines.js';
 
 interface PvRow {
   id: string;
@@ -131,7 +132,8 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
     })(),
     storyBeat: shot.storyBeatId ? getBeat(p, shot.storyBeatId) : null,
   };
-  const text = compileDeterministic(ctx, mode);
+  const audioLine = shotAudioLineContext(p, shotId);
+  const text = [compileDeterministic(ctx, mode), audioLine?.text ?? ''].filter(Boolean).join('\n\n');
   return createPrompt(p, {
     shotId,
     source: 'deterministic_compiler',

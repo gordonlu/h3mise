@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { get, post, patch, del, takeVideoUrl, fileUrl, subscribeEvents } from '../api/client';
 import { useToastStore } from '../stores/toast';
 import { t } from '../stores/locale';
-import type { FilmCheckResult, TimelineClip } from '@h3mise/shared';
+import { effectiveTransitions, timelineDurationSeconds, timelineClipDuration } from '@h3mise/shared';
+import type { EffectiveTimelineTransition, FilmCheckResult, TimelineClip, TimelineLookId } from '@h3mise/shared';
 import VideoPlayer from '../components/VideoPlayer.vue';
+import AudioLinePanel from '../components/timeline/AudioLinePanel.vue';
 import EmptyState from '../components/EmptyState.vue';
 
 interface ShotWithTake {
@@ -52,16 +54,42 @@ const takePoster = computed(() => {
   return m;
 });
 
+const LOOK_OPTIONS: TimelineLookId[] = ['none', 'cinematic', 'warm_film', 'bleach_bypass'];
+const lookPreview = ref<{ clipId: string; look: TimelineLookId; timeSeconds: number; url: string } | null>(null);
+const previewingLook = ref(false);
+const applyingLook = ref(false);
+
+function lookLabel(look: TimelineLookId): string {
+  return t(`workflow.timeline.look.${look}`);
+}
+
 function clipDuration(c: TimelineClip): number {
   const full = takeDuration.value.get(c.takeId) ?? 0;
-  return Math.max(0.1, (c.trimOut ?? full) - c.trimIn);
+  return Math.max(0.1, timelineClipDuration(c, full));
+}
+
+const transitions = computed(() => effectiveTransitions(clips.value, (c) => takeDuration.value.get(c.takeId) ?? 0));
+const transitionByClipId = computed(() => new Map(transitions.value.map((transition) => [transition.clipId, transition])));
+
+function transitionForClip(c: TimelineClip): EffectiveTimelineTransition | null {
+  return transitionByClipId.value.get(c.id) ?? null;
+}
+
+function incomingOverlap(c: TimelineClip): number {
+  return transitionForClip(c)?.duration ?? 0;
 }
 
 function clipWidth(c: TimelineClip): number {
-  return Math.max(MIN_CLIP_PX, clipDuration(c) * PX_PER_SEC);
+  return Math.max(MIN_CLIP_PX, (clipDuration(c) - incomingOverlap(c)) * PX_PER_SEC);
 }
 
-const totalSeconds = computed(() => clips.value.reduce((acc, c) => acc + clipDuration(c), 0));
+const totalSeconds = computed(() => timelineDurationSeconds(clips.value, (c) => takeDuration.value.get(c.takeId) ?? 0));
+
+function maxTransitionDuration(c: TimelineClip): number {
+  const index = clips.value.findIndex((clip) => clip.id === c.id);
+  if (index <= 0) return 0;
+  return Math.max(0, Math.min(clipDuration(clips.value[index - 1]!) / 2, clipDuration(c) / 2));
+}
 const activeClip = computed(() => clips.value.find((c) => c.id === activeClipId.value) ?? null);
 const activeClipIndex = computed(() => clips.value.findIndex((c) => c.id === activeClipId.value));
 
@@ -100,6 +128,50 @@ async function updateClip(id: string, patchData: Partial<TimelineClip>) {
   await patch(`/api/timeline/clips/${id}`, patchData);
   await load();
 }
+
+async function changeLook(look: TimelineLookId) {
+  const clip = activeClip.value;
+  if (!clip) return;
+  lookPreview.value = null;
+  await updateClip(clip.id, { look });
+}
+
+async function applyLookToAll() {
+  const clip = activeClip.value;
+  if (!clip) return;
+  applyingLook.value = true;
+  try {
+    await post('/api/timeline/looks', { look: clip.look });
+    await load();
+    toasts.push({ kind: 'ok', text: t('workflow.timeline.lookAppliedToAll') });
+  } catch (error) {
+    toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
+  } finally {
+    applyingLook.value = false;
+  }
+}
+
+async function previewLook() {
+  const clip = activeClip.value;
+  if (!clip) return;
+  previewingLook.value = true;
+  try {
+    const current = trimPlayer.value?.currentTime();
+    const result = await post<{ clipId: string; look: TimelineLookId; timeSeconds: number; url: string }>(
+      `/api/timeline/clips/${clip.id}/look-preview`,
+      { look: clip.look, ...(current && current > 0 ? { timeSeconds: current } : {}) },
+    );
+    lookPreview.value = result;
+  } catch (error) {
+    toasts.push({ kind: 'err', text: error instanceof Error ? error.message : String(error) });
+  } finally {
+    previewingLook.value = false;
+  }
+}
+
+watch(activeClipId, () => {
+  lookPreview.value = null;
+});
 
 function changeTransition(c: TimelineClip, transition: TimelineClip['transition']) {
   const transitionDuration = transition === 'cut' || transition === 'none'
@@ -254,7 +326,8 @@ onUnmounted(() => off?.());
             <span class="strip-idx mono">{{ String(i + 1).padStart(2, '0') }}</span>
             <span class="strip-dur mono">{{ clipDuration(c).toFixed(1) }}s</span>
           </div>
-          <div v-if="c.transition !== 'cut' && c.transition !== 'none' && i > 0" class="strip-trans" :title="t('workflow.timeline.transitionValue', { v0: c.transition })">◧</div>
+          <div v-if="transitionForClip(c) && incomingOverlap(c) > 0" class="strip-trans" :title="`${c.transition} · ${incomingOverlap(c).toFixed(1)}s`">◧</div>
+          <div v-if="c.look !== 'none'" class="strip-look" :title="lookLabel(c.look)">{{ lookLabel(c.look) }}</div>
           <button
             type="button"
             class="strip-edit"
@@ -323,10 +396,36 @@ onUnmounted(() => off?.());
               class="trim-input"
               min="0.1"
               step="0.1"
-              :value="activeClip.transitionDuration"
+              :max="maxTransitionDuration(activeClip) || undefined"
+              :value="transitionForClip(activeClip)?.duration ?? activeClip.transitionDuration"
               @change="updateClip(activeClip.id, { transitionDuration: Number(($event.target as HTMLInputElement).value) })"
             /> {{ t('workflow.timeline.sec') }}
+            <span class="muted">· 实际最大 {{ maxTransitionDuration(activeClip).toFixed(1) }}s</span>
           </label>
+          <div class="look-controls">
+            <div class="look-head">
+              <strong>{{ t('workflow.timeline.lookLabel') }}</strong>
+              <span class="muted">{{ t('workflow.timeline.lookHelp') }}</span>
+            </div>
+            <div class="row wrap">
+              <select :value="activeClip.look" @change="changeLook(($event.target as HTMLSelectElement).value as TimelineLookId)">
+                <option v-for="look in LOOK_OPTIONS" :key="look" :value="look">{{ lookLabel(look) }}</option>
+              </select>
+              <button class="sm" :disabled="previewingLook" @click="previewLook">{{ previewingLook ? t('workflow.timeline.previewingLook') : t('workflow.timeline.previewLook') }}</button>
+              <button class="sm" :disabled="applyingLook" @click="applyLookToAll">{{ applyingLook ? t('workflow.timeline.applyingLook') : t('workflow.timeline.applyLookToAll') }}</button>
+            </div>
+            <div v-if="lookPreview && lookPreview.clipId === activeClip.id" class="look-preview">
+              <div class="look-preview-item">
+                <span class="muted">{{ t('workflow.timeline.original') }}</span>
+                <img v-if="takePoster.get(activeClip.takeId)" :src="fileUrl(takePoster.get(activeClip.takeId)!)" alt="" />
+                <span v-else class="muted">—</span>
+              </div>
+              <div class="look-preview-item">
+                <span class="muted">{{ t('workflow.timeline.lookPreview') }} · {{ lookPreview.timeSeconds.toFixed(1) }}s</span>
+                <img :src="lookPreview.url" alt="" />
+              </div>
+            </div>
+          </div>
           <div class="audio-controls">
             <div class="audio-title">{{ t('workflow.timeline.audio') }}</div>
             <label class="audio-option">
@@ -366,7 +465,9 @@ onUnmounted(() => off?.());
       </div>
     </div>
 
-      </div>
+    <AudioLinePanel :shot-id="activeClip?.shotId ?? null" />
+
+    </div>
 
       <aside class="timeline-rail">
     <div class="panel">
@@ -427,6 +528,7 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .strip-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.55)); }
 .strip-meta { position: absolute; left: 6px; right: 6px; bottom: 5px; display: flex; justify-content: space-between; color: #fff; font-size: 10.5px; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
 .strip-trans { position: absolute; top: 5px; left: 5px; color: #fff; font-size: 11px; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
+.strip-look { position: absolute; left: 5px; bottom: 22px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 999px; background: rgba(25,22,20,.62); color: rgba(255,255,255,.92); font-size: 9.5px; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
 .strip-edit { position: absolute; top: 7px; right: 7px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid rgba(255,255,255,.38); border-radius: 999px; background: rgba(25,22,20,.62); color: rgba(255,255,255,.92); box-shadow: 0 2px 8px rgba(0,0,0,.18); backdrop-filter: blur(6px); font-size: 10.5px; font-weight: 600; line-height: 1; white-space: nowrap; }
 .strip-edit:hover, .strip-edit:focus-visible { background: rgba(25,22,20,.88); border-color: rgba(255,255,255,.72); transform: translateY(-1px); }
 .strip-edit.current { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 3px 10px rgba(209,89,45,.3); }
@@ -437,6 +539,13 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .trim-controls { gap: 10px; align-content: start; }
 .control-help, .first-clip-note { padding: 9px 11px; border-radius: 6px; background: var(--bg-subtle); color: var(--text-2); font-size: 12px; line-height: 1.55; }
 .first-clip-note { color: var(--text-3); }
+.look-controls { display: grid; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-subtle); }
+.look-head { display: grid; gap: 2px; }
+.look-head strong { font-size: 12px; }
+.look-head span { font-size: 11px; line-height: 1.45; }
+.look-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.look-preview-item { display: grid; gap: 4px; min-width: 0; font-size: 10.5px; }
+.look-preview-item img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 5px; background: var(--inset); }
 .audio-controls { display: grid; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-subtle); }
 .audio-title { font-size: 12px; font-weight: 700; }
 .audio-option { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-2); }

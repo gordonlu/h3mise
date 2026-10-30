@@ -625,6 +625,49 @@ CREATE TABLE IF NOT EXISTS shot_composers (
 `,
 });
 
+PROJECT_MIGRATIONS.push({
+  version: 24,
+  name: 'timeline-look',
+  sql: `
+ALTER TABLE timeline_clips ADD COLUMN look TEXT NOT NULL DEFAULT 'none';
+`,
+});
+
+PROJECT_MIGRATIONS.push({
+  version: 25,
+  name: 'audio-lines',
+  sql: `
+CREATE TABLE IF NOT EXISTS audio_lines (
+  id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'master',
+  label TEXT NOT NULL DEFAULT '',
+  offset_seconds REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audio_segments (
+  id TEXT PRIMARY KEY,
+  line_id TEXT NOT NULL REFERENCES audio_lines(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL,
+  start_seconds REAL NOT NULL,
+  end_seconds REAL NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  speaker TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audio_segments_line ON audio_segments(line_id, ord);
+CREATE TABLE IF NOT EXISTS shot_audio_segments (
+  shot_id TEXT NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+  segment_id TEXT NOT NULL REFERENCES audio_segments(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (shot_id, segment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_shot_audio_segments_shot ON shot_audio_segments(shot_id, ord);
+`,
+});
+
 export const REGISTRY_MIGRATIONS: Migration[] = [
   {
     version: 1,

@@ -435,7 +435,7 @@ async function aiPreflight(promptId: string) {
   let report: Awaited<ReturnType<typeof s.runPreflight>> | null = null;
   await guarded(async () => {
     report = sDetail.value?.preflights.find((item) => item.promptVersionId === promptId) ?? null;
-    if (!report) report = await s.runPreflight(prompt.id, providerId.value, megapixels.value);
+    if (!report) report = await s.runPreflight(prompt.id, providerId.value, megapixels.value, sShot.value?.durationSeconds);
     const result = await runAi('continuity_check', { shotId });
     report = await s.attachSemanticReview(report.id, aiText(result));
     toasts.push({ kind: 'ok', text: tr('shot.toast.aiCheckAdded') });
@@ -485,7 +485,7 @@ async function doRender(promptId: string) {
 async function refreshPromptReferences() {
   await guarded(async () => {
     const prompt = await s.compilePrompt(sShot.value?.h3Mode ?? 't2va');
-    await s.runPreflight(prompt.id, providerId.value, megapixels.value);
+    await s.runPreflight(prompt.id, providerId.value, megapixels.value, sShot.value?.durationSeconds);
     toasts.push({ kind: 'ok', text: tr('shot.toast.promptReferencesUpdated') });
   });
 }
@@ -637,7 +637,7 @@ function refreshShotAndRepairExpiredDuplicateGate(): Promise<void> {
     const hasActiveJob = detail?.jobs.some((job) => ACTIVE_RENDER_STATUSES.has(job.status)) ?? false;
     const errors = report?.basic.flatMap((section) => section.checks).filter((check) => check.severity === 'error') ?? [];
     if (prompt && report?.blocked && !hasActiveJob && errors.length > 0 && errors.every((check) => check.key === 'duplicate.active')) {
-      await s.runPreflight(prompt.id);
+      await s.runPreflight(prompt.id, providerId.value, megapixels.value, sShot.value?.durationSeconds);
     }
   })().finally(() => {
     shotRefresh = null;
@@ -976,7 +976,7 @@ function localizeRequirement(value: string): string {
             :duration-seconds="sShot.durationSeconds"
             :aspect-ratio="sShot.aspectRatio"
             :ai-enabled="aiEnabled"
-            :on-basic="(pid: string, mp: number) => guarded(() => s.runPreflight(pid, providerId, mp), tr('shot.toast.preflightComplete')) as never"
+            :on-basic="(pid: string, mp: number) => guarded(() => s.runPreflight(pid, providerId, mp, sShot?.durationSeconds), tr('shot.toast.preflightComplete')) as never"
             :on-ai-check="aiPreflight"
             :on-refresh-prompt="refreshPromptReferences"
             :on-render="doRender"

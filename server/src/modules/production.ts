@@ -5,6 +5,7 @@ import type {
   ProductionShotStatus,
   RenderBatchShotStage,
 } from '@h3mise/shared';
+import { timelineDurationSeconds } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { getStory, listBeats } from './story.js';
@@ -43,10 +44,11 @@ function issue(input: ProductionIssue): ProductionIssue {
 
 function timelineDuration(p: ProjectContext): number {
   const clips = getTimeline(p).clips;
-  return Math.max(0, clips.reduce((total, clip) => {
-    const takeDuration = p.db.get<{ duration: number }>('SELECT duration FROM takes WHERE id = ?', [clip.takeId])?.duration ?? 0;
-    return total + Math.max(0, (clip.trimOut ?? takeDuration) - clip.trimIn);
-  }, 0) - clips.slice(1).reduce((total, clip) => total + (clip.transition === 'cut' || clip.transition === 'none' ? 0 : clip.transitionDuration), 0));
+  const durations = new Map(clips.map((clip) => [
+    clip.takeId,
+    p.db.get<{ duration: number }>('SELECT duration FROM takes WHERE id = ?', [clip.takeId])?.duration ?? 0,
+  ]));
+  return timelineDurationSeconds(clips, (clip) => durations.get(clip.takeId) ?? 0);
 }
 
 export async function productionOverview(p: ProjectContext, registry: ProviderRegistry): Promise<ProductionOverview> {
@@ -137,6 +139,15 @@ export async function productionOverview(p: ProjectContext, registry: ProviderRe
     issues.push(issue({ id: 'export-stale', severity: 'warning', category: 'timeline', title: '时间线在上次导出后有修改', detail: '当前导出文件不包含最新的剪辑调整，需要重新导出。', to: '/timeline' }));
   }
 
+  const spent = p.db.all<{ cost_json: string }>('SELECT cost_json FROM render_jobs WHERE cost_json IS NOT NULL').reduce((sum, row) => {
+    try {
+      const cost = JSON.parse(row.cost_json) as { credits?: number; coins?: number };
+      sum.cny += Number(cost.credits ?? 0) || 0;
+      sum.coins += Number(cost.coins ?? 0) || 0;
+    } catch { /* malformed legacy cost is ignored, not guessed */ }
+    return sum;
+  }, { cny: 0, coins: 0 });
+
   const severityRank: Record<ProductionIssueSeverity, number> = { blocker: 0, warning: 1, info: 2 };
   issues.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]);
   shotStatuses.sort((a, b) => STAGE_PRIORITY[a.stage] - STAGE_PRIORITY[b.stage] || a.order - b.order);
@@ -156,6 +167,8 @@ export async function productionOverview(p: ProjectContext, registry: ProviderRe
       activeRenderCount: p.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM render_jobs WHERE status IN (${ACTIVE.map(() => '?').join(',')})`, ACTIVE)?.n ?? 0,
       failedJobCount,
       remainingShotCount: shotStatuses.filter((shot) => shot.stage !== 'done').length,
+      spentCny: Math.round(spent.cny * 100) / 100,
+      spentCoins: Math.round(spent.coins * 100) / 100,
     },
     nextActions: issues.slice(0, 3),
     issues,

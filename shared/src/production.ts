@@ -43,6 +43,9 @@ export interface ProductionOverview {
     activeRenderCount: number;
     failedJobCount: number;
     remainingShotCount: number;
+    /** Sum of provider-reported costs across all persisted render jobs. */
+    spentCny: number;
+    spentCoins: number;
   };
   nextActions: ProductionIssue[];
   issues: ProductionIssue[];

@@ -28,11 +28,13 @@ import * as directorMod from '../modules/director.js';
 import * as cameraPlanMod from '../modules/camera-plan.js';
 import * as composerMod from '../modules/shot-composer.js';
 import * as promptMod from '../modules/prompt.js';
+import { lintPrompt } from '../modules/prompt-lint.js';
 import * as preflightMod from '../modules/preflight.js';
 import * as renderBatchMod from '../modules/render-batch.js';
 import * as takesMod from '../modules/takes.js';
 import * as continuityMod from '../modules/continuity.js';
 import * as timelineMod from '../modules/timeline.js';
+import * as audioLinesMod from '../modules/audio-lines.js';
 import * as mediaMod from '../modules/media.js';
 import * as aiActions from '../modules/ai-actions.js';
 import * as delegationMod from '../modules/ai-delegation.js';
@@ -733,6 +735,16 @@ export function buildRoutes(services: AppServices): App {
   });
 
   app.get('/api/shots/:id/prompts', (c) => c.json(promptMod.listPrompts(p(c), c.req.param('id'))));
+  app.get('/api/prompts/:id', (c) => c.json(promptMod.getPrompt(p(c), c.req.param('id'))));
+  app.post('/api/prompts/lint', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; hasAudioRefs?: unknown; hasDialogue?: unknown };
+    return c.json({
+      issues: lintPrompt(String(body.text ?? ''), {
+        hasAudioRefs: body.hasAudioRefs === true,
+        hasDialogue: body.hasDialogue === true,
+      }),
+    });
+  });
   app.post('/api/shots/:id/prompts/compile', async (c) => {
     const ctx = p(c);
     const shotId = c.req.param('id');
@@ -764,6 +776,10 @@ export function buildRoutes(services: AppServices): App {
       promptVersionId: String(body.promptVersionId ?? promptMod.listPrompts(ctx, shotId).at(-1)?.id ?? ''),
       providerId: String(body.providerId ?? ctx.config.default_provider ?? 'runninghub'),
       megapixels: body.megapixels !== undefined ? Number(body.megapixels) : undefined,
+      durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
+      aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
+      resolution: body.resolution !== undefined ? String(body.resolution) : undefined,
+      providerParams: body.providerParams && typeof body.providerParams === 'object' ? body.providerParams : undefined,
     });
     return c.json(report, 201);
   });
@@ -964,6 +980,39 @@ export function buildRoutes(services: AppServices): App {
     return c.json(continuityMod.latestContinuity(p(c), (scope ?? 'visual') as 'visual' | 'narrative', (kind ?? 'actual') as 'planned' | 'actual'));
   });
 
+  // --- audio lines ---------------------------------------------------------
+  app.get('/api/audio-lines', (c) => {
+    const lines = audioLinesMod.listAudioLines(p(c));
+    return c.json({ lines, segments: audioLinesMod.listAudioSegments(p(c)) });
+  });
+  app.post('/api/audio-lines', async (c) => c.json(audioLinesMod.createAudioLine(p(c), await c.req.json()), 201));
+  app.patch('/api/audio-lines/:id', async (c) => c.json(audioLinesMod.updateAudioLine(p(c), c.req.param('id'), await c.req.json())));
+  app.delete('/api/audio-lines/:id', (c) => {
+    audioLinesMod.deleteAudioLine(p(c), c.req.param('id'));
+    return c.json({ ok: true });
+  });
+  app.get('/api/audio-lines/:id/waveform', async (c) => c.json(await audioLinesMod.audioLineWaveform(p(c), services.ffmpeg, c.req.param('id'))));
+  app.post('/api/audio-lines/:id/detect-silence', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { replace?: unknown; noiseDb?: unknown; minSilenceSeconds?: unknown };
+    return c.json(await audioLinesMod.detectAudioSegments(p(c), services.ffmpeg, c.req.param('id'), {
+      replace: body.replace === true,
+      ...(body.noiseDb === undefined ? {} : { noiseDb: Number(body.noiseDb) }),
+      ...(body.minSilenceSeconds === undefined ? {} : { minSilenceSeconds: Number(body.minSilenceSeconds) }),
+    }));
+  });
+  app.post('/api/audio-lines/:id/segments', async (c) => c.json(audioLinesMod.createAudioSegment(p(c), c.req.param('id'), await c.req.json()), 201));
+  app.patch('/api/audio-segments/:id', async (c) => c.json(audioLinesMod.updateAudioSegment(p(c), c.req.param('id'), await c.req.json())));
+  app.delete('/api/audio-segments/:id', (c) => {
+    audioLinesMod.deleteAudioSegment(p(c), c.req.param('id'));
+    return c.json({ ok: true });
+  });
+  app.get('/api/shots/:id/audio-segments', (c) => c.json(audioLinesMod.getShotAudioSegments(p(c), c.req.param('id'))));
+  app.put('/api/shots/:id/audio-segments', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { segmentIds?: unknown };
+    const ids = Array.isArray(body.segmentIds) ? body.segmentIds.map(String) : [];
+    return c.json(audioLinesMod.setShotAudioSegments(p(c), c.req.param('id'), ids));
+  });
+
   // --- timeline ------------------------------------------------------------
 
   app.get('/api/timeline', (c) => c.json(timelineMod.getTimeline(p(c))));
@@ -979,6 +1028,30 @@ export function buildRoutes(services: AppServices): App {
     return c.json({ ok: true });
   });
   app.post('/api/timeline/clips/reorder', async (c) => c.json(timelineMod.reorderClips(p(c), (await c.req.json()).ids)));
+  app.post('/api/timeline/looks', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { look?: unknown };
+    try {
+      return c.json({ clips: timelineMod.setTimelineLook(p(c), body.look) });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  });
+  app.post('/api/timeline/clips/:id/look-preview', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { look?: unknown; timeSeconds?: unknown };
+    try {
+      const result = await timelineMod.renderLookPreview(
+        p(c),
+        services.ffmpeg,
+        c.req.param('id'),
+        body.look,
+        body.timeSeconds,
+      );
+      return c.json({ ...result, url: `/api/file/${encodeURIComponent(result.relPath)}` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return c.json({ error: message }, /not found/.test(message) ? 404 : 422);
+    }
+  });
   app.get('/api/timeline/exports', (c) => c.json(timelineMod.listTimelineExports(p(c)).map((item) => ({
     ...item,
     url: `/api/file/${encodeURIComponent(item.relPath)}`,

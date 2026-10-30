@@ -55,6 +55,8 @@ export interface RenderJob {
   cost: { credits?: number; unit?: string; coins?: number; raw?: unknown } | null;
   error: string | null;
   takeId: string | null;
+  /** Convenience projection joined by the server; null until a Take exists. */
+  take?: Take | null;
   createdAt: string;
   updatedAt: string;
 }

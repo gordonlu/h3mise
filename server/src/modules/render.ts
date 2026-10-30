@@ -24,7 +24,7 @@ import { ProviderError } from '../providers/types.js';
 import { getShot, updateShot, advanceShotStatus, advanceTo } from './shots.js';
 import { getPrompt } from './prompt.js';
 import { getMedia, insertMedia } from './assets.js';
-import { createTake } from './takes.js';
+import { createTake, getTake } from './takes.js';
 
 interface JobRow {
   id: string;
@@ -72,6 +72,15 @@ export function jobFromRow(r: JobRow): RenderJob {
   };
 }
 
+function withTake(p: ProjectContext, job: RenderJob): RenderJob {
+  if (!job.takeId) return { ...job, take: null };
+  try {
+    return { ...job, take: getTake(p, job.takeId) };
+  } catch {
+    return { ...job, take: null };
+  }
+}
+
 const ACTIVE_STATUSES: RenderJobStatus[] = ['LOCAL_QUEUED', 'UPLOADING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'];
 const TERMINAL_STATUSES: RenderJobStatus[] = ['SUCCEEDED', 'LOCAL_READY', 'FAILED', 'CANCELLED', 'EXPIRED'];
 
@@ -80,6 +89,8 @@ const runKey = (projectId: string, jobId: string) => `${projectId}/${jobId}`;
 export class RenderQueue {
   /** key -> provider. Insertion order gives stable FIFO among runnable jobs. */
   private pending = new Map<string, string>();
+  /** Queue key → shot id, used to serialize an active job and its one queued revision. */
+  private keyShot = new Map<string, string>();
   private handles = new Map<string, RenderJobHandle>();
   /** Jobs currently occupying a provider slot. */
   private active = new Map<string, string>();
@@ -209,6 +220,9 @@ export class RenderQueue {
     }
     for (const k of [...this.handles.keys()]) {
       if (k.startsWith(`${projectId}/`)) this.handles.delete(k);
+    }
+    for (const k of [...this.keyShot.keys()]) {
+      if (k.startsWith(`${projectId}/`)) this.keyShot.delete(k);
     }
     // Cancellation wakes pollers, but their async finally blocks still need a
     // turn before the detached SQLite handle is safe to remove. Awaiting this
@@ -346,7 +360,7 @@ export class RenderQueue {
     return rows.map((r) => {
       const job = jobFromRow(r);
       if (!job.projectId) job.projectId = p.meta.id;
-      return job;
+      return withTake(p, job);
     });
   }
 
@@ -378,7 +392,7 @@ export class RenderQueue {
           if (!job.projectId) job.projectId = meta.id;
           job.projectTitle = meta.title;
           job.shotTitle = projectCtx.db.get<{ title: string }>('SELECT title FROM shots WHERE id = ?', [job.shotId])?.title;
-          out.push(job);
+          out.push(withTake(projectCtx, job));
         }
       } catch {
         // A damaged/unavailable project should not hide other queue entries.
@@ -392,7 +406,8 @@ export class RenderQueue {
   get(jobId: string): RenderJob | null {
     const p = this.getStore().current;
     if (!p) return null;
-    return this.getJob(p.meta.id, jobId);
+    const job = this.getJob(p.meta.id, jobId);
+    return job ? withTake(p, job) : null;
   }
 
   /** Enqueue a render. Caller must have run preflight (blocked=false). */
@@ -419,14 +434,24 @@ export class RenderQueue {
     if (input.projectId !== p.meta.id) throw new Error('render job project mismatch');
     const shot = getShot(p, input.shotId);
     const prompt = getPrompt(p, input.promptVersionId);
-    // One active task per Shot covers double-click, multi-tab, network replay,
-    // and changing parameters while an earlier paid task is still running.
-    const active = p.db.get<{ id: string; status: string }>(
-      `SELECT id, status FROM render_jobs WHERE shot_id = ? AND status IN (${ACTIVE_STATUSES.map(() => '?').join(',')}) ORDER BY created_at DESC LIMIT 1`,
-      [input.shotId, ...ACTIVE_STATUSES],
+    // One running job plus at most one queued revision per Shot. The revision
+    // is persisted immediately and is only started after the running job
+    // reaches a terminal state, so a prompt fix never needs a local cancel.
+    const sameIntent = p.db.get<{ id: string; status: string }>(
+      `SELECT id, status FROM render_jobs WHERE shot_id = ? AND render_intent_hash = ? AND status IN (${ACTIVE_STATUSES.map(() => '?').join(',')}) ORDER BY created_at DESC LIMIT 1`,
+      [input.shotId, input.intentHash, ...ACTIVE_STATUSES],
     );
-    if (active) {
-      throw new Error(`a render job for this shot is already active (${active.id}, ${active.status}) — wait for it to finish or cancel it first`);
+    if (sameIntent) {
+      throw new Error(`an identical render job for this shot is already active (${sameIntent.id}, ${sameIntent.status})`);
+    }
+    // A job can be LOCAL_QUEUED in the DB while its worker is already active
+    // (the row moves to UPLOADING asynchronously), so exclude active keys.
+    const queued = p.db.all<{ id: string }>(
+      "SELECT id FROM render_jobs WHERE shot_id = ? AND status = 'LOCAL_QUEUED' ORDER BY created_at DESC",
+      [input.shotId],
+    ).find((row) => !this.active.has(runKey(p.meta.id, row.id)));
+    if (queued) {
+      throw new Error(`this shot already has a queued task (${queued.id}) — wait for it to start or cancel it first`);
     }
     const dpvId = prompt.directorPlanVersionId;
     // P2: the row insert and its state transitions are one transaction — an
@@ -444,7 +469,9 @@ export class RenderQueue {
       if (shot.status !== 'RENDERING') advanceShotStatus(p, input.shotId, 'RENDERING');
       return newId;
     });
-    this.pending.set(runKey(p.meta.id, id), input.provider);
+    const key = runKey(p.meta.id, id);
+    this.pending.set(key, input.provider);
+    this.keyShot.set(key, input.shotId);
     this.bus.emit({ type: 'render.job.created', projectId: p.meta.id, jobId: id, shotId: input.shotId });
     this.pump();
     return this.getJob(p.meta.id, id)!;
@@ -463,6 +490,7 @@ export class RenderQueue {
       const key = runKey(ownerProjectId, jobId);
       this.pending.delete(key);
       this.capacityRetries.delete(key);
+      this.keyShot.delete(key);
       const handle = this.handles.get(key);
       if (handle) {
         const provider = this.providerFor(job);
@@ -523,8 +551,10 @@ export class RenderQueue {
         "UPDATE render_jobs SET status = 'QUEUED', error = NULL, finished_at = NULL, updated_at = ? WHERE id = ?",
         [now, job.id],
       );
-      this.handles.set(runKey(ownerProjectId, job.id), { providerTaskId: job.providerTaskId });
-      this.pending.set(runKey(ownerProjectId, job.id), job.provider);
+      const retryKey = runKey(ownerProjectId, job.id);
+      this.handles.set(retryKey, { providerTaskId: job.providerTaskId });
+      this.pending.set(retryKey, job.provider);
+      this.keyShot.set(retryKey, job.shotId);
       this.bus.emit({ type: 'render.job.queued', projectId: ownerProjectId, jobId: job.id, shotId: job.shotId });
       try {
         const shot = getShot(p, job.shotId);
@@ -543,7 +573,9 @@ export class RenderQueue {
        VALUES (?, ?, ?, ?, ?, ?, 'LOCAL_QUEUED', ?, ?, ?, ?)`,
       [newId, ownerProjectId, job.shotId, job.promptVersionId, prompt.directorPlanVersionId, job.provider, j(job.requestSnapshot), job.renderIntentHash, now, now],
     );
-    this.pending.set(runKey(ownerProjectId, newId), job.provider);
+    const newKey = runKey(ownerProjectId, newId);
+    this.pending.set(newKey, job.provider);
+    this.keyShot.set(newKey, job.shotId);
     this.bus.emit({ type: 'render.job.created', projectId: ownerProjectId, jobId: newId, shotId: job.shotId });
     try {
       const shot = getShot(p, job.shotId);
@@ -577,12 +609,16 @@ export class RenderQueue {
           }
           if (job.providerTaskId) {
             // Resume polling immediately; no resubmit (avoid double cost).
-            this.handles.set(runKey(job.projectId, job.id), { providerTaskId: job.providerTaskId });
-            this.pending.set(runKey(job.projectId, job.id), job.provider);
+            const recoverKey = runKey(job.projectId, job.id);
+            this.handles.set(recoverKey, { providerTaskId: job.providerTaskId });
+            this.pending.set(recoverKey, job.provider);
+            this.keyShot.set(recoverKey, job.shotId);
           } else if (job.status === 'LOCAL_QUEUED') {
             // This state has not crossed the provider boundary and is safe to
             // submit after restart without risking a duplicate paid task.
-            this.pending.set(runKey(job.projectId, job.id), job.provider);
+            const recoverKey = runKey(job.projectId, job.id);
+            this.pending.set(recoverKey, job.provider);
+            this.keyShot.set(recoverKey, job.shotId);
           } else {
             // Never resubmitted without user action — mark failed with a hint.
             const now = new Date().toISOString();
@@ -613,7 +649,10 @@ export class RenderQueue {
     // Start every FIFO job whose Provider still has capacity. A long-running
     // poll occupies only that Provider's slot and no longer blocks unrelated
     // providers or independent projects.
+    const activeShots = new Set([...this.active.keys()].map((key) => this.keyShot.get(key)).filter((shotId): shotId is string => Boolean(shotId)));
     for (const [key, provider] of [...this.pending]) {
+      const shotId = this.keyShot.get(key);
+      if (shotId && activeShots.has(shotId)) continue;
       const cooldownUntil = this.providerCooldownUntil.get(provider) ?? 0;
       if (cooldownUntil > Date.now()) continue;
       if (cooldownUntil) this.providerCooldownUntil.delete(provider);
@@ -621,8 +660,10 @@ export class RenderQueue {
       if (used >= this.providerLimit(provider)) continue;
       this.pending.delete(key);
       this.active.set(key, provider);
+      if (shotId) activeShots.add(shotId);
       void this.work(key).finally(() => {
         this.active.delete(key);
+        this.keyShot.delete(key);
         const sep = key.indexOf('/');
         const projectId = key.slice(0, sep);
         if (this.deferredClose.has(projectId) && ![...this.active.keys()].some((activeKey) => activeKey.startsWith(`${projectId}/`))) {

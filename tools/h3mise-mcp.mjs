@@ -388,6 +388,8 @@ const tools = [
       promptVersionId: stringProp('Exact immutable PromptVersion to check.'),
       providerId: { type: 'string', enum: ['mock', 'runninghub', 'comfyui'], description: 'Provider to validate against.' },
       megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2] },
+      durationSeconds: { type: 'number', description: 'Exact requested duration. Defaults to the Shot duration.' },
+      aspectRatio: { type: 'string' },
     }, ['shotId', 'promptVersionId', 'providerId']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
@@ -652,6 +654,8 @@ async function callTool(name, args = {}) {
       promptVersionId: requireString(args, 'promptVersionId'),
       providerId: requireString(args, 'providerId'),
       ...(args.megapixels === undefined ? {} : { megapixels: args.megapixels }),
+      ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
+      ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),
     });
     case 'submit_render': {
       if (args.confirmPaid !== true) throw new Error('confirmPaid=true is required for every paid render submission');

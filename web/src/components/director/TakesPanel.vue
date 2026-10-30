@@ -2,7 +2,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted, toRaw } from 'vue';
 import type { PromptVersion, Take, TakeReview, TakeUsableRange, VisualContinuityState } from '@h3mise/shared';
 import { FAILURE_TAGS } from '@h3mise/shared';
-import { takeVideoUrl, fileUrl } from '../../api/client';
+import { takeVideoUrl, fileUrl, post } from '../../api/client';
 import { confirmDialog } from '../../stores/confirm';
 import { t as tr } from '../../stores/locale';
 import VideoPlayer from '../VideoPlayer.vue';
@@ -72,6 +72,8 @@ const revisionText = ref('');
 const revisionReason = ref('');
 const revisionPreserve = ref('');
 const revisionBusy = ref(false);
+const evidenceBusy = ref<string | null>(null);
+const evidence = ref<Record<string, { url: string; cached: boolean; decode: string }>>({});
 
 const activeTake = computed(() => props.takes.find((t) => t.id === active.value) ?? null);
 const takeA = computed(() => props.takes.find((t) => t.id === slotA.value) ?? null);
@@ -202,6 +204,21 @@ function rangesToText(take: Take, media: 'picture' | 'audio'): string {
     .filter((range) => range.media === media)
     .map((range) => `${range.start}-${range.end}`)
     .join(', ');
+}
+
+async function loadEvidence(take: Take) {
+  evidenceBusy.value = take.id;
+  try {
+    const result = await post<{ contactSheet: { relativePath: string }; technical: { decode: string }; cached: boolean }>(
+      `/api/takes/${take.id}/review-evidence`,
+      {},
+    );
+    evidence.value[take.id] = { url: fileUrl(result.contactSheet.relativePath), cached: result.cached, decode: result.technical.decode };
+  } catch (error) {
+    reviewError.value[take.id] = error instanceof Error ? error.message : String(error);
+  } finally {
+    evidenceBusy.value = null;
+  }
 }
 
 function openReview(take: Take) {
@@ -504,6 +521,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       </div>
       <div class="panel-body">
         <VideoPlayer :src="takeVideoUrl(activeTake.id)" :poster="activeTake.posterPath ? fileUrl(activeTake.posterPath) : undefined" :max-height="420" />
+        <div class="row wrap evidence-actions">
+          <button class="sm" :disabled="evidenceBusy === activeTake.id" @click="loadEvidence(activeTake)">{{ evidenceBusy === activeTake.id ? '生成审查证据…' : 'Contact Sheet / 审查证据' }}</button>
+          <span v-if="evidence[activeTake.id]" class="muted">解码：{{ evidence[activeTake.id]!.decode }} · {{ evidence[activeTake.id]!.cached ? '缓存' : '新生成' }}</span>
+        </div>
+        <div v-if="evidence[activeTake.id]" class="evidence-sheet">
+          <img :src="evidence[activeTake.id]!.url" alt="Contact sheet" />
+          <span class="muted">机械证据，不等于内容通过；仍需看片、听音频后记录判断。</span>
+        </div>
         <VideoAnalysisFilmstrip :take-id="activeTake.id" />
       </div>
     </div>
@@ -759,6 +784,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 .import-take-bar .import-error { color: var(--bad); }
 .takes { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 .take { overflow: hidden; transition: border-color 0.15s, box-shadow 0.15s; }
+.evidence-actions { margin: 8px 0; }
+.evidence-sheet { display: grid; gap: 5px; margin: 8px 0; }
+.evidence-sheet img { width: 100%; border-radius: 6px; border: 1px solid var(--line); background: var(--inset); }
 .take.selected { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok), var(--shadow-1); }
 .take.focused { border-color: var(--accent); }
 .take.rejected { opacity: 0.55; }

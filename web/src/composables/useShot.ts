@@ -87,8 +87,8 @@ export function useShot(shotId: string) {
     return pv;
   }
 
-  async function runPreflight(promptVersionId: string, providerId = 'runninghub', megapixels?: number): Promise<PreflightReport> {
-    const report = await post<PreflightReport>(`/api/shots/${shotId}/preflight`, { promptVersionId, providerId, megapixels });
+  async function runPreflight(promptVersionId: string, providerId = 'runninghub', megapixels?: number, durationSeconds?: number): Promise<PreflightReport> {
+    const report = await post<PreflightReport>(`/api/shots/${shotId}/preflight`, { promptVersionId, providerId, megapixels, durationSeconds });
     await load();
     return report;
   }

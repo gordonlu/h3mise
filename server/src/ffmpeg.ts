@@ -296,6 +296,31 @@ export class Ffmpeg {
     return parseLoudnessMeasurement(stderr);
   }
 
+  /** Detect silence intervals for audio-line sentence splitting. */
+  async detectSilences(input: string, options?: { noiseDb?: number; minDurationSeconds?: number }): Promise<Array<{ start: number; end: number }>> {
+    const noise = options?.noiseDb ?? -35;
+    const minDuration = options?.minDurationSeconds ?? 0.35;
+    const { stderr } = await runResult('ffmpeg', [
+      '-hide_banner', '-nostats', '-i', input,
+      '-af', `silencedetect=noise=${noise}dB:d=${minDuration}`,
+      '-f', 'null', '-',
+    ], input);
+    const starts = [...stderr.matchAll(/silence_start:\s*([0-9.]+)/g)].map((match) => Number(match[1]));
+    const ends = [...stderr.matchAll(/silence_end:\s*([0-9.]+)/g)].map((match) => Number(match[1]));
+    const duration = (await this.probe(input)).durationSeconds ?? 0;
+    return starts.map((start, index) => ({ start, end: ends[index] ?? duration })).filter((range) => range.end > range.start);
+  }
+
+  /** Render a compact waveform PNG for an audio line. */
+  async waveformImage(input: string, outPath: string, width = 1200, height = 160): Promise<void> {
+    await mkdir(dirname(outPath), { recursive: true });
+    await run('ffmpeg', [
+      '-y', '-hide_banner', '-v', 'error', '-nostdin', '-i', input,
+      '-filter_complex', `showwavespic=s=${Math.max(120, Math.round(width))}x${Math.max(48, Math.round(height))}:colors=#d05a2d`,
+      '-frames:v', '1', outPath,
+    ], input);
+  }
+
   /** Extract one frame at `at` seconds into `outPath` (jpg). */
   async extractFrame(input: string, outPath: string, at = 0, size?: string): Promise<void> {
     await mkdir(dirname(outPath), { recursive: true });
@@ -397,6 +422,21 @@ export class Ffmpeg {
   }
 
   /** Extract a compact, evenly sampled WebP strip in one FFmpeg process. */
+  /** One still frame with optional color filters, for local look previews. */
+  async previewFrame(input: string, outPath: string, timeSeconds: number, videoFilters: string[] = []): Promise<void> {
+    await mkdir(dirname(outPath), { recursive: true });
+    const filters = videoFilters.map((filter) => filter.trim()).filter(Boolean);
+    await run('ffmpeg', [
+      '-y', '-hide_banner', '-v', 'error', '-nostdin',
+      '-ss', String(Math.max(0, timeSeconds)),
+      '-i', input,
+      '-frames:v', '1',
+      ...(filters.length ? ['-vf', filters.join(',')] : []),
+      '-q:v', '3',
+      outPath,
+    ], input);
+  }
+
   async filmstrip(input: string, outDir: string, durationSeconds: number, frameCount = 12): Promise<Array<{ path: string; timeSeconds: number }>> {
     if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) throw new Error('filmstrip duration must be positive');
     const count = Math.min(24, Math.max(2, Math.round(frameCount)));
@@ -436,7 +476,7 @@ export class Ffmpeg {
     outPath: string,
     start: number,
     end: number,
-    options?: { audio?: { volume?: number; mute?: boolean; normalize?: boolean }; ensureAudio?: boolean },
+    options?: { audio?: { volume?: number; mute?: boolean; normalize?: boolean }; ensureAudio?: boolean; videoFilters?: string[] },
   ): Promise<void> {
     await mkdir(dirname(outPath), { recursive: true });
     const audio = options?.audio;
@@ -476,6 +516,8 @@ export class Ffmpeg {
     if (audioFilters.length) {
       args.push('-af', audioFilters.join(','));
     }
+    const videoFilters = (options?.videoFilters ?? []).map((filter) => filter.trim()).filter(Boolean);
+    if (videoFilters.length) args.push('-vf', videoFilters.join(','));
     args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
     if (keepSourceAudio && sourceHasAudio) {
       // Keep the ORIGINAL audio: default stream selection picks 0:a.
@@ -560,7 +602,18 @@ export class Ffmpeg {
         const effect = transition.type === 'fade' ? 'fadeblack' : 'fade';
         const offset = Math.max(0, accumulated - d);
         filter += `[${prevV}][v${i}]xfade=transition=${effect}:duration=${d}:offset=${offset}[${nextV}];`;
-        filter += `[${prevA}][a${i}]acrossfade=d=${d}:c1=tri:c2=tri[${nextA}];`;
+        if (transition.type === 'fade') {
+          // Dip-to-black also dips the audio: fade the outgoing track to
+          // silence over the first half of the overlap, then fade the incoming
+          // track in over the second half. A plain crossfade would keep both
+          // voices audible through a black frame.
+          const half = d / 2;
+          filter += `[${prevA}]afade=t=out:st=${offset}:d=${half}[${nextA}out];`;
+          filter += `[a${i}]adelay=${Math.round(offset * 1000)}:all=1,afade=t=in:st=${half}:d=${half}[${nextA}in];`;
+          filter += `[${nextA}out][${nextA}in]amix=inputs=2:duration=longest:normalize=0[${nextA}];`;
+        } else {
+          filter += `[${prevA}][a${i}]acrossfade=d=${d}:c1=tri:c2=tri[${nextA}];`;
+        }
         accumulated += (durations[i] ?? 0) - d;
       } else {
         filter += `[${prevV}][v${i}]concat=n=2:v=1:a=0[${nextV}];`;

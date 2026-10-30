@@ -11,13 +11,15 @@ This file tells coding assistants how to help a user run and configure H3Mise sa
 - A `Shot` is the plan; a `Take` is a generated result. Never overwrite a Take to represent a new render.
 - Continuity beats retries: for a themed story, create the character/entity assets (each with a main image) before designing Shots, and prefer first-frame-to-video (`i2va`) or frame-bridge chaining (`previous_take` dependency, then resolve it) over pure text generation. A bound first frame keeps identity, wardrobe, and set stable across shots; `t2va` lets every shot re-cast the subject.
 - Storyboard is an optional visual planning layer before Shot design. Creating or editing its text panels is free; generating a sheet or regenerating one panel through RunningHub is a separate paid image task.
+- Timeline is the finishing layer: only selected Takes can be added. Trim, incoming transitions, per-clip picture looks, and audio settings are non-destructive clip metadata; export re-encodes locally with FFmpeg.
+- Audio Line is the project-level master/vocal reference: sentence segments carry the authoritative words bound to Shots. Compiling a prompt with bound segments appends the exact text; Preflight refuses missing/partial lines. Silence detection only proposes boundaries — it is not transcription.
 - Story skeletons and director-style presets are planning aids. Applying a skeleton restructures canonical StoryBeats in place by default; it must not append a duplicate set or silently render.
 
 ## Help a first-time user
 
 Prefer the Settings UI over editing JSON or environment files.
 
-1. Start H3Mise and confirm the UI and `GET /api/health` are available. `node scripts/h3mise.mjs up --json` is idempotent (already healthy → returns immediately) and `H3MISE_SKIP_INSTALL=1` avoids a registry install when dependencies exist. Prefer it over repeatedly running `sh start.sh`; `node scripts/h3mise.mjs status --json` is read-only.
+1. Start H3Mise and confirm the UI and `GET /api/health` are available. `node scripts/h3mise.mjs up --json` is idempotent (already healthy → returns immediately) and `H3MISE_SKIP_INSTALL=1` avoids a registry install when dependencies exist. Prefer it over repeatedly running `sh start.sh`; `node scripts/h3mise.mjs status --json` is read-only, and `node scripts/h3mise.mjs doctor --json` checks Node, FFmpeg, H3MISE_HOME, health, and provider state. `node scripts/h3mise.mjs export-project <projectId|title> <destination>` copies a project out of H3MISE_HOME without modifying the original.
 2. If the user only wants to explore, keep RunningHub unconfigured and use Mock. Do not push them into paid rendering.
 3. For real rendering, explain that the user needs:
    - a RunningHub API Key from their own account;
@@ -182,6 +184,25 @@ Shot Composer is a per-shot 2D stage for placing still layers and previewing a c
 - `bind: true` writes `first_frame` or `last_frame` bindings only when the active provider's `supportedModes` already include that side (`i2va`/`fl2va` for the first frame, `l2va`/`fl2va` for the last). It does not submit a paid render and does not skip Preflight.
 - The preview MP4 is a local 2D rehearsal. Do not describe it as a motion reference that makes MiniMax, or any other video model, follow the p5 camera path. The deterministic placement sentence compiled into the H3 prompt states the same limit.
 
+## Timeline, transitions, and picture looks
+
+- A transition belongs to the INCOMING clip; the first clip has no incoming transition. `none` is a legacy alias of `cut`. Only `fade` and `dissolve` consume overlap.
+- Use the shared helpers in `shared/src/timeline.ts` (`effectiveTransitionDuration`, `effectiveTransitions`, `timelineClipDuration`, `timelineDurationSeconds`) instead of re-deriving durations. UI total time, Film Check, Production overview, and export must all report the same final duration.
+- Transition duration is clamped at write time and again at export to half of each neighbouring clip. `fade` uses a visual dip through black and audio fades out/in through silence; `dissolve` uses video crossfade plus audio crossfade.
+- Looks are a whitelisted per-clip post-production setting: `none`, `cinematic`, `warm_film`, `bleach_bypass`. Never accept a raw FFmpeg filter string from a client or agent; only these IDs reach `server/src/modules/timeline-looks.ts`.
+- Looks are applied during local trim/export, not inside the generation prompt or provider request. `POST /api/timeline/clips/:id/look-preview` renders a real local still JPEG; describe it as a still preview, not a final video preview. `POST /api/timeline/looks` applies one look to every clip in the current episode.
+- Timeline edits are free and local. Do not submit a paid render, regenerate a Take, or overwrite an exported file merely to preview a transition or look.
+
+## Queue revisions and prompt lint
+
+- A Shot may have one running job plus at most one queued revision. An active job is a queue state, not a prompt defect: Preflight reports `duplicate.active` as a warning and lets the revision queue. A third submission is blocked.
+- Cancel stops local tracking/polling. RunningHub AI App tasks have no remote cancel; the UI must say the remote task may continue and may already be billed. Reconcile a known task ID before resubmitting.
+- Preflight accepts `durationSeconds` from the exact request; it must show shot default vs requested duration and use the same intent as render.
+- `POST /api/prompts/lint` and the Preflight `prompt_lint` section are deterministic. Flag negative wording, missing subject/background/light/camera/performance/hair fields, half sentences, and audio/dialogue ambiguity. Warnings never replace the explicit render confirmation.
+- `GET /api/prompts/:id` returns one immutable PromptVersion. Render job responses include a joined `take` object when available (`takeId` remains the stable key).
+- Audio Line endpoints: `GET/POST /api/audio-lines`, `PATCH/DELETE /api/audio-lines/:id`, `GET .../waveform`, `POST .../detect-silence`, segment CRUD at `/api/audio-segments/:id`, and `GET/PUT /api/shots/:id/audio-segments`. Silence detection proposes boundaries only; text remains user/AI-supplied. One shot binds segments from one line only.
+- Production summary reports `spentCny` / `spentCoins` aggregated from provider cost receipts, not user-entered estimates.
+
 ## Render safety rules
 
 - Never start, retry, or duplicate a paid render merely to test connectivity.
@@ -208,6 +229,13 @@ Shot Composer is a per-shot 2D stage for placing still layers and previewing a c
 - `server/src/providers/runninghub.ts`: upload, workflow input mapping, submission, polling, and download.
 - `server/src/modules/shot-composer.ts`: per-shot layer stage, local still/MP4 export, and provider-gated first/last-frame binding.
 - `shared/src/shot-composer.ts`: composer document, keyframe interpolation, and the deterministic placement sentence.
+- `shared/src/timeline.ts`: clip/document model, transition clamping, and the single final-duration calculation.
+- `server/src/modules/timeline.ts`: selected-Take timeline persistence, trim/transition/look updates, look preview, and local export.
+- `server/src/modules/timeline-looks.ts`: the whitelisted bundled picture-look → FFmpeg filter chains.
+- `server/src/modules/audio-lines.ts`: project-level master/vocal lines, silence-derived segments, shot bindings, waveform cache, and authoritative prompt text.
+- `server/src/modules/prompt-lint.ts`: deterministic Prompt lint rules.
+- `web/src/components/timeline/AudioLinePanel.vue`: Audio Line import, waveform, sentence editing, silence split, and shot binding UI.
+- `server/src/ffmpeg.ts`: trim, frame preview, transition concat, and export encoding.
 - `server/src/modules/preflight.ts`: deterministic checks before paid submission.
 - `server/src/modules/render.ts`: persistent queue and reconciliation.
 - `server/src/modules/storyboard.ts`: optional text boards, paid image jobs, reconciliation, splitting, and panel versioning.
@@ -219,6 +247,7 @@ Shot Composer is a per-shot 2D stage for placing still layers and previewing a c
 - `server/src/modules/ai.ts`: OpenAI-compatible adapter, lenient JSON extraction, vision fallback.
 - `web/src/pages/SettingsPage.vue`: user-facing provider setup.
 - `web/src/pages/StoryboardPage.vue`: optional multi-page Storyboard planning and paid-generation confirmation UI.
+- `web/src/pages/TimelinePage.vue`: selected-Take timeline, trim/transition/look UI, still look preview, and export controls.
 - `shared/src/provider.ts`: provider profile and capability contract.
 - `shared/src/canvas.ts` / `canvas-rules.ts` / `canvas-layout.ts`: Studio node/edge types, the R1–R13 connection rule table (`canConnect`), and the deterministic lane layout.
 - `server/src/modules/canvas.ts`: graph projection (`buildCanvasGraph`), layout/annotation persistence, and the connection command dispatcher.

@@ -77,6 +77,28 @@ test('gate blocks duration overrides that bypass shot defaults', async () => {
   const dur = report.basic.find((s) => s.key === 'duration');
   assert.ok(dur!.checks.some((c) => c.severity === 'error' && c.key.startsWith('duration.')));
   assert.equal(report.blocked, true);
+
+  const requested = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', durationSeconds: 5 });
+  const requestedReport = await runBasicPreflightIntent(p, registry, requested);
+  assert.ok(requestedReport.basic.find((s) => s.key === 'duration')?.checks.some((c) => c.key === 'duration.override'));
+});
+
+test('an active job is a queue warning, not a prompt-blocking error', async () => {
+  const { root, store } = await makeStore('preflight-queue-revision');
+  roots.push(root);
+  const p = await makeProject(store, 'queue-revision');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  p.db.run(
+    `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, director_plan_version_id, provider, status, request_snapshot_json, render_intent_hash, created_at, updated_at)
+     VALUES ('job-active', ?, ?, ?, NULL, 'mock', 'RUNNING', '{}', 'h', datetime('now'), datetime('now'))`,
+    [p.meta.id, shotId, promptVersionId],
+  );
+  const registry = makeRegistry(store.registry);
+  const intent = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock' });
+  const report = await runBasicPreflightIntent(p, registry, intent);
+  const duplicate = report.basic.find((section) => section.key === 'duplicate');
+  assert.ok(duplicate?.checks.some((check) => check.key === 'duplicate.active' && check.severity === 'warning'));
+  assert.equal(report.blocked, false);
 });
 
 test('gate blocks unknown provider capabilities (P0-6)', async () => {

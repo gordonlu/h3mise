@@ -12,6 +12,7 @@ export * from './preflight.js';
 export * from './render.js';
 export * from './continuity.js';
 export * from './timeline.js';
+export * from './audio.js';
 export * from './provider.js';
 export * from './events.js';
 export * from './guide.js';

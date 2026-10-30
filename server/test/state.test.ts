@@ -8,8 +8,9 @@ import { makeStore, makeProject, makeShotWithPrompt, fakeTake, cleanupTempRoot, 
 import { listTakes, selectTake, getTake, rejectTake, updateTake, createTake, deleteRejectedTake, importTake } from '../src/modules/takes.js';
 import { getShot, advanceTo, advanceShotStatus, createShot, renderReadiness, resolveDependentsAfterSelection, updateShot } from '../src/modules/shots.js';
 import { commitContinuity, selectTakeAndCommit, emptyVisualState } from '../src/modules/continuity.js';
-import { getTimeline, addClip, addMissingSelectedTakes, invalidateShotClips, listTimelineExports, recoverTimelineExports, updateClip } from '../src/modules/timeline.js';
+import { getTimeline, addClip, addMissingSelectedTakes, invalidateShotClips, listTimelineExports, recoverTimelineExports, updateClip, setTimelineLook } from '../src/modules/timeline.js';
 import { getPrompt, importRawPrompt } from '../src/modules/prompt.js';
+import { timelineDurationSeconds } from '@h3mise/shared';
 import { insertMedia, createBinding } from '../src/modules/assets.js';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -274,4 +275,58 @@ test('reselecting after CONTINUITY_COMMITTED walks the shot back to SELECTED (st
   selectTake(p, b.id, bus());
   assert.equal(getShot(p, shotId).status, 'SELECTED');
   assert.equal(listTakes(p, shotId).find((t) => t.status === 'selected')!.id, b.id);
+});
+
+test('transition durations clamp to neighbouring clips and all duration views agree', async () => {
+  const { p, shotId, promptVersionId } = await fixture();
+  const first = await fakeTake(p, shotId, promptVersionId, 'trans-a');
+  selectTake(p, first.id, bus());
+  const firstClip = addClip(p, { shotId, takeId: first.id });
+
+  const secondShot = createShot(p, { title: 'Second transition shot', durationSeconds: 3 });
+  const secondPrompt = importRawPrompt(p, secondShot.id, 'Second transition prompt', 't2va').id;
+  const second = await fakeTake(p, secondShot.id, secondPrompt, 'trans-b');
+  selectTake(p, second.id, bus());
+  const secondClip = addClip(p, { shotId: secondShot.id, takeId: second.id });
+
+  const clamped = updateClip(p, secondClip.id, { transition: 'fade', transitionDuration: 10 });
+  assert.equal(clamped.transitionDuration, 1.5, '10s cannot exceed half of either 3s neighbour');
+  assert.equal(
+    timelineDurationSeconds(getTimeline(p).clips, (clip) => getTake(p, clip.takeId).duration),
+    4.5,
+    'final duration subtracts the effective overlap',
+  );
+
+  const trimmed = updateClip(p, secondClip.id, { trimOut: 1 });
+  assert.equal(trimmed.transitionDuration, 0.5, 'trimming re-clamps the existing transition');
+  assert.equal(
+    timelineDurationSeconds(getTimeline(p).clips, (clip) => getTake(p, clip.takeId).duration),
+    3.5,
+  );
+
+  const firstTransition = updateClip(p, firstClip.id, { transition: 'dissolve', transitionDuration: 1 });
+  assert.equal(firstTransition.transitionDuration, 0, 'the first clip has no incoming transition');
+});
+
+test('timeline clips persist a whitelisted picture look and apply it to the episode', async () => {
+  const { p, shotId, promptVersionId } = await fixture();
+  const first = await fakeTake(p, shotId, promptVersionId, 'look-a');
+  selectTake(p, first.id, bus());
+  const firstClip = addClip(p, { shotId, takeId: first.id });
+  assert.equal(firstClip.look, 'none');
+
+  const updated = updateClip(p, firstClip.id, { look: 'cinematic' });
+  assert.equal(updated.look, 'cinematic');
+  assert.throws(() => updateClip(p, firstClip.id, { look: 'rainbow' as never }), /invalid look/);
+
+  const secondShot = createShot(p, { title: 'Look second', durationSeconds: 3 });
+  const secondPrompt = importRawPrompt(p, secondShot.id, 'Look second prompt', 't2va').id;
+  const second = await fakeTake(p, secondShot.id, secondPrompt, 'look-b');
+  selectTake(p, second.id, bus());
+  const secondClip = addClip(p, { shotId: secondShot.id, takeId: second.id });
+
+  const clips = setTimelineLook(p, 'warm_film');
+  assert.deepEqual(clips.map((clip) => clip.look), ['warm_film', 'warm_film']);
+  assert.throws(() => setTimelineLook(p, 'rainbow'), /invalid look/);
+  assert.equal(getTimeline(p).clips.find((clip) => clip.id === secondClip.id)?.look, 'warm_film');
 });

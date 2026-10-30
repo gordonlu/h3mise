@@ -104,6 +104,7 @@ export function defaultAiAppProfile(region: RunningHubRegion = 'cn'): AiAppProfi
     maxAudioRefs: 3,
     maxTotalRefs: 12,
     audioSupported: true,
+    audioReuse: 'unknown',
   };
   const verification = { status: 'unconfigured' as const, checkedAt: null, note: 'run "detect nodes" in Settings, then confirm with a real render' };
   return {
@@ -452,7 +453,7 @@ function discoveredCapabilities(mapped: AiAppInputs, nodes: AiAppProfile['nodes'
     maxTotalRefs: faceswap ? 2 : Math.max(mapped.refImages.length, Number(Boolean(mapped.firstFrame?.nodeId)) + Number(Boolean(mapped.lastFrame?.nodeId)))
       + mapped.refAudios.length + (mapped.refVideos ?? []).length,
     audioSupported: faceswap ? false : previous.audioSupported || mapped.refAudios.length > 0,
-    ...(faceswap ? { preservesSourceAudio: true } : {}),
+    ...(faceswap ? { preservesSourceAudio: true, audioReuse: 'copy' as const } : {}),
   };
 }
 

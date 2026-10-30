@@ -176,6 +176,7 @@ onUnmounted(() => stopEvents?.());
         <article><span>{{ t('workflow.production.planShots') }}</span><strong>{{ seconds(overview.summary.plannedDurationSeconds) }} / {{ seconds(overview.summary.shotDurationSeconds) }}</strong><small>{{ t('workflow.production.storyPlanAndTotalShots') }}</small></article>
         <article><span>{{ t('workflow.production.timeline2') }}</span><strong>{{ overview.summary.timelineClipCount }} {{ t('workflow.production.clips') }} · {{ seconds(overview.summary.timelineDurationSeconds) }}</strong><small>{{ overview.summary.exportCount }} {{ t('workflow.production.exports') }}</small></article>
         <article><span>{{ t('workflow.production.taskStatus') }}</span><strong>{{ overview.summary.activeRenderCount }} {{ t('workflow.production.active') }} · {{ overview.summary.failedJobCount }} {{ t('workflow.production.failed') }}</strong><small>{{ t('workflow.production.valueShotsRemaining', { v0: overview.summary.remainingShotCount }) }}</small></article>
+        <article><span>{{ t('workflow.production.spent') }}</span><strong>¥{{ overview.summary.spentCny.toFixed(2) }}</strong><small>{{ overview.summary.spentCoins ? `${overview.summary.spentCoins} coins · ` : '' }}{{ t('workflow.production.providerReported') }}</small></article>
       </section>
 
       <section class="next-section">

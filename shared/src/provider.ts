@@ -29,6 +29,9 @@ export interface ProviderCapabilities {
   maxAudioRefs?: number;
   maxTotalRefs?: number;
   audioSupported?: boolean;
+  /** How a reference audio behaves: copied 1:1, reference-only timbre/rhythm,
+   * re-sung by the model, or not declared. Never promise a copy by default. */
+  audioReuse?: 'unknown' | 'reference_only' | 'resings' | 'copy';
   /** v2v/faceswap workflows normally keep the source video's audio track. */
   preservesSourceAudio?: boolean;
 }

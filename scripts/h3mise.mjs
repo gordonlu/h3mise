@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Idempotent local service helper: `h3mise up` starts H3Mise only when it is
 // not already healthy; `h3mise status` never installs or starts anything.
-import { spawn } from 'node:child_process';
-import { closeSync, mkdirSync, openSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { accessSync, closeSync, constants, cpSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,6 +67,60 @@ async function status() {
   });
 }
 
+async function exportProject(projectRef, destination) {
+  if (!projectRef || !destination) throw new Error('usage: h3mise export-project <projectId|title> <destination>');
+  const home = process.env.H3MISE_HOME || join(homedir(), '.h3mise');
+  const registryPath = join(home, 'registry.db');
+  if (!existsSync(registryPath)) throw new Error(`registry not found: ${registryPath}`);
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(registryPath, { readOnly: true });
+  let row;
+  try {
+    row = db.prepare('SELECT id, title, dir_path FROM projects WHERE id = ?').get(projectRef)
+      ?? db.prepare('SELECT id, title, dir_path FROM projects WHERE title = ?').get(projectRef)
+      ?? db.prepare('SELECT id, title, dir_path FROM projects WHERE title LIKE ? ORDER BY updated_at DESC LIMIT 1').get(`${projectRef}%`);
+  } finally {
+    db.close();
+  }
+  if (!row) throw new Error(`project not found: ${projectRef}`);
+  const source = resolve(String(row.dir_path));
+  const target = resolve(destination);
+  if (target === source || target.startsWith(`${source}${sep}`)) throw new Error('destination must be outside the project directory');
+  if (existsSync(target)) throw new Error(`destination already exists: ${target}`);
+  cpSync(source, target, { recursive: true, errorOnExist: true, force: false });
+  print({ ok: true, projectId: String(row.id), title: String(row.title), source, destination: target });
+}
+
+async function doctor() {
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail });
+  const [major, minor] = process.versions.node.replace(/^v/, '').split('.').map(Number);
+  add('node', major > 22 || (major === 22 && minor >= 13), process.versions.node);
+  const home = process.env.H3MISE_HOME || join(homedir(), '.h3mise');
+  try { accessSync(home, constants.W_OK); add('home writable', true, home); }
+  catch { add('home writable', false, `${home} (will be created on first run)`); }
+  const versionOf = (bin) => new Promise((done) => {
+    execFile(bin, ['-version'], { timeout: 5000 }, (error, stdout) => done(error ? null : String(stdout).split('\n')[0]));
+  });
+  for (const bin of ['ffmpeg', 'ffprobe']) {
+    const version = await versionOf(bin);
+    add(bin, Boolean(version), version ?? 'not found');
+  }
+  const body = await health();
+  add('service', Boolean(body), body ? `${base} (${body.providerMode})` : 'not running — run `h3mise up`');
+  if (body) {
+    add('runninghub', body.runningHubConfigured === true, body.runningHubConfigured ? `active ${body.runningHubActiveWorkflowId ?? '—'}` : 'no API key — Mock remains available');
+    add('project', body.projectOpen === true, body.projectOpen ? 'open' : 'no project open');
+  }
+  const ok = checks.filter((check) => !check.ok).length === 0;
+  if (json) print({ ok, checks });
+  else {
+    for (const check of checks) console.log(`${check.ok ? 'ok  ' : 'WARN'} ${check.name.padEnd(16)} ${check.detail}`);
+    console.log(ok ? '\nAll checks passed.' : '\nSome checks need attention.');
+  }
+  if (!ok) process.exitCode = 1;
+}
+
 async function up() {
   const existing = await health();
   if (existing) {
@@ -102,7 +157,15 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   await status();
 } else if (command === 'up' || command === 'ensure') {
   await up();
+} else if (command === 'doctor') {
+  await doctor();
+} else if (command === 'export-project') {
+  const positional = args.slice(1).filter((arg) => !arg.startsWith('--'));
+  await exportProject(positional[0], positional[1]).catch((error) => {
+    print({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    process.exitCode = 1;
+  });
 } else {
-  print({ ok: false, error: `unknown command "${command}"`, usage: 'h3mise [up|status] [--port N] [--json]' });
+  print({ ok: false, error: `unknown command "${command}"`, usage: 'h3mise [up|status|doctor|export-project] [--port N] [--json]' });
   process.exitCode = 2;
 }

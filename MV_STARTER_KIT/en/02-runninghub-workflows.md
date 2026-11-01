@@ -1,6 +1,6 @@
 # RunningHub: Narrative and Original-Audio Lip Sync
 
-The following integration reference was checked on 2026-11-01. Both configurations already have real submission records in the author's local H3Mise. They are stored in the local global Provider settings and persist across projects; downloading the source code does not obtain the author's local configuration, key, or verification state. The nodes below may change as the Apps are updated, so new users must still detect them with their own account.
+The following integration reference was checked on 2026-11-01. Both configurations already have real submission records. Their mappings are stored in the local global Provider settings and persist across projects. The nodes below may change as the Apps are updated, so new users must still detect them with their own account.
 
 ## Two Apps you can look up directly
 

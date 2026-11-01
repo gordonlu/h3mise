@@ -17,6 +17,4 @@ Everything in this folder is Markdown and can be copied to another person on its
 
 Keep the song under 3 minutes where possible, ideally around 2 minutes 30 seconds; validate a real sample before batch production. Prefer outputting the target 1080p directly at generation time and verify the actual dimensions of the artifact. A successful App connection recorded here does not mean native 1080p has been verified.
 
-This document contains no API key, user asset, local path, project ID, or historical task. App IDs are service entry points that may be connected to; access, pricing, and node structure depend on the recipient's account and the App's current page.
-
 When you need to install the program, use it together with H3Mise. This folder can be read independently, and the launch requirements are also in Quick start.

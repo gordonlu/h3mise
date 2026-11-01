@@ -32,6 +32,10 @@ H3Mise 管理的正是这一层：
 
 ![Good Boy 导演台](docs/screenshots/director-desk.png)
 
+## 从一首歌开始做 MV
+
+[MV 起步包](MV_STARTER_KIT/README.md)提供完整的新手路线、RunningHub 叙事与原音频对口型 App、节点映射、演唱提示词、空白制作表和 Agent 任务模板。全部为可复制文档，使用自己的素材与账号即可开始，不需要任何作者工程或额外脚本。
+
 ## 让 AI 助手代劳（零配置）
 
 不想配置 Provider 和 AI？把下面这段直接发给你常用的编码助手（Claude Code / Cursor / opencode 等），它会按 [AGENTS.md](AGENTS.md) 里的协议创建项目、写故事、设计镜头、生成视频，并在任何付费渲染前先向你确认：

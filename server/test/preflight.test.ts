@@ -7,6 +7,10 @@ import assert from 'node:assert/strict';
 import { makeStore, makeProject, makeShotWithPrompt, cleanupTempRoot } from './helpers.js';
 import { attachSemanticReview, renderIntentHash, intentFromInput, runBasicPreflightIntent } from '../src/modules/preflight.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
+import { createBinding, insertMedia } from '../src/modules/assets.js';
+import { importRawPrompt } from '../src/modules/prompt.js';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { Ffmpeg } from '../src/ffmpeg.js';
 import type { Db } from '../src/db/sqlite.js';
 
@@ -175,4 +179,31 @@ test('faceswap preflight requires exactly one face image and one source video', 
   assert.ok(keys.includes('ref.video.required'));
   assert.ok(keys.includes('ref.image.required'));
   assert.ok(keys.includes('provider.mode.ok'), 'mock declares faceswap for offline testing');
+});
+
+test('audio reuse / fully_copy wording never determines the preflight outcome', async () => {
+  const { root, store } = await makeStore('preflight-audio-reuse');
+  roots.push(root);
+  const p = await makeProject(store, 'audio-reuse');
+  const { shotId } = makeShotWithPrompt(p, 'ref2va');
+  const fileName = 'assets/voice.mp3';
+  const absolute = p.resolveProjectPath(fileName);
+  await mkdir(dirname(absolute), { recursive: true });
+  await writeFile(absolute, 'audio');
+  const asset = insertMedia(p, { kind: 'audio', fileName, mimeType: 'audio/mpeg', sizeBytes: 5, durationSeconds: 5, source: 'import', label: 'voice' });
+  createBinding(p, { assetId: asset.id, roles: ['audio'], shotId, label: 'voice' });
+  const imageName = 'assets/face.png';
+  const imageAbsolute = p.resolveProjectPath(imageName);
+  await mkdir(dirname(imageAbsolute), { recursive: true });
+  await writeFile(imageAbsolute, 'image');
+  const image = insertMedia(p, { kind: 'image', fileName: imageName, mimeType: 'image/png', sizeBytes: 5, source: 'import', label: 'face' });
+  createBinding(p, { assetId: image.id, roles: ['identity'], shotId, label: 'face' });
+  const prompt = importRawPrompt(p, shotId, 'audio reuse, fully_copy, aspect ratio 1:1. Keep the exact vocal.', 'ref2va');
+  const registry = makeRegistry(store.registry);
+  const intent = await intentFromInput(p, registry, { shotId, promptVersionId: prompt.id, providerId: 'mock', aspectRatio: '1:1' });
+  const report = await runBasicPreflightIntent(p, registry, intent);
+  const audioChecks = report.basic.flatMap((section) => section.checks).filter((check) => check.key.startsWith('ref.audio.reuse'));
+  assert.ok(audioChecks.some((check) => check.key === 'ref.audio.reuse.unknown' && check.severity === 'info'));
+  assert.ok(!audioChecks.some((check) => check.key === 'ref.audio.reuse.exact'));
+  assert.equal(report.blocked, false);
 });

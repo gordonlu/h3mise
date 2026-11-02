@@ -15,7 +15,7 @@ import { nextId } from '../db/ids.js';
 import { getShot, advanceShotStatus, advanceTo, renderReadiness } from './shots.js';
 import type { Shot } from '@h3mise/shared';
 import { lintPrompt } from './prompt-lint.js';
-import { shotAudioLineContext } from './audio-lines.js';
+import { getAudioLineSilences, shotAudioLineContext } from './audio-lines.js';
 
 export interface ReferenceCountViolation {
   key: string;
@@ -397,23 +397,17 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   }
   if (caps && intent.mode === 'ref2va' && bindings.some((binding) => binding.kind === 'audio')) {
     const reuse = caps.audioReuse ?? 'unknown';
-    const wantsExactCopy = /fully_copy|1\s*[:：]\s*1|原唱|原音|same\s+vocal|lip.?sync/i.test(prompt.text);
+    // Workflow capability is the only source of truth. Prompt wording such as
+    // "audio reuse", "fully_copy", "原唱" or even "1:1" must never decide
+    // whether a paid render is allowed.
     if (reuse === 'copy') {
-      sections[3]!.checks.push({ key: 'ref.audio.reuse.copy', severity: 'info', message: '该工作流声明会保留源音频' });
-    } else if (wantsExactCopy) {
-      sections[3]!.checks.push({
-        key: 'ref.audio.reuse.exact',
-        severity: 'error',
-        message: reuse === 'resings'
-          ? '提示词要求原唱/原音 1:1，但该工作流会重新演唱；需要原唱请改用 lip-sync 或换脸工作流'
-          : '提示词要求原唱/原音 1:1，但该工作流未声明音频复制能力；参考音频不能被当作原音轨锁定',
-      });
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.copy', severity: 'info', message: '该工作流声明支持 audio reuse：参考音频可作为原音轨复用' });
     } else if (reuse === 'resings') {
-      sections[3]!.checks.push({ key: 'ref.audio.reuse.resings', severity: 'warning', message: '该工作流的参考音频会驱动重新演唱，不是原唱 1:1 复制' });
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.resings', severity: 'warning', message: '该工作流的参考音频会驱动重新演唱，不是原唱复用' });
     } else if (reuse === 'reference_only') {
-      sections[3]!.checks.push({ key: 'ref.audio.reuse.reference', severity: 'warning', message: '参考音频仅作为音色/节奏参考，不能保证 1:1 原唱' });
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.reference', severity: 'warning', message: '参考音频仅作为音色/节奏参考，不是原唱复用' });
     } else {
-      sections[3]!.checks.push({ key: 'ref.audio.reuse.unknown', severity: 'warning', message: '该工作流未声明音频复用能力；不要假设参考音频会 1:1 保留原唱' });
+      sections[3]!.checks.push({ key: 'ref.audio.reuse.unknown', severity: 'info', message: '该工作流未声明音频复用能力；若 App 官方支持 audio reuse，请在 workflow capabilities 中设置 audioReuse: "copy"' });
     }
   }
   for (const b of bindingRows) {
@@ -586,6 +580,12 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       } catch {
         sections[9]!.checks.push({ key: 'audio_line.asset', severity: 'error', message: 'Audio Line 引用的音频素材不存在' });
       }
+      const normalize = (value: string) => value.replace(/[\s，。！？、,.!?;；:：'"“”‘’()（）<>\-]/g, '');
+      const dialogueTags = [...prompt.text.matchAll(/<d(?:\s[^>]*)?>([\s\S]*?)<\/d>/gi)]
+        .map((match) => match[1]!.trim())
+        .filter(Boolean);
+      const silences = getAudioLineSilences(p, audioLine.line.id);
+      const inSilence = (time: number) => silences.some((silence) => time >= silence.start - 0.15 && time <= silence.end + 0.15);
       for (const segment of audioLine.segments) {
         if (!segment.text.trim()) {
           sections[9]!.checks.push({ key: `audio_line.text.${segment.id}`, severity: 'error', message: `第 ${segment.order} 句缺少实际歌词/台词文本` });
@@ -594,6 +594,34 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
         }
         if (segment.endSeconds - segment.startSeconds > shot.durationSeconds + 0.05) {
           sections[9]!.checks.push({ key: `audio_line.duration.${segment.id}`, severity: 'warning', message: `第 ${segment.order} 句 ${(segment.endSeconds - segment.startSeconds).toFixed(1)}s 超过镜头 ${shot.durationSeconds}s，可能被压缩或截断` });
+        }
+        if (silences.length) {
+          if (segment.startSeconds > 0.2 && !inSilence(segment.startSeconds)) {
+            sections[9]!.checks.push({ key: `audio_line.breath.start.${segment.id}`, severity: 'warning', message: `第 ${segment.order} 句开头不在检测到的静音/气口内，可能切在半句` });
+          }
+          const lineEnd = Math.max(...audioLine.segments.map((item) => item.endSeconds));
+          if (segment.endSeconds < lineEnd - 0.1 && !inSilence(segment.endSeconds)) {
+            sections[9]!.checks.push({ key: `audio_line.breath.end.${segment.id}`, severity: 'warning', message: `第 ${segment.order} 句结尾不在检测到的静音/气口内，可能切在半句` });
+          }
+        }
+      }
+      for (let index = 1; index < audioLine.segments.length; index += 1) {
+        const previous = audioLine.segments[index - 1]!;
+        const current = audioLine.segments[index]!;
+        if (current.startSeconds < previous.endSeconds - 0.01) {
+          sections[9]!.checks.push({ key: `audio_line.overlap.${current.id}`, severity: 'error', message: `第 ${previous.order} 句与第 ${current.order} 句时间重叠` });
+        }
+      }
+      if (dialogueTags.length) {
+        for (const tag of dialogueTags) {
+          if (!audioLine.segments.some((segment) => normalize(tag).includes(normalize(segment.text)))) {
+            sections[9]!.checks.push({ key: 'audio_line.dialogue.extra', severity: 'error', message: `<d> 中出现了未绑定到 Audio Line 的文本：“${tag.slice(0, 60)}”` });
+          }
+        }
+        for (const segment of audioLine.segments) {
+          if (!dialogueTags.some((tag) => normalize(tag).includes(normalize(segment.text)))) {
+            sections[9]!.checks.push({ key: `audio_line.dialogue.${segment.id}`, severity: 'error', message: `<d> 标记没有包含第 ${segment.order} 句的完整文本` });
+          }
         }
       }
       if (sections[9]!.checks.every((check) => check.severity === 'info')) {

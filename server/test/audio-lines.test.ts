@@ -1,6 +1,8 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeStore, makeProject, makeShotWithPrompt, cleanupTempRoot } from './helpers.js';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { insertMedia } from '../src/modules/assets.js';
 import {
   createAudioLine,
@@ -8,6 +10,8 @@ import {
   setShotAudioSegments,
   shotAudioLineContext,
   updateAudioSegment,
+  transcribeAudioLine,
+  autoBindAudioLine,
 } from '../src/modules/audio-lines.js';
 import { compilePrompt } from '../src/modules/prompt.js';
 import { intentFromInput, runBasicPreflightIntent } from '../src/modules/preflight.js';
@@ -64,4 +68,43 @@ test('one shot cannot bind segments from different Audio Lines', async () => {
   const a = mk('a');
   const b = mk('b');
   assert.throws(() => setShotAudioSegments(p, shotId, [a.id, b.id]), /single audio line/);
+});
+
+test('ASR fills Audio Line segments and auto-bind assigns them to shots', async () => {
+  const { root, store } = await makeStore('audio-lines-asr');
+  roots.push(root);
+  const p = await makeProject(store, 'MV ASR');
+  const { shotId } = makeShotWithPrompt(p, 't2va');
+  const fileName = 'assets/asr.mp3';
+  const absolute = p.resolveProjectPath(fileName);
+  await mkdir(dirname(absolute), { recursive: true });
+  await writeFile(absolute, 'fake audio');
+  const asset = insertMedia(p, { kind: 'audio', fileName, mimeType: 'audio/mpeg', sizeBytes: 10, durationSeconds: 4, source: 'import', label: 'ASR' });
+  const line = createAudioLine(p, { assetId: asset.id, label: 'Vocal' });
+
+  const oldBase = process.env.ASR_BASE_URL;
+  const oldModel = process.env.ASR_MODEL;
+  const oldFetch = globalThis.fetch;
+  process.env.ASR_BASE_URL = 'http://asr.local/v1';
+  process.env.ASR_MODEL = 'whisper-test';
+  globalThis.fetch = async (input) => {
+    assert.match(String(input), /\/audio\/transcriptions$/);
+    return new Response(JSON.stringify({ language: 'zh', segments: [
+      { start: 0.1, end: 1.8, text: '第一句歌词' },
+      { start: 2.0, end: 3.9, text: '第二句歌词' },
+    ] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await transcribeAudioLine(p, line.id);
+    assert.equal(result.provider, 'openai_compatible');
+    assert.equal(result.segments.length, 2);
+    assert.equal(result.segments[0]?.text, '第一句歌词');
+    const bound = autoBindAudioLine(p, line.id);
+    assert.equal(bound.bound, 2);
+    assert.ok(bound.shots.some((shot) => shot.shotId === shotId));
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldBase === undefined) delete process.env.ASR_BASE_URL; else process.env.ASR_BASE_URL = oldBase;
+    if (oldModel === undefined) delete process.env.ASR_MODEL; else process.env.ASR_MODEL = oldModel;
+  }
 });

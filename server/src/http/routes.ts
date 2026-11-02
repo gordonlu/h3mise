@@ -1000,6 +1000,18 @@ export function buildRoutes(services: AppServices): App {
       ...(body.minSilenceSeconds === undefined ? {} : { minSilenceSeconds: Number(body.minSilenceSeconds) }),
     }));
   });
+  app.post('/api/audio-lines/:id/transcribe', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { replace?: unknown; language?: unknown };
+    try {
+      return c.json(await audioLinesMod.transcribeAudioLine(p(c), c.req.param('id'), {
+        replace: body.replace === true,
+        ...(typeof body.language === 'string' && body.language.trim() ? { language: body.language.trim() } : {}),
+      }));
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 422);
+    }
+  });
+  app.post('/api/audio-lines/:id/auto-bind', (c) => c.json(audioLinesMod.autoBindAudioLine(p(c), c.req.param('id'))));
   app.post('/api/audio-lines/:id/segments', async (c) => c.json(audioLinesMod.createAudioSegment(p(c), c.req.param('id'), await c.req.json()), 201));
   app.patch('/api/audio-segments/:id', async (c) => c.json(audioLinesMod.updateAudioSegment(p(c), c.req.param('id'), await c.req.json())));
   app.delete('/api/audio-segments/:id', (c) => {
@@ -1016,6 +1028,11 @@ export function buildRoutes(services: AppServices): App {
   // --- timeline ------------------------------------------------------------
 
   app.get('/api/timeline', (c) => c.json(timelineMod.getTimeline(p(c))));
+  app.put('/api/timeline/master-audio', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { lineId?: unknown };
+    const lineId = body.lineId === null || body.lineId === undefined || body.lineId === '' ? null : String(body.lineId);
+    return c.json(timelineMod.setTimelineMasterAudio(p(c), lineId));
+  });
   app.post('/api/timeline/quick-build', (c) => {
     const result = timelineMod.addMissingSelectedTakes(p(c));
     services.bus.emit({ type: 'project.updated' });

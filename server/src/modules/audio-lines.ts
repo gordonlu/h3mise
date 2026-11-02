@@ -7,6 +7,8 @@ import type { AudioLine, AudioLineKind, AudioSegment } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
 import { getMedia } from './assets.js';
+import { listShots } from './shots.js';
+import { transcribeAudio } from './transcription.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 
 interface LineRow {
@@ -15,6 +17,7 @@ interface LineRow {
   kind: string;
   label: string;
   offset_seconds: number;
+  silences_json: string;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +68,17 @@ export function getAudioLine(p: ProjectContext, id: string): AudioLine {
   const row = p.db.get<LineRow>('SELECT * FROM audio_lines WHERE id = ?', [id]);
   if (!row) throw new Error('audio line not found');
   return lineFromRow(row);
+}
+
+export function getAudioLineSilences(p: ProjectContext, lineId: string): Array<{ start: number; end: number }> {
+  const row = p.db.get<{ silences_json: string }>('SELECT silences_json FROM audio_lines WHERE id = ?', [lineId]);
+  if (!row) return [];
+  try {
+    const value = JSON.parse(row.silences_json);
+    return Array.isArray(value) ? value.filter((item): item is { start: number; end: number } => Boolean(item && typeof item.start === 'number' && typeof item.end === 'number')) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function listAudioSegments(p: ProjectContext, lineId?: string): AudioSegment[] {
@@ -138,6 +152,13 @@ export function updateAudioSegment(p: ProjectContext, id: string, patch: { start
   const start = patch.startSeconds ?? row.start_seconds;
   const end = patch.endSeconds ?? row.end_seconds;
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) throw new Error('invalid audio segment range');
+  const siblings = p.db.all<{ id: string; start_seconds: number; end_seconds: number }>(
+    'SELECT id, start_seconds, end_seconds FROM audio_segments WHERE line_id = ? AND id != ?',
+    [row.line_id, id],
+  );
+  if (siblings.some((item) => start < item.end_seconds - 0.01 && end > item.start_seconds + 0.01)) {
+    throw new Error('audio segment overlaps a neighbouring segment');
+  }
   const cols: string[] = [];
   const vals: unknown[] = [];
   if (patch.startSeconds !== undefined) { cols.push('start_seconds = ?'); vals.push(start); }
@@ -179,6 +200,7 @@ export async function detectAudioSegments(
   const existing = listAudioSegments(p, lineId);
   if (existing.length && !options.replace) return { created: [], preserved: true };
 
+  p.db.run('UPDATE audio_lines SET silences_json = ?, updated_at = ? WHERE id = ?', [JSON.stringify(silences), new Date().toISOString(), lineId]);
   const ranges: Array<{ start: number; end: number }> = [];
   let cursor = 0;
   for (const silence of silences) {
@@ -243,6 +265,83 @@ export function shotAudioLineContext(p: ProjectContext, shotId: string): ShotAud
     'Sing/speak exactly these words in order. Cut only at a complete phrase or silence boundary. Do not invent additional lyrics or dialogue.',
   ].join('\n');
   return { line, segments, text };
+}
+
+export async function transcribeAudioLine(
+  p: ProjectContext,
+  lineId: string,
+  options: { replace?: boolean; language?: string } = {},
+): Promise<{ provider: string; segments: AudioSegment[]; filled: number }> {
+  const line = getAudioLine(p, lineId);
+  const asset = getMedia(p, line.assetId);
+  const result = await transcribeAudio(p.resolveProjectPath(asset.fileName), { language: options.language });
+  const existing = listAudioSegments(p, lineId);
+  const duration = asset.durationSeconds ?? 0;
+  const transcript = result.segments.map((segment, index) => ({
+    ...segment,
+    end: segment.end > segment.start ? segment.end : Math.min(duration || segment.start + 2, segment.start + 2),
+    order: index,
+  }));
+  if (!existing.length || options.replace) {
+    const segments = p.db.tx(() => {
+      p.db.run('DELETE FROM audio_segments WHERE line_id = ?', [lineId]);
+      return transcript.map((segment) => createAudioSegment(p, lineId, {
+        startSeconds: segment.start,
+        endSeconds: segment.end,
+        text: segment.text,
+      }));
+    });
+    return { provider: result.provider, segments, filled: segments.length };
+  }
+  let filled = 0;
+  for (const segment of existing) {
+    const best = transcript
+      .map((candidate) => ({
+        candidate,
+        overlap: Math.max(0, Math.min(segment.endSeconds, candidate.end) - Math.max(segment.startSeconds, candidate.start)),
+      }))
+      .sort((a, b) => b.overlap - a.overlap)[0];
+    if (best && best.overlap > 0 && best.candidate.text && best.candidate.text !== segment.text) {
+      updateAudioSegment(p, segment.id, { text: best.candidate.text });
+      filled += 1;
+    }
+  }
+  return { provider: result.provider, segments: listAudioSegments(p, lineId), filled };
+}
+
+export function autoBindAudioLine(p: ProjectContext, lineId: string): { bound: number; shots: Array<{ shotId: string; segmentIds: string[] }> } {
+  const segments = listAudioSegments(p, lineId);
+  const shots = listShots(p);
+  if (!segments.length) throw new Error('audio line has no segments');
+  if (!shots.length) throw new Error('project has no shots to bind');
+  const groups: string[][] = shots.map(() => []);
+  if (segments.length === shots.length) {
+    segments.forEach((segment, index) => groups[index]!.push(segment.id));
+  } else {
+    const audioTotal = segments.reduce((sum, segment) => sum + (segment.endSeconds - segment.startSeconds), 0) || segments.length;
+    const shotTotal = shots.reduce((sum, shot) => sum + Math.max(0.1, shot.durationSeconds), 0) || shots.length;
+    let audioCursor = 0;
+    for (const segment of segments) {
+      const mid = ((audioCursor + (segment.endSeconds - segment.startSeconds) / 2) / audioTotal) * shotTotal;
+      let shotIndex = 0;
+      let cursor = 0;
+      for (let index = 0; index < shots.length; index += 1) {
+        cursor += Math.max(0.1, shots[index]!.durationSeconds);
+        if (mid <= cursor) { shotIndex = index; break; }
+        shotIndex = index;
+      }
+      groups[shotIndex]!.push(segment.id);
+      audioCursor += segment.endSeconds - segment.startSeconds;
+    }
+  }
+  const output: Array<{ shotId: string; segmentIds: string[] }> = [];
+  for (let index = 0; index < shots.length; index += 1) {
+    const shot = shots[index]!;
+    const segmentIds = groups[index] ?? [];
+    setShotAudioSegments(p, shot.id, segmentIds);
+    output.push({ shotId: shot.id, segmentIds });
+  }
+  return { bound: output.reduce((sum, item) => sum + item.segmentIds.length, 0), shots: output };
 }
 
 export async function audioLineWaveform(p: ProjectContext, ffmpeg: Ffmpeg, lineId: string): Promise<{ relPath: string; url: string }> {

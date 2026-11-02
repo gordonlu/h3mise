@@ -195,3 +195,19 @@ test('bundled timeline looks render frames and trimmed clips', async () => {
     assert.ok(Math.abs((info.durationSeconds ?? 0) - 1) < 0.2);
   }
 });
+
+test('master audio replaces the final mix without re-encoding video', async () => {
+  const root = makeTempRoot('ffmpeg-master-audio');
+  roots.push(root);
+  const ffmpeg = new Ffmpeg();
+  const video = join(root, 'video.mp4');
+  const master = join(root, 'master.mp4');
+  const out = join(root, 'out.mp4');
+  await ffmpeg.syntheticVideo(video, 1, 'Picture', '640x360');
+  await ffmpeg.syntheticVideo(master, 1, 'Master', '320x240');
+  await ffmpeg.replaceAudio(video, master, out, 1, 0);
+  const info = await ffmpeg.probe(out);
+  assert.equal(info.hasAudio, true);
+  assert.ok(Math.abs((info.durationSeconds ?? 0) - 1) < 0.2);
+  assert.equal(info.width, 640);
+});

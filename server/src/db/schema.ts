@@ -668,6 +668,15 @@ CREATE INDEX IF NOT EXISTS idx_shot_audio_segments_shot ON shot_audio_segments(s
 `,
 });
 
+PROJECT_MIGRATIONS.push({
+  version: 26,
+  name: 'audio-line-controls',
+  sql: `
+ALTER TABLE audio_lines ADD COLUMN silences_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE timeline ADD COLUMN master_audio_line_id TEXT;
+`,
+});
+
 export const REGISTRY_MIGRATIONS: Migration[] = [
   {
     version: 1,

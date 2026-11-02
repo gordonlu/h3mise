@@ -29,8 +29,9 @@ export interface ProviderCapabilities {
   maxAudioRefs?: number;
   maxTotalRefs?: number;
   audioSupported?: boolean;
-  /** How a reference audio behaves: copied 1:1, reference-only timbre/rhythm,
-   * re-sung by the model, or not declared. Never promise a copy by default. */
+  /** How reference audio behaves. `copy` means the workflow's official audio
+   * reuse (≈1:1 / fully_copy); `reference_only` is timbre/rhythm guidance and
+   * `resings` means the model performs new vocals. Unknown never promises a copy. */
   audioReuse?: 'unknown' | 'reference_only' | 'resings' | 'copy';
   /** v2v/faceswap workflows normally keep the source video's audio track. */
   preservesSourceAudio?: boolean;

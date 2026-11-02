@@ -16,6 +16,10 @@ const busy = ref(false);
 const notice = ref('');
 const waveforms = ref<Record<string, string>>({});
 const drafts = ref<Record<string, string>>({});
+const players = ref<Record<string, HTMLAudioElement | null>>({});
+const stopAt = ref<Record<string, number | null>>({});
+const transcribing = ref<string | null>(null);
+const masterLineId = ref<string | null>(null);
 
 const availableAssets = computed(() => audioAssets.value.filter((asset) => asset.kind === 'audio'));
 const canCreate = computed(() => Boolean(selectedAssetId.value) && !busy.value);
@@ -24,15 +28,17 @@ const activeSegments = computed(() => segments.value.filter((segment) => boundId
 async function refresh() {
   busy.value = true;
   try {
-    const [data, assets, bound] = await Promise.all([
+    const [data, assets, bound, timeline] = await Promise.all([
       get<{ lines: AudioLine[]; segments: AudioSegment[] }>('/api/audio-lines'),
       get<MediaAsset[]>('/api/assets/media?kind=audio'),
       props.shotId ? get<AudioSegment[]>(`/api/shots/${props.shotId}/audio-segments`) : Promise.resolve([]),
+      get<{ masterAudioLineId: string | null }>('/api/timeline'),
     ]);
     lines.value = data.lines;
     segments.value = data.segments;
     audioAssets.value = assets;
     boundIds.value = bound.map((segment) => segment.id);
+    masterLineId.value = timeline.masterAudioLineId;
     for (const segment of data.segments) {
       if (drafts.value[segment.id] === undefined) drafts.value[segment.id] = segment.text;
     }
@@ -106,6 +112,91 @@ async function saveText(segment: AudioSegment) {
   }
 }
 
+function setPlayer(lineId: string, element: unknown) {
+  players.value[lineId] = (element as HTMLAudioElement | null) ?? null;
+}
+
+function lineDuration(line: AudioLine): number {
+  const el = players.value[line.id];
+  if (el && Number.isFinite(el.duration) && el.duration > 0) return el.duration;
+  return segments.value.filter((segment) => segment.lineId === line.id).reduce((end, segment) => Math.max(end, segment.endSeconds), 0);
+}
+
+function seekLine(line: AudioLine, event: MouseEvent) {
+  const el = players.value[line.id];
+  if (!el) return;
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  el.currentTime = ratio * lineDuration(line);
+}
+
+function playSegment(line: AudioLine, segment: AudioSegment) {
+  const el = players.value[line.id];
+  if (!el) return;
+  el.currentTime = segment.startSeconds;
+  stopAt.value[line.id] = segment.endSeconds;
+  void el.play();
+}
+
+function onTimeUpdate(line: AudioLine) {
+  const el = players.value[line.id];
+  const end = stopAt.value[line.id];
+  if (el && end != null && el.currentTime >= end) {
+    el.pause();
+    stopAt.value[line.id] = null;
+  }
+}
+
+async function saveBoundary(segment: AudioSegment, field: 'startSeconds' | 'endSeconds', value: number) {
+  if (!Number.isFinite(value)) return;
+  try {
+    const updated = await patch<AudioSegment>(`/api/audio-segments/${segment.id}`, { [field]: value });
+    Object.assign(segment, updated);
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function transcribe(line: AudioLine) {
+  const existing = lineSegments(line.id);
+  transcribing.value = line.id;
+  try {
+    const result = await post<{ provider: string; filled: number; segments: AudioSegment[] }>(`/api/audio-lines/${line.id}/transcribe`, {
+      replace: existing.length === 0,
+    });
+    notice.value = `转写完成（${result.provider}）：${result.filled || result.segments.length} 句`;
+    await refresh();
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    transcribing.value = null;
+  }
+}
+
+async function autoBind(line: AudioLine) {
+  if (!(await confirmDialog({ title: '自动绑定 Audio Line', message: '会按镜头时长重排并覆盖当前集所有镜头的 Audio Line 绑定。', confirmLabel: '自动绑定' }))) return;
+  busy.value = true;
+  try {
+    const result = await post<{ bound: number }>(`/api/audio-lines/${line.id}/auto-bind`, {});
+    notice.value = `已自动绑定 ${result.bound} 句到镜头`;
+    await refresh();
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function setMaster(line: AudioLine | null) {
+  try {
+    const timeline = await put<{ masterAudioLineId: string | null }>('/api/timeline/master-audio', { lineId: line?.id ?? null });
+    masterLineId.value = timeline.masterAudioLineId;
+    notice.value = line ? `成片将使用 ${line.label} 作为 Master 音频` : '已恢复使用 Take 自带音频';
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function toggleBind(segment: AudioSegment) {
   if (!props.shotId) {
     notice.value = '先在时间线选中一个片段，再绑定 Audio Line。';
@@ -156,19 +247,28 @@ onMounted(() => { void refresh(); });
             <span class="badge accent no-dot">{{ line.kind }}</span>
             <span class="muted mono">{{ line.id }}</span>
           </div>
-          <div class="row">
+          <div class="row wrap">
             <button class="sm" @click="loadWaveform(line)">波形</button>
             <button class="sm" :disabled="busy" @click="detect(line)">按静音切句</button>
+            <button class="sm" :disabled="transcribing === line.id" @click="transcribe(line)">{{ transcribing === line.id ? '转写中…' : '自动转写' }}</button>
+            <button class="sm" :disabled="busy" @click="autoBind(line)">自动绑定镜头</button>
+            <button class="sm" :class="{ primary: masterLineId === line.id }" @click="setMaster(masterLineId === line.id ? null : line)">{{ masterLineId === line.id ? '取消成片 Master' : '用作成片 Master' }}</button>
             <button class="sm danger" @click="removeLine(line)">删除</button>
           </div>
         </div>
-        <audio :src="mediaUrl(line.assetId)" controls preload="metadata" class="audio-player" />
-        <div v-if="waveforms[line.id]" class="waveform"><img :src="fileUrl(waveforms[line.id]!)" alt="" /></div>
+        <audio :ref="(el) => setPlayer(line.id, el)" :src="mediaUrl(line.assetId)" controls preload="metadata" class="audio-player" @timeupdate="onTimeUpdate(line)" />
+        <div v-if="waveforms[line.id]" class="waveform" @click="seekLine(line, $event)"><img :src="fileUrl(waveforms[line.id]!)" alt="" /></div>
         <div v-if="!lineSegments(line.id).length" class="muted">还没有切片。点“按静音切句”生成边界，再填写每句实际歌词/台词。</div>
         <div v-for="segment in lineSegments(line.id)" :key="segment.id" class="audio-segment" :class="{ bound: boundIds.includes(segment.id) }">
-          <span class="mono time">{{ segment.startSeconds.toFixed(2) }}–{{ segment.endSeconds.toFixed(2) }}s</span>
+          <span class="mono time">
+            <input type="number" step="0.01" min="0" :value="segment.startSeconds" @change="saveBoundary(segment, 'startSeconds', Number(($event.target as HTMLInputElement).value))" /> –
+            <input type="number" step="0.01" min="0" :value="segment.endSeconds" @change="saveBoundary(segment, 'endSeconds', Number(($event.target as HTMLInputElement).value))" />s
+          </span>
           <input v-model="drafts[segment.id]" class="text" placeholder="这一句的实际歌词/台词（完整句）" @change="saveText(segment)" />
-          <button class="sm" :disabled="!shotId" @click="toggleBind(segment)">{{ boundIds.includes(segment.id) ? '解除绑定' : '绑定到镜头' }}</button>
+          <div class="row">
+            <button class="sm" @click="playSegment(line, segment)">试听</button>
+            <button class="sm" :disabled="!shotId" @click="toggleBind(segment)">{{ boundIds.includes(segment.id) ? '解除绑定' : '绑定到镜头' }}</button>
+          </div>
         </div>
       </div>
       <div v-if="activeSegments.length" class="muted">当前镜头已绑定 {{ activeSegments.length }} 句；重新编译 Prompt 后会写入完整文本。</div>
@@ -186,7 +286,9 @@ onMounted(() => { void refresh(); });
 .waveform img { display: block; width: 100%; max-height: 120px; object-fit: cover; }
 .audio-segment { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 7px; border-radius: 5px; }
 .audio-segment.bound { background: var(--accent-soft); }
-.audio-segment .time { color: var(--text-3); font-size: 10.5px; }
+.audio-segment .time { color: var(--text-3); font-size: 10.5px; display: flex; align-items: center; gap: 4px; }
+.audio-segment .time input { width: 58px; padding: 2px 4px; font-size: 10.5px; }
+.waveform { cursor: crosshair; }
 .audio-segment .text { min-width: 0; }
 .notice { padding: 8px 10px; border-radius: 5px; background: var(--accent-soft); font-size: 12px; }
 .danger { color: var(--err); border-color: var(--err-line); }

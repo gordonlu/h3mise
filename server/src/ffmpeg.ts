@@ -630,6 +630,25 @@ export class Ffmpeg {
     );
   }
 
+  /** Replace the final video's audio with a project master track. Video is
+   * stream-copied; the master is padded/truncated to the final film length. */
+  async replaceAudio(videoPath: string, audioPath: string, outPath: string, durationSeconds: number, audioStart = 0): Promise<void> {
+    await mkdir(dirname(outPath), { recursive: true });
+    await run('ffmpeg', [
+      '-y', '-hide_banner', '-v', 'error', '-nostdin',
+      '-i', videoPath,
+      '-ss', String(Math.max(0, audioStart)),
+      '-i', audioPath,
+      '-map', '0:v:0', '-map', '1:a:0',
+      '-c:v', 'copy',
+      '-af', 'apad',
+      '-c:a', 'aac',
+      '-t', String(Math.max(0.1, durationSeconds)),
+      '-movflags', '+faststart',
+      outPath,
+    ], videoPath);
+  }
+
   /**
    * Synthetic render (mock provider): testsrc clip with optional burned-in
    * label. Lets the whole Take pipeline run offline.

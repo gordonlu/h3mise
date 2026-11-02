@@ -12,7 +12,7 @@ This file tells coding assistants how to help a user run and configure H3Mise sa
 - Continuity beats retries: for a themed story, create the character/entity assets (each with a main image) before designing Shots, and prefer first-frame-to-video (`i2va`) or frame-bridge chaining (`previous_take` dependency, then resolve it) over pure text generation. A bound first frame keeps identity, wardrobe, and set stable across shots; `t2va` lets every shot re-cast the subject.
 - Storyboard is an optional visual planning layer before Shot design. Creating or editing its text panels is free; generating a sheet or regenerating one panel through RunningHub is a separate paid image task.
 - Timeline is the finishing layer: only selected Takes can be added. Trim, incoming transitions, per-clip picture looks, and audio settings are non-destructive clip metadata; export re-encodes locally with FFmpeg.
-- Audio Line is the project-level master/vocal reference: sentence segments carry the authoritative words bound to Shots. Compiling a prompt with bound segments appends the exact text; Preflight refuses missing/partial lines. Silence detection only proposes boundaries — it is not transcription.
+- Audio Line is the project-level master/vocal reference: sentence segments carry the authoritative words bound to Shots. Compiling a prompt with bound segments appends the exact text; Preflight refuses missing/partial lines. Silence detection only proposes boundaries — it is not transcription. Optional ASR uses `ASR_BASE_URL`/`ASR_MODEL` or a local `whisper` CLI; H3Mise bundles no ASR model. Auto-bind distributes contiguous segments across Shots by duration. A selected master line replaces the final mix during local export.
 - Story skeletons and director-style presets are planning aids. Applying a skeleton restructures canonical StoryBeats in place by default; it must not append a duplicate set or silently render.
 
 ## Help a first-time user
@@ -200,7 +200,9 @@ Shot Composer is a per-shot 2D stage for placing still layers and previewing a c
 - Preflight accepts `durationSeconds` from the exact request; it must show shot default vs requested duration and use the same intent as render.
 - `POST /api/prompts/lint` and the Preflight `prompt_lint` section are deterministic. Flag negative wording, missing subject/background/light/camera/performance/hair fields, half sentences, and audio/dialogue ambiguity. Warnings never replace the explicit render confirmation.
 - `GET /api/prompts/:id` returns one immutable PromptVersion. Render job responses include a joined `take` object when available (`takeId` remains the stable key).
-- Audio Line endpoints: `GET/POST /api/audio-lines`, `PATCH/DELETE /api/audio-lines/:id`, `GET .../waveform`, `POST .../detect-silence`, segment CRUD at `/api/audio-segments/:id`, and `GET/PUT /api/shots/:id/audio-segments`. Silence detection proposes boundaries only; text remains user/AI-supplied. One shot binds segments from one line only.
+- Audio Line endpoints: `GET/POST /api/audio-lines`, `PATCH/DELETE /api/audio-lines/:id`, `GET .../waveform`, `POST .../detect-silence`, `POST .../transcribe`, `POST .../auto-bind`, segment CRUD at `/api/audio-segments/:id`, and `GET/PUT /api/shots/:id/audio-segments`. `PUT /api/timeline/master-audio` selects the final master. Silence detection proposes boundaries only; ASR is optional. One shot binds segments from one line only.
+- Audio Line Preflight checks missing text, Prompt omission, segment overlap, duration overflow, `<d>` text mismatch, and boundaries outside detected silences. Warnings about breath boundaries do not silently rewrite the cut.
+- Audio reference semantics: `fully_copy`, `audio reuse`, and explicit原唱/原音 wording are official reuse intent. Preflight must never infer audio intent from prompt text or block on those words; the workflow's `capabilities.audioReuse` is the only source of truth. Set it to `copy` only when the App officially supports reuse; `reference_only`/`resings` produce warnings, while an undeclared workflow only gets an info hint. A bare `1:1` is an aspect ratio, not audio intent.
 - Production summary reports `spentCny` / `spentCoins` aggregated from provider cost receipts, not user-entered estimates.
 
 ## Render safety rules
@@ -232,7 +234,8 @@ Shot Composer is a per-shot 2D stage for placing still layers and previewing a c
 - `shared/src/timeline.ts`: clip/document model, transition clamping, and the single final-duration calculation.
 - `server/src/modules/timeline.ts`: selected-Take timeline persistence, trim/transition/look updates, look preview, and local export.
 - `server/src/modules/timeline-looks.ts`: the whitelisted bundled picture-look → FFmpeg filter chains.
-- `server/src/modules/audio-lines.ts`: project-level master/vocal lines, silence-derived segments, shot bindings, waveform cache, and authoritative prompt text.
+- `server/src/modules/audio-lines.ts`: project-level master/vocal lines, silence-derived segments, optional ASR, auto-bind, shot bindings, waveform cache, and authoritative prompt text.
+- `server/src/modules/transcription.ts`: optional OpenAI-compatible endpoint / local whisper integration; no bundled model.
 - `server/src/modules/prompt-lint.ts`: deterministic Prompt lint rules.
 - `web/src/components/timeline/AudioLinePanel.vue`: Audio Line import, waveform, sentence editing, silence split, and shot binding UI.
 - `server/src/ffmpeg.ts`: trim, frame preview, transition concat, and export encoding.

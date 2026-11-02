@@ -33,6 +33,8 @@ export interface TimelineDoc {
   id: string;
   title: string;
   clips: TimelineClip[];
+  /** Optional project master audio line used for the final mix. */
+  masterAudioLineId: string | null;
   updatedAt: string;
 }
 

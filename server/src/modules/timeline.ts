@@ -2,7 +2,7 @@
 // Clips reference shot+take; export trims and concats via ffmpeg.
 
 import { join, relative, sep } from 'node:path';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, rm, stat } from 'node:fs/promises';
 import { effectiveTransitionDuration, effectiveTransitions, isHardTransition, isTimelineLook, timelineClipDuration, timelineDurationSeconds } from '@h3mise/shared';
 import type { TimelineClip, TimelineDoc, TimelineLookId } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
@@ -10,6 +10,7 @@ import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import type { Ffmpeg } from '../ffmpeg.js';
 import { getShot } from './shots.js';
+import { getMedia } from './assets.js';
 import { timelineLookFilters } from './timeline-looks.js';
 import { getTake } from './takes.js';
 import { activeEpisodeId } from './story.js';
@@ -54,13 +55,23 @@ function clipFromRow(r: ClipRow): TimelineClip {
 }
 
 export function getTimeline(p: ProjectContext): TimelineDoc {
-  const row = p.db.get<{ id: string; title: string; updated_at: string }>('SELECT * FROM timeline LIMIT 1');
+  const row = p.db.get<{ id: string; title: string; updated_at: string; master_audio_line_id: string | null }>('SELECT * FROM timeline LIMIT 1');
   if (!row) throw new Error('timeline missing');
   const clips = p.db.all<ClipRow>(
     'SELECT tc.* FROM timeline_clips tc JOIN shots s ON s.id = tc.shot_id WHERE s.story_id = ? ORDER BY tc.ord',
     [activeEpisodeId(p)],
   ).map(clipFromRow);
-  return { id: row.id, title: row.title, clips, updatedAt: row.updated_at };
+  return { id: row.id, title: row.title, clips, masterAudioLineId: row.master_audio_line_id ?? null, updatedAt: row.updated_at };
+}
+
+/** Choose a project master audio line for the final mix; null restores Take audio. */
+export function setTimelineMasterAudio(p: ProjectContext, lineId: string | null): TimelineDoc {
+  if (lineId !== null) {
+    const exists = p.db.get<{ id: string }>('SELECT id FROM audio_lines WHERE id = ?', [lineId]);
+    if (!exists) throw new Error('audio line not found');
+  }
+  p.db.run('UPDATE timeline SET master_audio_line_id = ?, updated_at = ?', [lineId, new Date().toISOString()]);
+  return getTimeline(p);
 }
 
 export function addClip(p: ProjectContext, input: { shotId: string; takeId: string; trimIn?: number; trimOut?: number | null }): TimelineClip {
@@ -334,10 +345,28 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
     type: transition.type,
     duration: transition.duration,
   }));
-  await ffmpeg.concat(clips, outPath, { transitions });
+  const masterLineId = tl.masterAudioLineId;
+  const concatPath = masterLineId ? `${outPath}.video.mp4` : outPath;
+  await ffmpeg.concat(clips, concatPath, { transitions });
+  const durationSeconds = timelineDurationSeconds(tl.clips, (clip) => getTake(p, clip.takeId).duration);
+  if (masterLineId) {
+    try {
+      const line = p.db.get<{ asset_id: string; offset_seconds: number }>('SELECT asset_id, offset_seconds FROM audio_lines WHERE id = ?', [masterLineId]);
+      if (!line) throw new Error('timeline master audio line no longer exists');
+      const asset = getMedia(p, line.asset_id);
+      await ffmpeg.replaceAudio(
+        concatPath,
+        p.resolveProjectPath(asset.fileName),
+        outPath,
+        durationSeconds,
+        Math.max(0, line.offset_seconds),
+      );
+    } finally {
+      await rm(concatPath, { force: true });
+    }
+  }
   // Forward slashes: stored rel paths must be OS-independent.
   const relPath = relative(p.root, outPath).split(sep).join('/');
-  const durationSeconds = timelineDurationSeconds(tl.clips, (clip) => getTake(p, clip.takeId).duration);
   const id = nextId(p.db, 'export');
   const createdAt = new Date().toISOString();
   p.db.run(

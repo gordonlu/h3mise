@@ -191,7 +191,11 @@ export class RunningHubAiAppProvider implements VideoProvider {
       throw new ProviderError(`AI App ${appId} is not registered in the RunningHub profile`, 'submit');
     }
     const nodeInfoList = this.buildNodeInfoList(request);
-    const body: Record<string, unknown> = { nodeInfoList };
+    const body: Record<string, unknown> = {
+      nodeInfoList,
+      instanceType: this.profile.instanceType ?? 'default',
+      usePersonalQueue: 'false',
+    };
     return this.v2(`/openapi/v2/run/ai-app/${appId}`, body).then((raw) => {
       const r = raw as { taskId?: string; status?: string; errorCode?: string; errorMessage?: string; results?: unknown };
       if (!r.taskId || (r.errorCode && r.errorCode !== '')) {
@@ -470,7 +474,7 @@ export class RunningHubAiAppProvider implements VideoProvider {
     if (options.durationSeconds != null) nodeInfoList.push({ nodeId: '10', fieldName: 'value', fieldValue: String(options.durationSeconds) });
     // Node 18: steps
     if (options.steps != null) nodeInfoList.push({ nodeId: '18', fieldName: 'steps', fieldValue: String(options.steps) });
-    const body = { nodeInfoList, instanceType: 'default', usePersonalQueue: 'false' };
+    const body = { nodeInfoList, instanceType: this.profile.instanceType ?? 'default', usePersonalQueue: 'false' };
     return this.v2(`/openapi/v2/run/ai-app/${appId}`, body).then((raw) => {
       const r = raw as { taskId?: string; status?: string; errorCode?: string; errorMessage?: string; results?: unknown };
       if (!r.taskId || (r.errorCode && r.errorCode !== '')) {

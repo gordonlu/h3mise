@@ -6,8 +6,8 @@
 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { H3_MODES } from '@h3mise/shared';
-import type { AiAppInputs, AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, MediaAsset, ProviderCapabilities, ProviderStatus, ProviderVerification, ProviderWorkflowSummary, RunningHubRegion, StoryboardProviderProfile, WorkflowKind, WorkflowModeReadiness, WorkflowProfile } from '@h3mise/shared';
+import { H3_MODES, RUNNINGHUB_INSTANCE_TYPES } from '@h3mise/shared';
+import type { AiAppInputs, AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, MediaAsset, ProviderCapabilities, ProviderStatus, ProviderVerification, ProviderWorkflowSummary, RunningHubInstanceType, RunningHubRegion, StoryboardProviderProfile, WorkflowKind, WorkflowModeReadiness, WorkflowProfile } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -111,6 +111,7 @@ export function defaultAiAppProfile(region: RunningHubRegion = 'cn'): AiAppProfi
     provider: 'runninghub',
     region,
     concurrency: 1,
+    instanceType: 'default',
     appId: H3_AI_APP_ID,
     invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${H3_AI_APP_ID}`,
     protocolVersion: 'observed',
@@ -346,6 +347,10 @@ function sanitizeKind(raw: unknown): WorkflowKind | undefined {
   return typeof raw === 'string' && WORKFLOW_KINDS.includes(raw as WorkflowKind) ? raw as WorkflowKind : undefined;
 }
 
+function sanitizeInstanceType(raw: unknown): RunningHubInstanceType | undefined {
+  return typeof raw === 'string' && RUNNINGHUB_INSTANCE_TYPES.includes(raw as RunningHubInstanceType) ? raw as RunningHubInstanceType : undefined;
+}
+
 function sanitizeCapabilities(raw: unknown, inputs: AiAppInputs, nodes: AiAppProfile['nodes'], kind?: WorkflowKind): ProviderCapabilities | undefined {
   if (!raw || typeof raw !== 'object') {
     if (!inputs.prompt.nodeId) return undefined;
@@ -406,6 +411,7 @@ function workflowAsProfile(workflow: WorkflowProfile, account: AiAppProfile): Ai
     provider: 'runninghub',
     region: account.region,
     concurrency: account.concurrency,
+    instanceType: account.instanceType,
     appId: workflow.appId,
     invokeUrl: `${runningHubOrigin(account.region)}/openapi/v2/run/ai-app/${workflow.appId}`,
     protocolVersion: 'observed',
@@ -753,7 +759,7 @@ export class ProviderRegistry {
     const profile = this.sanitizeProfile(jget(row.profile_json, {}));
     const primary = this.getProfile();
     if (profile.region !== primary?.region) return { ...profile, nodes: [], verification: { status: 'unconfigured', checkedAt: null, note: 'Account region changed; configure and detect the frame App for this region' } };
-    return profile;
+    return { ...profile, instanceType: primary?.instanceType ?? profile.instanceType ?? 'default' };
   }
 
   /** Resolve the workflow that owns a mode. Frame modes keep their separate
@@ -853,7 +859,7 @@ export class ProviderRegistry {
   getVideoReferenceProfile(): AiAppProfile {
     const region = this.getProfile()?.region ?? 'cn';
     const row = this.getRegistryDb().get<{ profile_json: string }>("SELECT profile_json FROM provider_profiles WHERE id = 'runninghub_video_reference'");
-    const fallback = { ...defaultAiAppProfile(region), appId: '2093714693130113026', inputs: mapDiscoveredNodes([]) };
+    const fallback = { ...defaultAiAppProfile(region), instanceType: this.getProfile()?.instanceType ?? 'default', appId: '2093714693130113026', inputs: mapDiscoveredNodes([]) };
     const profile = this.sanitizeProfile(row ? jget(row.profile_json, fallback) : fallback);
     if (profile.region !== region) return this.sanitizeProfile(fallback);
     return profile;
@@ -967,6 +973,7 @@ export class ProviderRegistry {
       concurrency: Number.isInteger(Number(base.concurrency))
         ? Math.min(4, Math.max(1, Number(base.concurrency)))
         : d.concurrency,
+      instanceType: sanitizeInstanceType(base.instanceType) ?? d.instanceType ?? 'default',
       appId: active.appId,
       invokeUrl: `${runningHubOrigin(region)}/openapi/v2/run/ai-app/${active.appId}`,
       nodes: active.nodes ?? [],

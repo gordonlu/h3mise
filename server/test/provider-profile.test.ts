@@ -131,6 +131,29 @@ test('RunningHub submits to a registered secondary AI App and rejects unknown Ap
   }
 });
 
+test('RunningHub submits the configured GPU instance and a 2.0 MP payload', async () => {
+  const profile = defaultAiAppProfile();
+  profile.instanceType = 'plus';
+  profile.inputs.megapixels = { nodeId: 'shape', fieldName: 'megapixels' };
+  const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile });
+  const originalFetch = globalThis.fetch;
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ taskId: 'instance-task', status: 'QUEUED' }), { status: 200 });
+  };
+  try {
+    await provider.submit({
+      mode: 't2va', prompt: 'test', durationSeconds: 5, aspectRatio: '16:9',
+      megapixels: 2, references: [], providerParams: {},
+    });
+    assert.equal(body.instanceType, 'plus');
+    assert.ok((body.nodeInfoList as Array<{ nodeId: string; fieldValue: string }>).some((item) => item.nodeId === 'shape' && item.fieldValue === '2'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('RunningHub marks error 421 as provider-capacity backoff before a task id exists', async () => {
   const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile: defaultAiAppProfile() });
   const originalFetch = globalThis.fetch;

@@ -9,6 +9,8 @@ export interface ProviderVerification {
 }
 
 export type RunningHubRegion = 'cn' | 'global';
+export type RunningHubInstanceType = 'default' | 'plus' | 'ultra';
+export const RUNNINGHUB_INSTANCE_TYPES: RunningHubInstanceType[] = ['default', 'plus', 'ultra'];
 
 // Provider / AI profiles
 // ---------------------------------------------------------------------------
@@ -101,6 +103,8 @@ export interface AiAppProfile {
   /** Maximum active remote tasks for this account/workflow. Defaults to 1
    * because a wrong value can create several paid tasks at once. */
   concurrency?: number;
+  /** RunningHub GPU tier: default 24G, plus 48G, ultra 84G. Higher tiers cost more. */
+  instanceType?: RunningHubInstanceType;
   /** Active workflow's App ID. Kept as a compatibility mirror of
    * `apps[activeWorkflowId]`; submit resolves the actual App per mode. */
   appId: string;

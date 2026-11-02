@@ -8,7 +8,7 @@
 // submission via renderIntentHash.
 
 import { createHash } from 'node:crypto';
-import { cameraPlanWarnings, normalizeCameraPlan, SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightReport, type PreflightSection, type ProviderCapabilities } from '@h3mise/shared';
+import { MEGAPIXEL_PRESETS, cameraPlanWarnings, isMegapixelPreset, normalizeCameraPlan, SHOT_STATUS_LABEL, type H3Mode, type PreflightCheck, type PreflightReport, type PreflightSection, type ProviderCapabilities } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
@@ -280,15 +280,34 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       });
     }
     if (intent.megapixels !== undefined) {
-      const allowedMegapixels = [0.6, 0.8, 1, 1.2];
-      if (!Number.isFinite(intent.megapixels) || !allowedMegapixels.includes(intent.megapixels)) {
+      if (!Number.isFinite(intent.megapixels) || !isMegapixelPreset(intent.megapixels)) {
         sections[2]!.checks.push({
           key: 'provider.megapixels',
           severity: 'error',
-          message: `像素档位 ${intent.megapixels} MP 不受支持；可选：${allowedMegapixels.join('、')} MP`,
+          message: `像素档位 ${intent.megapixels} MP 不受支持；可选：${MEGAPIXEL_PRESETS.join('、')} MP`,
         });
       } else {
         sections[2]!.checks.push({ key: 'provider.megapixels.ok', severity: 'info', message: `输出像素：${intent.megapixels} MP` });
+        const instanceType = intent.providerId === 'runninghub' ? registry.getProfile()?.instanceType ?? 'default' : null;
+        if (intent.megapixels >= 2 && instanceType === 'default') {
+          sections[2]!.checks.push({
+            key: 'provider.megapixels.vram',
+            severity: 'error',
+            message: `${intent.megapixels} MP 在 default（24G）实例上实测容易显存不足；请先降到 1.4 MP 或更低，或在 Settings 把运行实例切到 plus/ultra（显存越大越贵）`,
+          });
+        } else if (intent.megapixels >= 2) {
+          sections[2]!.checks.push({
+            key: 'provider.megapixels.vram',
+            severity: 'info',
+            message: `${intent.megapixels} MP 需要 plus/ultra 显存；当前运行实例：${instanceType ?? 'unknown'}`,
+          });
+        } else if (intent.megapixels >= 1.4 && instanceType === 'default') {
+          sections[2]!.checks.push({
+            key: 'provider.megapixels.near_vram',
+            severity: 'warning',
+            message: 'default（24G）实例实测约 1.4 MP 边界；若 RunningHub 报显存不足，请降低 MP',
+          });
+        }
       }
     }
     if (provider.configured === false) {

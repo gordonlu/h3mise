@@ -239,6 +239,17 @@ async function saveProviderConcurrency(provider: 'runninghub' | 'comfyui', value
   }
 }
 
+async function saveInstanceType(instanceType: 'default' | 'plus' | 'ultra') {
+  if (!profile.value) return;
+  try {
+    profile.value = await put<AiAppProfile>('/api/providers/runninghub/profile', { ...profile.value, instanceType });
+    notice.value = `运行实例已设为 ${instanceType}`;
+    await project.refreshProviders();
+  } catch (e) {
+    notice.value = errorMessage(e);
+  }
+}
+
 async function saveApiKey() {
   if (!apiKeyInput.value.trim()) {
     notice.value = t('pages.settings.enterApiKey');
@@ -599,6 +610,15 @@ watch(() => route.hash, async (hash) => {
             <div class="row"><strong>不提交的载荷预览</strong><button class="sm ghost" @click="payloadPreview = ''">关闭</button></div>
             <pre class="payload-preview mono">{{ payloadPreview }}</pre>
           </div>
+          <label class="field">
+            运行实例（显存）
+            <select :value="profile?.instanceType ?? 'default'" @change="saveInstanceType(($event.target as HTMLSelectElement).value as 'default' | 'plus' | 'ultra')">
+              <option value="default">default · 24G 显存</option>
+              <option value="plus">plus · 48G 显存（更贵）</option>
+              <option value="ultra">ultra · 84G 显存（最贵）</option>
+            </select>
+            <span class="muted">default（24G）实测约 1.4 MP 边界；2.0 MP 建议使用 plus/ultra。显存不足时先降低 MP，再升级实例；更高显存会产生更高 RunningHub 消耗。</span>
+          </label>
           <label class="field">
             {{ t('pages.settings.concurrency') }}
             <input type="number" min="1" max="4" :value="profile?.concurrency ?? 1" @change="saveProviderConcurrency('runninghub', Number(($event.target as HTMLInputElement).value))" />

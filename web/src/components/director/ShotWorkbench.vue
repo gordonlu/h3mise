@@ -780,6 +780,8 @@ function localizeRequirement(value: string): string {
             <option :value="0.8">0.8 MP</option>
             <option :value="1">1.0 MP</option>
             <option :value="1.2">1.2 MP</option>
+            <option :value="1.4">1.4 MP</option>
+            <option :value="2">2.0 MP</option>
           </select>
         </label>
         <label class="ctl">

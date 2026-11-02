@@ -6,7 +6,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeStore, makeProject, makeShotWithPrompt, cleanupTempRoot } from './helpers.js';
 import { attachSemanticReview, renderIntentHash, intentFromInput, runBasicPreflightIntent } from '../src/modules/preflight.js';
-import { ProviderRegistry } from '../src/providers/registry.js';
+import { ProviderRegistry, defaultAiAppProfile } from '../src/providers/registry.js';
 import { createBinding, insertMedia } from '../src/modules/assets.js';
 import { importRawPrompt } from '../src/modules/prompt.js';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -58,6 +58,11 @@ test('gate accepts only the workflow-safe megapixel presets', async () => {
 
   const accepted = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 1.2 });
   assert.equal((await runBasicPreflightIntent(p, registry, accepted)).blocked, false);
+
+  const large = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 2 });
+  const largeReport = await runBasicPreflightIntent(p, registry, large);
+  assert.equal(largeReport.blocked, false);
+  assert.ok(largeReport.basic.find((section) => section.key === 'provider')?.checks.some((check) => check.key === 'provider.megapixels.vram' && check.severity === 'info'));
 
   const rejected = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 1.24 });
   const report = await runBasicPreflightIntent(p, registry, rejected);
@@ -206,4 +211,31 @@ test('audio reuse / fully_copy wording never determines the preflight outcome', 
   assert.ok(audioChecks.some((check) => check.key === 'ref.audio.reuse.unknown' && check.severity === 'info'));
   assert.ok(!audioChecks.some((check) => check.key === 'ref.audio.reuse.exact'));
   assert.equal(report.blocked, false);
+});
+
+test('2 MP is blocked on the default 24G instance and allowed on plus/ultra', async () => {
+  const { root, store } = await makeStore('preflight-vram');
+  roots.push(root);
+  const p = await makeProject(store, 'vram');
+  const { shotId, promptVersionId } = makeShotWithPrompt(p, 't2va');
+  const base = {
+    ...defaultAiAppProfile(),
+    instanceType: 'default' as const,
+    capabilities: { supportedModes: ['t2va' as const], maxDuration: 15 },
+    verification: { status: 'nodes_detected' as const, checkedAt: new Date().toISOString(), note: 'test' },
+  };
+  store.registry.run("INSERT INTO provider_profiles (id, profile_json, updated_at) VALUES ('runninghub', ?, ?)", [JSON.stringify(base), new Date().toISOString()]);
+  const registry = new ProviderRegistry(() => null, () => store.registry, new Ffmpeg(), 'test-key', 'runninghub');
+  registry.refresh();
+
+  const intent = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'runninghub', megapixels: 2 });
+  const report = await runBasicPreflightIntent(p, registry, intent);
+  assert.equal(report.blocked, true);
+  assert.ok(report.basic.find((section) => section.key === 'provider')?.checks.some((check) => check.key === 'provider.megapixels.vram' && check.severity === 'error'));
+
+  registry.saveProfile({ ...registry.getProfile()!, instanceType: 'plus' });
+  const plusIntent = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'runninghub', megapixels: 2 });
+  const plusReport = await runBasicPreflightIntent(p, registry, plusIntent);
+  assert.equal(plusReport.blocked, false);
+  assert.ok(plusReport.basic.find((section) => section.key === 'provider')?.checks.some((check) => check.key === 'provider.megapixels.vram' && check.severity === 'info'));
 });

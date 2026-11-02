@@ -387,7 +387,7 @@ const tools = [
       shotId: stringProp('Shot to check.'),
       promptVersionId: stringProp('Exact immutable PromptVersion to check.'),
       providerId: { type: 'string', enum: ['mock', 'runninghub', 'comfyui'], description: 'Provider to validate against.' },
-      megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2] },
+      megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2, 1.4, 2, 2.0736] },
       durationSeconds: { type: 'number', description: 'Exact requested duration. Defaults to the Shot duration.' },
       aspectRatio: { type: 'string' },
     }, ['shotId', 'promptVersionId', 'providerId']),
@@ -403,7 +403,7 @@ const tools = [
       durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
       aspectRatio: { type: 'string' },
       resolution: { type: 'string' },
-      megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2] },
+      megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2, 1.4, 2, 2.0736] },
       providerParams: { type: 'object', additionalProperties: true },
       confirmPaid: { type: 'boolean', const: true, description: 'Must be true, confirming the user explicitly authorized this paid submission.' },
     }, ['shotId', 'promptVersionId', 'providerId', 'confirmPaid']),
@@ -485,6 +485,7 @@ const tools = [
     inputSchema: objectSchema({
       appId: stringProp('Published RunningHub video AI App ID for the selected region.'),
       concurrency: { type: 'integer', minimum: 1, maximum: 4, description: 'Maximum active remote tasks. Prefer 1.' },
+      instanceType: { type: 'string', enum: ['default', 'plus', 'ultra'], description: 'RunningHub GPU tier: default 24G, plus 48G, ultra 84G. Higher tiers cost more.' },
       refVideoAppId: { type: 'string', description: 'Optional AI App ID used only for camera reference video.' },
       apps: {
         type: 'array',
@@ -721,7 +722,7 @@ async function callTool(name, args = {}) {
     case 'configure_runninghub_video_profile': {
       const current = await api('GET', '/api/providers/runninghub/profile');
       if (!current || typeof current !== 'object') throw new Error('RunningHub video profile is unavailable');
-      const allowed = ['appId', 'concurrency', 'refVideoAppId', 'apps', 'inputs', 'providerParamBindings'];
+      const allowed = ['appId', 'concurrency', 'instanceType', 'refVideoAppId', 'apps', 'inputs', 'providerParamBindings'];
       const supplied = allowed.filter((key) => Object.hasOwn(args, key));
       if (!supplied.length) throw new Error(`provide at least one of: ${allowed.join(', ')}`);
       const update = { ...current };

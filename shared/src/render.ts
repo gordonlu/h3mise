@@ -4,6 +4,13 @@
 import type { H3Mode } from './director.js';
 import type { MediaKind } from './assets.js';
 
+/** Workflow-safe output presets in megapixels. 2.0/2.0736 need more VRAM. */
+export const MEGAPIXEL_PRESETS = [0.6, 0.8, 1, 1.2, 1.4, 2, 2.0736] as const;
+
+export function isMegapixelPreset(value: unknown): value is (typeof MEGAPIXEL_PRESETS)[number] {
+  return typeof value === 'number' && MEGAPIXEL_PRESETS.includes(value as (typeof MEGAPIXEL_PRESETS)[number]);
+}
+
 export type RenderJobStatus =
   | 'LOCAL_QUEUED'
   | 'UPLOADING'

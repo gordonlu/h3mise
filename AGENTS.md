@@ -211,7 +211,7 @@ Shot Composer is a per-shot 2D stage for placing still layers and previewing a c
 - Never bypass Preflight, the active-job lock, reference limits, or provider capability checks.
 - Reconcile a task that already has a RunningHub task ID instead of creating another paid job.
 - When the provider reports success but H3Mise reports failure, query and reconcile the existing task before retrying.
-- Use selected megapixels exactly as mapped. Supported presets are `0.6`, `0.8`, `1.0`, and `1.2`; do not silently substitute another value.
+- Use selected megapixels exactly as mapped. Supported presets are `0.6`, `0.8`, `1.0`, `1.2`, `1.4`, `2.0`, and `2.0736`; do not silently substitute another value. `default` 24G is stable only around `1.4 MP`; `2.0 MP` requires an explicit `plus`/`ultra` instance. If RunningHub reports insufficient VRAM, lower MP first, then switch `instanceType` (`default` 24G / `plus` 48G / `ultra` 84G). Never silently upgrade the instance tier because it costs more.
 - Do not claim `nodes_detected` means the workflow is verified.
 - Surface the provider error, stage, and task ID without exposing credentials.
 - One-click preview and execution must calculate from the same canonical Beats, Shots, Takes, and jobs. Candidate Takes and active jobs block a new run until selected, rejected, or reconciled; the paid confirmation count must include Shots materialized from uncovered Beats.

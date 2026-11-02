@@ -146,7 +146,7 @@ test('filmstrip extracts an evenly sampled WebP preview set', async () => {
   assert.equal(frames.length, 5);
   assert.equal(frames[0]?.timeSeconds, 0);
   assert.ok((frames.at(-1)?.timeSeconds ?? 0) > 0.8);
-  assert.ok(frames.every((frame) => frame.path.endsWith('.webp')));
+  assert.ok(frames.every((frame) => /\.(webp|jpg)$/i.test(frame.path)));
 });
 
 test('scene cut parser returns unique sorted timestamps without inventing time zero', () => {

@@ -448,13 +448,26 @@ export class Ffmpeg {
     const count = Math.min(24, Math.max(2, Math.round(frameCount)));
     await mkdir(outDir, { recursive: true });
     const fps = count / Math.max(0.1, durationSeconds);
-    await run('ffmpeg', [
-      '-y', '-hide_banner', '-nostats', '-i', input,
-      '-vf', `fps=${fps.toFixed(6)},scale=240:-2:force_original_aspect_ratio=decrease`,
-      '-frames:v', String(count), '-c:v', 'libwebp', '-q:v', '70',
-      join(outDir, 'frame-%04d.webp'),
-    ], input);
-    const files = (await readdir(outDir)).filter((name) => /^frame-\d+\.webp$/i.test(name)).sort();
+    // Homebrew FFmpeg may omit libwebp. Prefer WebP, fall back to JPEG; the
+    // callers only store the returned relative path.
+    let files: string[] = [];
+    try {
+      await run('ffmpeg', [
+        '-y', '-hide_banner', '-nostats', '-i', input,
+        '-vf', `fps=${fps.toFixed(6)},scale=240:-2:force_original_aspect_ratio=decrease`,
+        '-frames:v', String(count), '-c:v', 'libwebp', '-q:v', '70',
+        join(outDir, 'frame-%04d.webp'),
+      ], input);
+      files = (await readdir(outDir)).filter((name) => /^frame-\d+\.webp$/i.test(name)).sort();
+    } catch {
+      await run('ffmpeg', [
+        '-y', '-hide_banner', '-nostats', '-i', input,
+        '-vf', `fps=${fps.toFixed(6)},scale=240:-2:force_original_aspect_ratio=decrease`,
+        '-frames:v', String(count), '-c:v', 'mjpeg', '-q:v', '3',
+        join(outDir, 'frame-%04d.jpg'),
+      ], input);
+      files = (await readdir(outDir)).filter((name) => /^frame-\d+\.jpg$/i.test(name)).sort();
+    }
     return files.map((name, index) => ({
       path: join(outDir, name),
       timeSeconds: Number(Math.min(Math.max(0, durationSeconds - 0.05), index * durationSeconds / count).toFixed(3)),

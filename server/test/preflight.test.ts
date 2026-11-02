@@ -59,6 +59,9 @@ test('gate accepts only the workflow-safe megapixel presets', async () => {
   const accepted = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 1.2 });
   assert.equal((await runBasicPreflightIntent(p, registry, accepted)).blocked, false);
 
+  const acceptedMid = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 1.8 });
+  assert.equal((await runBasicPreflightIntent(p, registry, acceptedMid)).blocked, false);
+
   const large = await intentFromInput(p, registry, { shotId, promptVersionId, providerId: 'mock', megapixels: 2 });
   const largeReport = await runBasicPreflightIntent(p, registry, large);
   assert.equal(largeReport.blocked, false);

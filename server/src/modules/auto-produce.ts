@@ -172,7 +172,7 @@ export class AutoProduceService {
     const provider = this.registry.get(settings.providerId);
     if (!provider) throw new Error('生成服务不存在');
     if (settings.providerId !== 'mock' && !provider.configured) throw new Error('生成服务尚未配置或节点未检测，不能开始一键制作');
-    if (!isMegapixelPreset(settings.megapixels)) throw new Error('megapixels必须是0.6、0.8、1.0、1.2、1.4、2.0或2.0736');
+    if (!isMegapixelPreset(settings.megapixels)) throw new Error('megapixels必须是0.6、0.8、1.0、1.2、1.4、1.6、1.8、2.0或2.0736');
     const before = listShots(p).map((shot) => this.planShot(p, shot));
     if (before.some((shot) => shot.hasCandidateTake)) throw new Error('已有候选Take，请先选择或拒绝，避免重复付费生成');
     if (before.some((shot) => shot.hasActiveJob)) throw new Error('已有生成任务，请等待并对账现有任务');

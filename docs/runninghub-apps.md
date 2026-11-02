@@ -39,7 +39,7 @@ node scripts/h3mise.mjs up --json     # 已在运行则不会重复 install/启�
   - 支持模式：`t2va`, `ref2va`, `vref2va`
   - 节点：prompt `250`；aspect_ratio/megapixels `115`；duration `222`；
     images `231–239`（9）；audio `247–249`（3）；reference video `251`。
-- 输出像素支持 `0.6/0.8/1.0/1.2/1.4/2.0/2.0736 MP`。default（24G）实测约 1.4 MP 边界；2.0 MP 建议使用 `plus`（48G）或 `ultra`（84G）。显存不足时先降低 MP，再升级实例；更高显存更贵。
+- 输出像素支持 `0.6/0.8/1.0/1.2/1.4/1.6/1.8/2.0/2.0736 MP`。default（24G）实测约 1.4 MP 边界；2.0 MP 建议使用 `plus`（48G）或 `ultra`（84G）。显存不足时先降低 MP，再升级实例；更高显存更贵。
 - Frame App：`2114235428827131905`（首尾帧 I2VA/L2VA/FL2VA）
   - 状态：`nodes_detected`
   - 支持模式：`i2va`, `l2va`, `fl2va`

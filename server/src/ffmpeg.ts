@@ -24,6 +24,12 @@ export class FfmpegError extends Error {
   }
 }
 
+function errorTail(stderr: string): string {
+  const lines = stderr.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const tail = lines.slice(-2).join(' | ');
+  return tail ? `: ${tail.slice(0, 500)}` : '';
+}
+
 function runResult(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -42,7 +48,7 @@ function runResult(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: strin
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve({ stdout, stderr });
-      else reject(new FfmpegError(`${bin} ${inputLabel ? `(${inputLabel}) ` : ''}exited with code ${code}`, stderr));
+      else reject(new FfmpegError(`${bin} ${inputLabel ? `(${inputLabel}) ` : ''}exited with code ${code}${errorTail(stderr)}`, stderr));
     });
   });
 }
@@ -71,7 +77,7 @@ function runBuffer(bin: 'ffmpeg' | 'ffprobe', args: string[], inputLabel?: strin
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve(Buffer.concat(chunks));
-      else reject(new FfmpegError(`${bin} ${inputLabel ? `(${inputLabel}) ` : ''}exited with code ${code}`, stderr));
+      else reject(new FfmpegError(`${bin} ${inputLabel ? `(${inputLabel}) ` : ''}exited with code ${code}${errorTail(stderr)}`, stderr));
     });
   });
 }
@@ -665,22 +671,26 @@ export class Ffmpeg {
     const drawtext = safe
       ? `,drawtext=text='${safe}':x=(w-text_w)/2:y=(h-text_h)/2:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=16`
       : '';
-    await run(
-      'ffmpeg',
-      [
-        '-y',
-        '-f', 'lavfi',
-        '-i', `testsrc2=duration=${durationSeconds}:size=${size}:rate=24`,
-        '-f', 'lavfi',
-        '-i', 'sine=frequency=440:duration=' + durationSeconds,
-        '-vf', `format=yuv420p${drawtext}`,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
-        '-c:a', 'aac', '-shortest',
-        '-movflags', '+faststart',
-        outPath,
-      ],
+    const args = (filter: string) => [
+      '-y',
+      '-f', 'lavfi',
+      '-i', `testsrc2=duration=${durationSeconds}:size=${size}:rate=24`,
+      '-f', 'lavfi',
+      '-i', 'sine=frequency=440:duration=' + durationSeconds,
+      '-vf', filter,
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
+      '-c:a', 'aac', '-shortest',
+      '-movflags', '+faststart',
       outPath,
-    );
+    ];
+    try {
+      await run('ffmpeg', args(`format=yuv420p${drawtext}`), outPath);
+    } catch (error) {
+      // Some Homebrew FFmpeg builds have drawtext but no usable default font.
+      // The label is diagnostic only; retry the same clip without it.
+      if (!drawtext) throw error;
+      await run('ffmpeg', args('format=yuv420p'), outPath);
+    }
   }
 }
 

@@ -39,8 +39,8 @@ test('renderIntentHash is deterministic and input-sensitive', () => {
   };
   const ref = { appId: 'app', checkedAt: '2026-01-01T00:00:00.000Z' };
   const h1 = renderIntentHash(base, ref);
-  const h2 = renderIntentHash({ ...base, references: [...base.references].reverse() }, ref); // order-insensitive
-  assert.equal(h1, h2);
+  const h2 = renderIntentHash({ ...base, references: [...base.references].reverse() }, ref);
+  assert.notEqual(h1, h2); // reference order changes <Picture N> and the provider payload
   assert.match(h1, /^[0-9a-f]{16}$/);
   // duration override MUST change the hash (that is the paid-gate invariant)
   assert.notEqual(h1, renderIntentHash({ ...base, durationSeconds: 6 }, ref));
@@ -206,7 +206,7 @@ test('audio reuse / fully_copy wording never determines the preflight outcome', 
   await writeFile(imageAbsolute, 'image');
   const image = insertMedia(p, { kind: 'image', fileName: imageName, mimeType: 'image/png', sizeBytes: 5, source: 'import', label: 'face' });
   createBinding(p, { assetId: image.id, roles: ['identity'], shotId, label: 'face' });
-  const prompt = importRawPrompt(p, shotId, 'audio reuse, fully_copy, aspect ratio 1:1. Keep the exact vocal.', 'ref2va');
+  const prompt = importRawPrompt(p, shotId, '<Picture 1> identity. <Audio 1> audio reuse, fully_copy, aspect ratio 1:1. Keep the exact vocal.', 'ref2va');
   const registry = makeRegistry(store.registry);
   const intent = await intentFromInput(p, registry, { shotId, promptVersionId: prompt.id, providerId: 'mock', aspectRatio: '1:1' });
   const report = await runBasicPreflightIntent(p, registry, intent);

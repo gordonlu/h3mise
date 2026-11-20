@@ -5,6 +5,7 @@ import { useToastStore } from '../stores/toast';
 import { t } from '../stores/locale';
 import { effectiveTransitions, timelineDurationSeconds, timelineClipDuration } from '@h3mise/shared';
 import type { EffectiveTimelineTransition, FilmCheckResult, TimelineClip, TimelineLookId } from '@h3mise/shared';
+import type { ShotProductionConfig } from '@h3mise/shared';
 import VideoPlayer from '../components/VideoPlayer.vue';
 import AudioLinePanel from '../components/timeline/AudioLinePanel.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -53,6 +54,7 @@ const takePoster = computed(() => {
   for (const s of shotsWithTakes.value) m.set(s.takeId, s.poster);
   return m;
 });
+const cctvByShot = ref(new Map<string, ShotProductionConfig['cctv']>());
 
 const LOOK_OPTIONS: TimelineLookId[] = ['none', 'cinematic', 'warm_film', 'bleach_bypass'];
 const lookPreview = ref<{ clipId: string; look: TimelineLookId; timeSeconds: number; url: string } | null>(null);
@@ -96,7 +98,7 @@ const activeClipIndex = computed(() => clips.value.findIndex((c) => c.id === act
 async function load() {
   const seq = ++loadSeq;
   const tl = await get<{ id: string; clips: TimelineClip[] }>('/api/timeline');
-  const shots = await get<Array<{ id: string; title: string }>>('/api/shots');
+  const shots = await get<Array<{ id: string; title: string; production?: ShotProductionConfig }>>('/api/shots');
   const takes = await Promise.all(
     shots.map(async (s) => {
       const det = await get<{ takes: Array<{ id: string; duration: number; status: string; posterPath: string | null }> }>(`/api/shots/${s.id}`);
@@ -107,6 +109,7 @@ async function load() {
   const nextExports = await get<TimelineExport[]>('/api/timeline/exports');
   const nextCheck = await get<FilmCheckResult>('/api/film-check');
   if (seq !== loadSeq) return;
+  cctvByShot.value = new Map(shots.filter((shot) => shot.production?.cctv.enabled).map((shot) => [shot.id, shot.production!.cctv]));
   clips.value = tl.clips;
   shotsWithTakes.value = takes.filter((t): t is ShotWithTake => t !== null);
   exports.value = nextExports;
@@ -328,6 +331,7 @@ onUnmounted(() => off?.());
           </div>
           <div v-if="transitionForClip(c) && incomingOverlap(c) > 0" class="strip-trans" :title="`${c.transition} · ${incomingOverlap(c).toFixed(1)}s`">◧</div>
           <div v-if="c.look !== 'none'" class="strip-look" :title="lookLabel(c.look)">{{ lookLabel(c.look) }}</div>
+          <div v-if="cctvByShot.has(c.shotId)" class="strip-cctv" :title="cctvByShot.get(c.shotId)?.cameraLabel">{{ cctvByShot.get(c.shotId)?.cameraLabel }} · {{ t('shot.production.cctv.postOverlay') }}</div>
           <button
             type="button"
             class="strip-edit"
@@ -529,6 +533,7 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .strip-meta { position: absolute; left: 6px; right: 6px; bottom: 5px; display: flex; justify-content: space-between; color: #fff; font-size: 10.5px; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
 .strip-trans { position: absolute; top: 5px; left: 5px; color: #fff; font-size: 11px; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
 .strip-look { position: absolute; left: 5px; bottom: 22px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 999px; background: rgba(25,22,20,.62); color: rgba(255,255,255,.92); font-size: 9.5px; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+.strip-cctv { position: absolute; right: 5px; top: 5px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 999px; background: rgba(18,48,32,.82); color: #d8ffcf; font: 9px var(--mono); }
 .strip-edit { position: absolute; top: 7px; right: 7px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid rgba(255,255,255,.38); border-radius: 999px; background: rgba(25,22,20,.62); color: rgba(255,255,255,.92); box-shadow: 0 2px 8px rgba(0,0,0,.18); backdrop-filter: blur(6px); font-size: 10.5px; font-weight: 600; line-height: 1; white-space: nowrap; }
 .strip-edit:hover, .strip-edit:focus-visible { background: rgba(25,22,20,.88); border-color: rgba(255,255,255,.72); transform: translateY(-1px); }
 .strip-edit.current { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 3px 10px rgba(209,89,45,.3); }

@@ -8,6 +8,8 @@ import { nextId } from '../db/ids.js';
 import { unlink } from 'node:fs/promises';
 import { createBinding, deleteBinding, listBindings } from './assets.js';
 import { activeEpisodeId } from './story.js';
+import { j, jget } from '../db/sqlite.js';
+import { normalizeShotProduction } from '@h3mise/shared';
 
 const SHOT_FUNCTIONS = new Set(['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other']);
 const H3_MODES = new Set(['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', 'vref2va', 'faceswap']);
@@ -44,6 +46,7 @@ interface ShotRow {
   depends_on_shot_id: string | null;
   screen_direction: string;
   intentional_reversal: number;
+  production_json: string;
   created_at: string;
   updated_at: string;
 }
@@ -68,6 +71,7 @@ function shotFromRow(r: ShotRow): Shot {
     dependsOnShotId: r.depends_on_shot_id,
     screenDirection: (r.screen_direction as Shot['screenDirection']) ?? 'neutral',
     intentionalReversal: Boolean(r.intentional_reversal),
+    production: normalizeShotProduction(jget<unknown>(r.production_json, {})),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -244,6 +248,7 @@ export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Sh
     dependsOnShotId: 'depends_on_shot_id',
     screenDirection: 'screen_direction',
     intentionalReversal: 'intentional_reversal',
+    production: 'production_json',
   };
   const cols: string[] = [];
   const vals: unknown[] = [];
@@ -252,7 +257,7 @@ export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Sh
     const col = map[k];
     if (!col) continue;
     cols.push(`${col} = ?`);
-    vals.push(k === 'intentionalReversal' ? (v ? 1 : 0) : v === null ? null : v);
+    vals.push(k === 'intentionalReversal' ? (v ? 1 : 0) : k === 'production' ? j(normalizeShotProduction(v)) : v === null ? null : v);
   }
   if (cols.length === 0) return getShot(p, id);
   vals.push(now, id);

@@ -27,3 +27,5 @@ export * from './breakdown.js';
 export * from './canvas.js';
 export * from './canvas-rules.js';
 export * from './canvas-layout.js';
+export * from './shot-production.js';
+export * from './take-quality.js';

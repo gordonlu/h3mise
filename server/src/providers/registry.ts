@@ -7,7 +7,7 @@
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { H3_MODES, RUNNINGHUB_INSTANCE_TYPES } from '@h3mise/shared';
-import type { AiAppInputs, AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, MediaAsset, ProviderCapabilities, ProviderStatus, ProviderVerification, ProviderWorkflowSummary, RunningHubInstanceType, RunningHubRegion, StoryboardProviderProfile, WorkflowKind, WorkflowModeReadiness, WorkflowProfile } from '@h3mise/shared';
+import type { AiAppInputs, AiAppProfile, ComfyUiInputBinding, ComfyUiWorkflowProfile, H3Mode, MediaAsset, ProviderCapabilities, ProviderStatus, ProviderVerification, ProviderWorkflowSummary, RenderRequest, RunningHubInstanceType, RunningHubRegion, StoryboardProviderProfile, WorkflowKind, WorkflowModeReadiness, WorkflowProfile } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget, type Db } from '../db/sqlite.js';
 import type { Ffmpeg } from '../ffmpeg.js';
@@ -704,7 +704,7 @@ export class ProviderRegistry {
         name: prov.name,
         kind: isRh ? 'runninghub_ai_app' : isComfy ? 'comfyui_local' : 'mock',
         configured: prov.configured,
-        verification: rhProfile?.verification ?? comfyProfile?.verification ?? { status: 'unconfigured', checkedAt: null, note: 'mock provider' },
+        verification: rhProfile?.verification ?? comfyProfile?.verification ?? { status: 'verified', checkedAt: null, note: 'Built-in offline Mock; no credentials or paid API required' },
         capabilities: caps ?? null,
         ...(rhProfile ? {
           activeWorkflowId: rhProfile.activeWorkflowId ?? null,
@@ -1359,6 +1359,51 @@ export class ProviderRegistry {
       this.confirmVerified();
     } catch {
       /* profile persistence is best-effort after a paid submit */
+    }
+  }
+
+  /** Exact capability evidence is written only after a real result becomes a
+   * Take. Node detection and a returned taskId never reach this path. */
+  confirmSuccessfulRender(request: RenderRequest): void {
+    if (request.provider === 'mock') return;
+    try {
+      const cell = {
+        mode: request.mode,
+        durationSeconds: request.durationSeconds,
+        aspectRatio: request.aspectRatio,
+        megapixels: request.megapixels ?? null,
+        testedAt: new Date().toISOString(),
+        note: 'A provider result was downloaded and registered as a Take',
+      };
+      const merge = (capabilities: ProviderCapabilities): ProviderCapabilities => ({
+        ...capabilities,
+        testedCombinations: [
+          ...(capabilities.testedCombinations ?? []).filter((item) => !(item.mode === cell.mode && item.durationSeconds === cell.durationSeconds && item.aspectRatio === cell.aspectRatio && item.megapixels === cell.megapixels)),
+          cell,
+        ].slice(-50),
+      });
+      if (request.provider === 'comfyui') {
+        const profile = this.getComfyUiProfile();
+        this.persistComfyUiProfile({ ...profile, capabilities: merge(profile.capabilities) });
+        return;
+      }
+      if (this.isFrameMode(request.mode)) {
+        const profile = this.getFrameProfile();
+        if (profile?.appId === request.aiAppId) this.persistFrameProfile({ ...profile, capabilities: merge(profile.capabilities) });
+        return;
+      }
+      if (request.mode === 'vref2va') {
+        const profile = this.getVideoReferenceProfile();
+        if (profile.appId === request.aiAppId) this.persistVideoReferenceProfile({ ...profile, capabilities: merge(profile.capabilities) });
+        return;
+      }
+      const profile = this.getProfile() ?? defaultAiAppProfile();
+      const workflow = profile.apps.find((entry) => entry.appId === request.aiAppId);
+      if (workflow) {
+        this.updateWorkflowEvidence(profile, workflow.id, { capabilities: merge(workflow.capabilities ?? { supportedModes: [] }) });
+      }
+    } catch {
+      /* Evidence persistence must never invalidate an already-created Take. */
     }
   }
 

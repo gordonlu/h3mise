@@ -108,6 +108,7 @@ export const SCREEN_DIRECTION_LABEL: Record<ScreenDirection, string> = {
 };
 
 import type { H3Mode } from './director.js';
+import type { ShotProductionConfig } from './shot-production.js';
 
 export interface Shot {
   id: string;
@@ -130,6 +131,7 @@ export interface Shot {
   screenDirection: ScreenDirection;
   /** "I intend this reversal" — dissolves the preflight reversal warning. */
   intentionalReversal: boolean;
+  production: ShotProductionConfig;
   createdAt: string;
   updatedAt: string;
 }

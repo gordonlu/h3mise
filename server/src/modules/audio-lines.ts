@@ -263,6 +263,7 @@ export function shotAudioLineContext(p: ProjectContext, shotId: string): ShotAud
       return `${index + 1}. ${segment.startSeconds.toFixed(2)}–${segment.endSeconds.toFixed(2)}s${speaker}: ${segment.text}`;
     }),
     'Sing/speak exactly these words in order. Cut only at a complete phrase or silence boundary. Do not invent additional lyrics or dialogue.',
+    'If these words are generated as H3 native dialogue, the times are approximate rather than sample-accurate. Use an explicitly bound reference-audio workflow and local conform when exact onset is required.',
   ].join('\n');
   return { line, segments, text };
 }
@@ -352,4 +353,3 @@ export async function audioLineWaveform(p: ProjectContext, ffmpeg: Ffmpeg, lineI
   const relPath = relative(p.root, outPath).split(sep).join('/');
   return { relPath, url: `/api/file/${encodeURIComponent(relPath)}` };
 }
-

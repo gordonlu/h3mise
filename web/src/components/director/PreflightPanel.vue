@@ -3,8 +3,10 @@ import { computed, ref } from 'vue';
 import type { PreflightReport, PromptVersion, ProviderStatus } from '@h3mise/shared';
 import { H3_MODE_LABEL } from '@h3mise/shared';
 import { t } from '../../stores/locale';
+import SubmissionPreviewPanel from './SubmissionPreviewPanel.vue';
 
 const props = defineProps<{
+  shotId: string;
   reports: PreflightReport[];
   prompt: PromptVersion | null;
   provider: ProviderStatus | null;
@@ -22,7 +24,12 @@ const busy = ref('');
 const effectiveMegapixels = computed(() => props.megapixels ?? 1);
 const megapixelsLabel = computed(() => effectiveMegapixels.value === 1 ? '1.0 MP' : `${effectiveMegapixels.value} MP`);
 const latestMatchingReport = computed(() => props.prompt
-  ? props.reports.find((report) => report.promptVersionId === props.prompt?.id) ?? null
+  ? props.reports.find((report) => report.promptVersionId === props.prompt?.id && (!report.payload || (
+    report.payload.providerId === (props.provider?.id ?? 'runninghub')
+    && report.payload.durationSeconds === props.durationSeconds
+    && report.payload.aspectRatio === props.aspectRatio
+    && (report.payload.providerId === 'mock' || report.payload.megapixels === effectiveMegapixels.value)
+  ))) ?? null
   : null);
 const visibleReports = computed(() => latestMatchingReport.value ? [latestMatchingReport.value] : []);
 const matchingReportCount = computed(() => props.prompt
@@ -147,6 +154,16 @@ function modeLabel(mode: string): string {
         <span class="muted take-count">{{ t('shot.workspace.oneNewTake') }}</span>
       </div>
     </div>
+
+    <SubmissionPreviewPanel
+      :shot-id="shotId"
+      :prompt="prompt"
+      :provider-id="provider?.id ?? 'runninghub'"
+      :duration-seconds="durationSeconds"
+      :aspect-ratio="aspectRatio"
+      :megapixels="megapixels"
+      :payload="latestMatchingReport?.payload"
+    />
 
     <button class="primary render-btn" :disabled="busy !== '' || !prompt || !renderReady" @click="render">
       {{ busy === 'render' ? t('shot.preflight.submitting') : renderReady ? t('shot.workspace.generateOneTake') : !latestMatchingReport ? t('shot.preflight.runCurrentCheckFirst') : canRender && !providerSupportsPrompt ? t('shot.workspace.providerModeUnsupported') : t('shot.preflight.generateAfterPass') }}

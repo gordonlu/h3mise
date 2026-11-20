@@ -233,13 +233,16 @@ function subjectDefinitions(ctx: CompileContext, num: ReturnType<typeof numberRe
   // label stays unresolved later in the prompt. Body stays in Chinese.
   const lines: string[] = [];
   const primary = ctx.plan.subject.primarySubject.trim();
-  const identities = num.pictures.filter((p) => p.binding.roles.includes('identity'));
+  const identities = identityGroups(num);
   const { pictureSubject } = ctx.mode === 'ref2va' ? subjectMap(num) : { pictureSubject: new Map<string, number>() };
   if (identities.length) {
-    for (const { binding, tag } of identities) {
-      const n = pictureSubject.get(tag);
+    for (const group of identities) {
+      const first = group[0]!;
+      const n = pictureSubject.get(first.tag);
       if (!n) continue;
-      lines.push(`<Subject ${n}> 是 ${referenceSubjectName(binding, identities.length === 1 ? primary : '')}，其外观以 ${tag} 为准。`);
+      const name = referenceSubjectName(first.binding, identities.length === 1 || first.binding.targetEntityId === ctx.shot.primaryCharacterId ? primary : '');
+      if (group.length === 1) lines.push(`<Subject ${n}> 是 ${name}，其外观以 ${first.tag} 为准。`);
+      else lines.push(`<Subject ${n}> 是 ${name}；这是同一人物，只出现一次，其身份、全身、服装、姿势或表情由 ${group.map((item) => item.tag).join('、')} 共同定义。`);
     }
   } else if (primary) {
     lines.push(`<Subject 1> 是 ${primary}。`);
@@ -301,7 +304,12 @@ function retentionAnalysis(ctx: CompileContext, num: ReturnType<typeof numberRef
     .map(({ binding, tag }) => {
       const label = binding.label ? `（${binding.label}）` : '';
       const { mark, why } = binding.type === 'audio'
-        ? { mark: 'reference', why: '仅参考其声音特质，不直接复制信号' }
+        ? (() => {
+            const policy = binding.audioPolicy;
+            if (!policy) return { mark: 'reference', why: '仅参考其声音特质，不直接复制信号' };
+            const range = policy.startSeconds !== null && policy.endSeconds !== null ? `，明确范围为 ${policy.startSeconds.toFixed(2)}–${policy.endSeconds.toFixed(2)}s` : '';
+            return { mark: policy.mode, why: `按用户确认的音频用途处理${range}` };
+          })()
         : marker(binding);
       const keep = binding.preserve.length ? `；需保留：${binding.preserve.join('、')}` : '';
       return `- ${tag}${label}: ${mark} - ${why}${keep}`;
@@ -313,13 +321,38 @@ function retentionAnalysis(ctx: CompileContext, num: ReturnType<typeof numberRef
 /** Subject numbering shared by subjectDefinitions and detailedDescription.
  * The first identity picture is Subject 1; every remaining picture gets a
  * stable distinct subject number in provider input order. */
+function identityGroups(num: ReturnType<typeof numberReferences>): Array<Array<{ binding: ReferenceBinding; tag: string }>> {
+  const groups = new Map<string, Array<{ binding: ReferenceBinding; tag: string }>>();
+  for (const picture of num.pictures.filter((item) => item.binding.roles.includes('identity'))) {
+    const key = picture.binding.targetEntityId ?? picture.binding.sourceEntityId ?? `binding:${picture.binding.id}`;
+    const group = groups.get(key) ?? [];
+    group.push(picture);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 function subjectMap(num: ReturnType<typeof numberReferences>): { pictureSubject: Map<string, number>; hasPrimary: boolean } {
   const pictureSubject = new Map<string, number>();
-  const firstIdentity = num.pictures.find((picture) => picture.binding.roles.includes('identity'));
-  if (firstIdentity) pictureSubject.set(firstIdentity.tag, 1);
+  const groups = identityGroups(num);
+  const firstGroup = groups[0];
+  if (firstGroup) for (const picture of firstGroup) pictureSubject.set(picture.tag, 1);
+  const numbers = new Map<string, number>();
   let next = 2;
   for (const { binding, tag } of num.pictures) {
-    if (tag === firstIdentity?.tag) continue;
+    if (pictureSubject.has(tag)) continue;
+    if (binding.roles.includes('identity')) {
+      const key = binding.targetEntityId ?? binding.sourceEntityId ?? `binding:${binding.id}`;
+      const assigned = numbers.get(key);
+      if (assigned) {
+        pictureSubject.set(tag, assigned);
+        continue;
+      }
+      numbers.set(key, next);
+      pictureSubject.set(tag, next);
+      next += 1;
+      continue;
+    }
     pictureSubject.set(tag, next);
     next += 1;
   }
@@ -372,9 +405,11 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
       })()
     : '';
   const primaryTag = subjects && plan.subject.primarySubject.trim() ? '<Subject 1>' : '';
-  const identitySubjects = num.pictures
-    .filter((picture) => picture.binding.roles.includes('identity'))
-    .map(({ binding, tag }) => `<Subject ${subjects?.pictureSubject.get(tag)}> ${referenceSubjectName(binding, '')}`);
+  const identitySubjects = identityGroups(num)
+    .map((group) => {
+      const first = group[0]!;
+      return `<Subject ${subjects?.pictureSubject.get(first.tag)}> ${referenceSubjectName(first.binding, '')}`;
+    });
   const subjectValue = identitySubjects.length
     ? identitySubjects.join('；')
     : plan.subject.primarySubject.trim() ? `${primaryTag} ${plan.subject.primarySubject.trim()}`.trim() : '';
@@ -386,6 +421,8 @@ function detailedDescription(ctx: CompileContext, num: ReturnType<typeof numberR
     ...(startFrameLine ? [startFrameLine] : []),
     ...(endFrameLine ? [endFrameLine] : []),
     ...(continuityLine ? [continuityLine] : []),
+    line('Shot', ctx.shot.title),
+    line('Narrative intent', ctx.shot.purpose),
     line('Director style', ctx.directorStyle ?? ''),
     ...narrativeContextLines(ctx),
     line('Subject', subjectValue),
@@ -488,9 +525,11 @@ function identityControlLines(
   const identities = num.pictures.filter((picture) => picture.binding.roles.includes('identity'));
   if (identities.length < 2) return [];
 
-  const cast = identities.map(({ binding, tag }) => {
-    const subjectTag = `<Subject ${subjects.pictureSubject.get(tag)}>`;
-    return `${subjectTag} ${referenceSubjectName(binding, '')}`;
+  const groups = identityGroups(num);
+  const cast = groups.map((group) => {
+    const first = group[0]!;
+    const subjectTag = `<Subject ${subjects.pictureSubject.get(first.tag)}>`;
+    return `${subjectTag} ${referenceSubjectName(first.binding, '')}`;
   });
   const lines = [
     `Cast lock: 画面中的人物集合严格等于以下 ${cast.length} 位：${cast.join('、')}；每位只出现一次，保持各自身份，不合并、不复制、不生成替身或相似人物。`,
@@ -503,7 +542,7 @@ function identityControlLines(
 
   const aspectRatio = ctx.plan.generation.aspectRatio || ctx.shot.aspectRatio;
   const distantWide = /wide|全景|远景/i.test(ctx.plan.camera.shotSizeStart);
-  if (aspectRatio === '9:16' && identities.length >= 3 && distantWide) {
+  if (aspectRatio === '9:16' && groups.length >= 3 && distantWide) {
     const owner = ctx.plan.subject.primaryMotionOwner.trim();
     const ownerEntry = identities.find(({ binding }) => referenceSubjectName(binding, '').toLocaleLowerCase() === owner.toLocaleLowerCase());
     const ownerTag = ownerEntry ? `<Subject ${subjects.pictureSubject.get(ownerEntry.tag)}> ${owner}` : owner;

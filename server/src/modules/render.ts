@@ -25,6 +25,8 @@ import { getShot, updateShot, advanceShotStatus, advanceTo } from './shots.js';
 import { getPrompt } from './prompt.js';
 import { getMedia, insertMedia } from './assets.js';
 import { createTake, getTake } from './takes.js';
+import { runTakeQuality } from './take-quality.js';
+import { recoveryPlanForJob } from './shot-production.js';
 
 interface JobRow {
   id: string;
@@ -49,7 +51,7 @@ interface JobRow {
 }
 
 export function jobFromRow(r: JobRow): RenderJob {
-  return {
+  const job: RenderJob = {
     id: r.id,
     projectId: r.project_id ?? '',
     shotId: r.shot_id,
@@ -70,14 +72,16 @@ export function jobFromRow(r: JobRow): RenderJob {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+  return job;
 }
 
 function withTake(p: ProjectContext, job: RenderJob): RenderJob {
-  if (!job.takeId) return { ...job, take: null };
+  const failureAdvice = recoveryPlanForJob(p, job);
+  if (!job.takeId) return { ...job, take: null, failureAdvice };
   try {
-    return { ...job, take: getTake(p, job.takeId) };
+    return { ...job, take: getTake(p, job.takeId), failureAdvice };
   } catch {
-    return { ...job, take: null };
+    return { ...job, take: null, failureAdvice };
   }
 }
 
@@ -530,6 +534,9 @@ export class RenderQueue {
     if (job.status !== 'FAILED' && job.status !== 'CANCELLED') {
       throw new Error(`job is ${job.status} 鈥?only FAILED or CANCELLED jobs can be retried`);
     }
+    if (job.provider === 'runninghub' && /(?:^|\D)805(?:\D|$)/.test(job.error ?? '')) {
+      throw new Error('RunningHub 805 不允许重试同一任务；请查看降 MP、缩短时长或同机位拆段方案，修改参数后重新确认');
+    }
     const p = await this.pipelineCtx(ownerProjectId);
     if (!p) throw new Error('project unavailable for retry');
     if (!job.requestSnapshot) throw new Error('cannot retry: request snapshot missing');
@@ -924,6 +931,12 @@ export class RenderQueue {
       localVideoPath: rel,
       duration: info.durationSeconds ?? job.requestSnapshot?.durationSeconds ?? 0,
     }, this.ffmpeg);
+    if (job.requestSnapshot && job.provider !== 'mock') this.registry.confirmSuccessfulRender?.(job.requestSnapshot);
+    try {
+      await runTakeQuality(p, this.ffmpeg, take.id);
+    } catch (error) {
+      console.warn('[take-quality] mechanical analysis unavailable:', error instanceof Error ? error.message : error);
+    }
     this.saveStatus(job.projectId, job.id, 'LOCAL_READY', { finishedAt: new Date().toISOString(), cost, takeId: take.id });
     this.bus.emit({ type: 'render.job.succeeded', projectId: job.projectId, jobId: job.id, shotId: job.shotId, takeId: take.id });
     this.bus.emit({ type: 'take.created', takeId: take.id, shotId: job.shotId });

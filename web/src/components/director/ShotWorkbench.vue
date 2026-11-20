@@ -17,6 +17,7 @@ import PromptPanel from './PromptPanel.vue';
 import PreflightPanel from './PreflightPanel.vue';
 import TakesPanel from './TakesPanel.vue';
 import ReferencesPanel from './ReferencesPanel.vue';
+import ShotProductionPanel from './ShotProductionPanel.vue';
 import VideoPlayer from '../VideoPlayer.vue';
 import GuideStepper from '../GuideStepper.vue';
 import { t as tr } from '../../stores/locale';
@@ -284,7 +285,7 @@ const parsedMissingFields = computed(() => {
 });
 
 function latestPrompt() {
-  return sDetail.value?.prompts.at(-1) ?? null;
+  return sDetail.value?.prompts.filter((prompt) => prompt.stage === 'final').at(-1) ?? null;
 }
 
 function mediaOf(assetId: string): MediaAsset | null {
@@ -307,6 +308,10 @@ const firstFrameThumb = computed(() => {
 
 async function loadMedia() {
   media.value = await get<MediaAsset[]>('/api/assets/media');
+}
+
+async function reloadReferenceState() {
+  await Promise.all([s.load(), loadMedia()]);
 }
 
 /** Run an AI action; when an external agent is attached the request is
@@ -450,14 +455,15 @@ async function doRender(promptId: string) {
       const first = binding.roles.includes('first_frame');
       const last = binding.roles.includes('last_frame');
       if (mode === 'vref2va' || mode === 'faceswap') return binding.type === 'video' || binding.type === 'image';
-      if (mode === 'ref2va') return !first && !last;
+      if (mode === 'ref2va') return binding.type === 'image' || binding.type === 'audio';
       if (mode === 'i2va') return first;
       if (mode === 'l2va') return last;
       if (mode === 'fl2va') return first || last;
       return false;
     });
     const provider = activeProvider.value;
-    const preflightReport = (sDetail.value?.preflights ?? []).find((item) => item.promptVersionId === promptId) ?? null;
+    const preflightReport = await s.runPreflight(promptId, providerId.value, megapixels.value, sShot.value?.durationSeconds);
+    if (preflightReport.blocked) throw new Error(tr('shot.production.preflight.blocked'));
     const paid = usePaidAction();
     await paid.confirm(
       {
@@ -629,7 +635,7 @@ function refreshShotAndRepairExpiredDuplicateGate(): Promise<void> {
   shotRefresh = (async () => {
     await s.load();
     const detail = sDetail.value;
-    const prompt = detail?.prompts.at(-1);
+    const prompt = detail?.prompts.filter((item) => item.stage === 'final').at(-1);
     const matchingReport = prompt
       ? detail?.preflights.find((item) => item.promptVersionId === prompt.id)
       : null;
@@ -772,6 +778,12 @@ function localizeRequirement(value: string): string {
         <label class="ctl">
           <span class="ctl-label">{{ tr('shot.duration') }}</span>
           <input v-model.number="sShot.durationSeconds" type="number" min="1" max="15" class="dur" :title="tr('shot.durationTitle')" placeholder="12" @change="s.updateShot({ durationSeconds: sShot?.durationSeconds ?? 12 })" />
+        </label>
+        <label class="ctl" :title="tr('shot.production.aspectHint')">
+          <span class="ctl-label">{{ tr('shot.production.aspect') }}</span>
+          <select :value="sShot.aspectRatio" @change="s.updateShot({ aspectRatio: ($event.target as HTMLSelectElement).value })">
+            <option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option><option>1:1</option>
+          </select>
         </label>
         <label v-if="activeProvider?.id === 'runninghub'" class="ctl">
           <span class="ctl-label">{{ tr('shot.outputPixels') }}</span>
@@ -945,11 +957,16 @@ function localizeRequirement(value: string): string {
             :bindings="sDetail?.bindings ?? []"
             :media="media"
             :current-mode="sShot.h3Mode ?? 't2va'"
+            :aspect-ratio="sShot.aspectRatio"
+            :provider-id="providerId"
+            :entities="sDetail?.entities ?? []"
             :upload-path="assetUploadPath"
             :on-add="(input) => guarded(() => s.addBinding(input), tr('shot.toast.referenceBound'))"
             :on-update="s.updateBinding"
             :on-remove="(id: string) => guarded(() => s.removeBinding(id), tr('shot.toast.referenceRemoved'))"
+            @changed="reloadReferenceState"
           />
+          <ShotProductionPanel :shot="sShot" @updated="s.load" />
         </section>
 
         <section id="sec-prompt" class="flow-section">
@@ -973,6 +990,7 @@ function localizeRequirement(value: string): string {
             <strong>{{ tr('shot.tab.preflight') }}</strong>
           </div>
           <PreflightPanel
+            :shot-id="shotId"
             :megapixels="megapixels"
             :reports="sDetail?.preflights ?? []"
             :prompt="latestPrompt()"

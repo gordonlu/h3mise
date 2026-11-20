@@ -677,6 +677,48 @@ ALTER TABLE timeline ADD COLUMN master_audio_line_id TEXT;
 `,
 });
 
+PROJECT_MIGRATIONS.push({
+  version: 27,
+  name: 'shot-production-acceptance',
+  sql: `
+ALTER TABLE shots ADD COLUMN production_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE reference_bindings ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE reference_bindings ADD COLUMN target_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL;
+ALTER TABLE reference_bindings ADD COLUMN reference_use TEXT NOT NULL DEFAULT 'general';
+ALTER TABLE reference_bindings ADD COLUMN frame_policy TEXT NOT NULL DEFAULT 'unassigned';
+ALTER TABLE reference_bindings ADD COLUMN audio_policy_json TEXT;
+ALTER TABLE prompt_versions ADD COLUMN stage TEXT NOT NULL DEFAULT 'final';
+ALTER TABLE prompt_versions ADD COLUMN reference_signature TEXT;
+ALTER TABLE preflight_reports ADD COLUMN payload_json TEXT;
+CREATE TABLE take_quality_reports (
+  id TEXT PRIMARY KEY,
+  take_id TEXT NOT NULL REFERENCES takes(id) ON DELETE CASCADE,
+  shot_id TEXT NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+  report_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_take_quality_take ON take_quality_reports(take_id, created_at);
+`,
+  apply: (db) => {
+    const rows = db.all<{ id: string; shot_id: string | null }>('SELECT id, shot_id FROM reference_bindings ORDER BY shot_id, created_at, id');
+    const positions = new Map<string, number>();
+    for (const row of rows) {
+      const scope = row.shot_id ?? '';
+      const position = (positions.get(scope) ?? 0) + 1;
+      positions.set(scope, position);
+      db.run('UPDATE reference_bindings SET position = ? WHERE id = ?', [position, row.id]);
+    }
+  },
+});
+
+PROJECT_MIGRATIONS.push({
+  version: 28,
+  name: 'prompt-production-signature',
+  sql: `
+ALTER TABLE prompt_versions ADD COLUMN production_signature TEXT;
+`,
+});
+
 export const REGISTRY_MIGRATIONS: Migration[] = [
   {
     version: 1,

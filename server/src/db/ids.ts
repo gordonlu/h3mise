@@ -31,7 +31,8 @@ export type IdKind =
   | 'aireq'
   | 'note'
   | 'audio_line'
-  | 'audio_segment';
+  | 'audio_segment'
+  | 'quality';
 
 export function nextId(db: Db, kind: IdKind): string {
   const row = db.get<{ value: string }>('SELECT value FROM kv WHERE key = ?', [`counter:${kind}`]);

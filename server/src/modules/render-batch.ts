@@ -63,7 +63,7 @@ export async function planRenderBatch(
   const shots: RenderBatchShot[] = [];
   for (const shot of listShots(p)) {
     const dependency = renderReadiness(p, shot);
-    const prompt = listPrompts(p, shot.id).at(-1) ?? null;
+    const prompt = listPrompts(p, shot.id).filter((item) => item.stage === 'final').at(-1) ?? null;
     const mode = (shot.h3Mode ?? prompt?.h3Mode ?? 't2va') as H3Mode;
     const selected = p.db.get<{ id: string; created_at: string }>("SELECT id, created_at FROM takes WHERE shot_id = ? AND status = 'selected' LIMIT 1", [shot.id]);
     const candidates = p.db.get<{ n: number; newest: string | null }>("SELECT COUNT(*) AS n, MAX(created_at) AS newest FROM takes WHERE shot_id = ? AND status = 'candidate'", [shot.id]);
@@ -147,7 +147,7 @@ export async function prepareRenderBatch(
       skipped.push({ shotId: shot.id, reason: item.reason });
       continue;
     }
-    let prompt = listPrompts(p, shot.id).at(-1) ?? null;
+    let prompt = listPrompts(p, shot.id).filter((item) => item.stage === 'final').at(-1) ?? null;
     const mode = (shot.h3Mode ?? prompt?.h3Mode ?? 't2va') as H3Mode;
     if (prompt && prompt.h3Mode !== mode && prompt.source !== 'deterministic_compiler') {
       skipped.push({ shotId: shot.id, reason: item.reason });

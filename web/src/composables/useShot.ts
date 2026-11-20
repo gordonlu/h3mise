@@ -50,7 +50,7 @@ export function useShot(shotId: string) {
 
   const shot = computed(() => detail.value?.shot ?? null);
   const latestPlan = computed(() => detail.value?.plans.at(-1) ?? null);
-  const latestPrompt = computed(() => detail.value?.prompts.at(-1) ?? null);
+  const latestPrompt = computed(() => detail.value?.prompts.filter((prompt) => prompt.stage === 'final').at(-1) ?? null);
   const selectedTake = computed(() => detail.value?.takes.find((t) => t.status === 'selected') ?? null);
 
   async function load() {
@@ -101,7 +101,7 @@ export function useShot(shotId: string) {
 
   async function render(promptVersionId: string, providerId = 'runninghub', durationSeconds?: number, megapixels?: number): Promise<RenderJob> {
     try {
-      const job = await post<RenderJob>('/api/render', { shotId, promptVersionId, providerId, durationSeconds, megapixels });
+      const job = await post<RenderJob>('/api/render', { shotId, promptVersionId, providerId, durationSeconds, megapixels, confirmed: true });
       await load();
       return job;
     } catch (error) {

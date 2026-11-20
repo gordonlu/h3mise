@@ -143,6 +143,7 @@ onMounted(() => project.refreshProjects());
                   <select v-model="form.defaultAspectRatio">
                     <option>16:9</option>
                     <option>9:16</option>
+                    <option>3:4</option>
                     <option>4:3</option>
                     <option>1:1</option>
                   </select>

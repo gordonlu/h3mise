@@ -14,6 +14,14 @@ const emit = defineEmits<{
   cancel: [job: RenderJob];
   theater: [key: string];
 }>();
+
+function recoverySuggestion(suggestion: NonNullable<RenderJob['failureAdvice']>['suggestions'][number]): string {
+  return t(`shot.production.recovery.${suggestion.key}`, {
+    mp: suggestion.megapixels ?? '',
+    duration: suggestion.durationSeconds ?? '',
+    count: suggestion.segments?.length ?? '',
+  });
+}
 </script>
 
 <template>
@@ -35,7 +43,12 @@ const emit = defineEmits<{
         <code :title="job.providerTaskId">{{ job.providerTaskId }}</code>
       </div>
       <div v-if="job.error" class="error mono">{{ job.error.slice(0, 400) }}</div>
-      <div v-if="['FAILED', 'CANCELLED'].includes(job.status)" class="job-actions">
+      <div v-if="job.failureAdvice" class="recovery">
+        <strong>{{ t('shot.production.recovery.title') }}</strong>
+        <p>{{ t('shot.production.recovery.summary') }}</p>
+        <ul><li v-for="suggestion in job.failureAdvice.suggestions" :key="suggestion.key">{{ recoverySuggestion(suggestion) }}</li></ul>
+      </div>
+      <div v-if="['FAILED', 'CANCELLED'].includes(job.status) && !job.failureAdvice" class="job-actions">
         <button v-if="job.providerTaskId" class="sm" :title="t('queue.syncHint')" @click="emit('retry', job)">{{ t('queue.syncCloud') }}</button>
         <button v-else class="sm" @click="emit('retry', job)">{{ t('queue.resubmit') }}</button>
       </div>
@@ -62,4 +75,7 @@ const emit = defineEmits<{
 .task-ref code { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .error { min-width: 0; max-width: 100%; color: var(--bad); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; background: rgba(217, 99, 92, 0.08); padding: 8px 9px; border-radius: 6px; }
 .job-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.recovery { color: var(--warn); background: var(--bg-subtle); border: 1px dashed var(--line-2); border-radius: 6px; padding: 9px; font-size: 11px; }
+.recovery p { color: var(--text-2); line-height: 1.5; }
+.recovery ul { margin: 0; padding-left: 18px; color: var(--text-2); line-height: 1.6; }
 </style>

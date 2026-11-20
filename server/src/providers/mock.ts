@@ -15,11 +15,12 @@ const CAPS: ProviderCapabilities = {
   supportedModes: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', 'faceswap'],
   minDuration: 1,
   maxDuration: 15,
-  supportedAspectRatios: ['16:9', '9:16', '4:3', '1:1'],
+  supportedAspectRatios: ['16:9', '9:16', '4:3', '3:4', '1:1'],
   supportedResolutions: ['720p', '1080p'],
-  maxImageRefs: 3,
+  maxImageRefs: 9,
   maxVideoRefs: 1,
-  maxAudioRefs: 1,
+  maxAudioRefs: 3,
+  maxTotalRefs: 12,
   audioSupported: true,
 };
 
@@ -29,6 +30,8 @@ interface MockTask {
   startAt: number; // epoch ms when the task begins rendering
   duration: number;
   label: string;
+  aspectRatio: string;
+  cleanPlate?: boolean;
 }
 
 export class MockProvider implements VideoProvider {
@@ -74,6 +77,8 @@ export class MockProvider implements VideoProvider {
       startAt: Date.now() + 1200,
       duration,
       label: `Mock ${request.mode.toUpperCase()} · ${request.prompt.slice(0, 40)}`,
+      aspectRatio: request.aspectRatio,
+      cleanPlate: request.prompt.includes('surveillance_clean_plate'),
     };
     await writeFile(this.taskPath(id), JSON.stringify(task), 'utf8');
     return { providerTaskId: id };
@@ -95,7 +100,8 @@ export class MockProvider implements VideoProvider {
     if (st.status !== 'SUCCEEDED') throw new ProviderError('mock task not finished', 'download', st);
     const outPath = join(this.tasksDir, '..', `${handle.providerTaskId}.mp4`);
     try {
-      await this.ffmpeg.syntheticVideo(outPath, task.duration, task.label);
+      const sizes: Record<string, string> = { '16:9': '1280x720', '9:16': '720x1280', '4:3': '960x720', '3:4': '720x960', '1:1': '720x720' };
+      await this.ffmpeg.syntheticVideo(outPath, task.duration, task.cleanPlate ? '' : task.label, sizes[task.aspectRatio] ?? '1280x720');
     } catch (e) {
       throw new ProviderError('mock render failed: ' + (e instanceof Error ? e.message : e), 'download');
     }

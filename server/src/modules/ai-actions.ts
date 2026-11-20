@@ -475,7 +475,7 @@ ${PLAN_SCHEMA_HINT}`,
     }
     case 'compile_prompt': {
       if (!shotId) throw new Error('shotId required');
-      const current = promptMod.listPrompts(ctx, shotId).at(-1);
+      const current = promptMod.listPrompts(ctx, shotId).filter((prompt) => prompt.stage === 'final').at(-1);
       if (!current) throw new Error('请先从镜头设计生成或手动输入一版提示词');
       return {
         system: `你是专业的 MiniMax H3 视频提示词编辑，严格遵循 H3 官方提示词规范。

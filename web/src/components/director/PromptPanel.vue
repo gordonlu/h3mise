@@ -98,12 +98,13 @@ async function copy(text: string) {
         <div class="spread prompt-head">
           <div class="row wrap">
             <span class="badge accent no-dot">{{ modeLabel(pv.h3Mode) }}</span>
+            <span class="badge no-dot" :class="pv.stage === 'final' ? 'ok' : 'warn'">{{ pv.stage }}</span>
             <span class="badge no-dot">{{ sourceLabel(pv.source) }}</span>
             <span class="muted mono">{{ pv.id }}</span>
             <span class="muted">{{ new Date(pv.createdAt).toLocaleString() }}</span>
           </div>
           <div class="row prompt-actions">
-            <button class="sm ghost" :disabled="busy !== ''" :title="t('shot.prompt.reviewAndEditTitle')" @click="startEdit(pv)">{{ t('shot.prompt.reviewAndEdit') }}</button>
+            <button v-if="pv.stage === 'final'" class="sm ghost" :disabled="busy !== ''" :title="t('shot.prompt.reviewAndEditTitle')" @click="startEdit(pv)">{{ t('shot.prompt.reviewAndEdit') }}</button>
             <button class="sm ghost" @click="copy(pv.text)">{{ t('shot.common.copy') }}</button>
           </div>
         </div>
@@ -122,6 +123,7 @@ async function copy(text: string) {
           </div>
         </div>
         <pre v-else class="prompt-text">{{ pv.text || t('shot.prompt.emptyPrompt') }}</pre>
+        <div v-if="pv.stage !== 'final'" class="prompt-review-note">{{ t('shot.production.prompt.workingDraft', { stage: pv.stage }) }}</div>
       </div>
       <div v-if="!prompts.length" class="muted">{{ t('shot.prompt.noPrompts') }}</div>
     </div>

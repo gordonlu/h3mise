@@ -3,7 +3,7 @@
 // bindings; frame dependency, Takes, preflight and continuity start fresh.
 
 import type { DirectorPlanVersion, PromptVersion, ReferenceBinding, Shot } from '@h3mise/shared';
-import { get, post } from '../api/client';
+import { get, patch, post } from '../api/client';
 import { useStudioStore } from '../stores/studio';
 import { useToastStore } from '../stores/toast';
 import { t } from '../stores/locale';
@@ -39,12 +39,13 @@ export function useDuplicateShot() {
       screenDirection: source.screenDirection,
       intentionalReversal: source.intentionalReversal,
     });
+    await patch(`/api/shots/${encodeURIComponent(created.id)}`, { production: source.production });
 
     const latestPlan = detail.plans.at(-1);
     if (latestPlan) {
       await post(`/api/shots/${encodeURIComponent(created.id)}/plans`, { plan: latestPlan.plan, source: 'manual' });
     }
-    const latestPrompt = detail.prompts.at(-1);
+    const latestPrompt = detail.prompts.filter((prompt) => prompt.stage === 'final').at(-1);
     if (latestPrompt) {
       await post(`/api/shots/${encodeURIComponent(created.id)}/prompts/raw`, {
         text: latestPrompt.text,
@@ -61,6 +62,10 @@ export function useDuplicateShot() {
         ignore: binding.ignore,
         label: binding.label,
         shotId: created.id,
+        targetEntityId: binding.targetEntityId,
+        referenceUse: binding.referenceUse,
+        framePolicy: binding.framePolicy,
+        audioPolicy: binding.audioPolicy,
       });
     }
 

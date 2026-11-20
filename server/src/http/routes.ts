@@ -6,7 +6,7 @@ import type { Context } from 'hono';
 import { createReadStream, statSync } from 'node:fs';
 import { stream, streamSSE } from 'hono/streaming';
 import { Readable } from 'node:stream';
-import { H3_MODES, emptyDirectorPlan } from '@h3mise/shared';
+import { H3_MODES, cctvWallClock, emptyDirectorPlan } from '@h3mise/shared';
 import type { AppEvent, H3Mode, CanvasConnectRequest } from '@h3mise/shared';
 import type { ProjectStore } from '../project-store.js';
 import type { EventBus } from '../events.js';
@@ -43,6 +43,8 @@ import * as productionMod from '../modules/production.js';
 import * as videoAnalysisMod from '../modules/video-analysis.js';
 import * as breakdownMod from '../modules/reference-breakdown.js';
 import * as filmCheckMod from '../modules/film-check.js';
+import * as shotProductionMod from '../modules/shot-production.js';
+import * as takeQualityMod from '../modules/take-quality.js';
 import * as canvasMod from '../modules/canvas.js';
 import type { AutoProduceService } from '../modules/auto-produce.js';
 import { serveMedia } from './media-route.js';
@@ -166,6 +168,7 @@ export function buildRoutes(services: AppServices): App {
     const body = await c.req.json().catch(() => ({}));
     if (body.format !== undefined && !['single_shot', 'sequence', 'story'].includes(String(body.format))) return c.json({ error: 'invalid project format' }, 400);
     if (body.defaultAspectRatio !== undefined && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(String(body.defaultAspectRatio))) return c.json({ error: 'invalid defaultAspectRatio' }, 400);
+    if (body.defaultProvider !== undefined && !['runninghub', 'comfyui', 'mock'].includes(String(body.defaultProvider))) return c.json({ error: 'invalid defaultProvider' }, 400);
     const requestedDuration = body.defaultDurationSeconds === undefined ? undefined : Number(body.defaultDurationSeconds);
     if (requestedDuration !== undefined && (!Number.isFinite(requestedDuration) || requestedDuration < 1 || requestedDuration > 15)) return c.json({ error: 'invalid defaultDurationSeconds' }, 400);
     return projectSwitchGate('interactive-project', async () => {
@@ -176,6 +179,7 @@ export function buildRoutes(services: AppServices): App {
         defaultAspectRatio: body.defaultAspectRatio,
         visualStyle: body.visualStyle,
         defaultDurationSeconds: requestedDuration,
+        defaultProvider: body.defaultProvider ?? services.providers.providerMode,
       });
       await services.store.open(meta.id);
       services.providers.refresh();
@@ -260,6 +264,8 @@ export function buildRoutes(services: AppServices): App {
 
   app.get('/api/guide/project', (c) => c.json(guideMod.projectGuideSummary(p(c))));
   app.get('/api/production', async (c) => c.json(await productionMod.productionOverview(p(c), services.providers)));
+  app.get('/api/production/audio', (c) => c.json(shotProductionMod.getProjectAudio(p(c))));
+  app.patch('/api/production/audio', async (c) => c.json(shotProductionMod.updateProjectAudio(p(c), await c.req.json())));
   app.get('/api/auto-produce/plan', async (c) => c.json(await services.auto.buildPlan(p(c))));
   app.get('/api/auto-produce/runs', (c) => c.json(services.auto.listRuns(p(c))));
   app.get('/api/auto-produce/active', (c) => c.json(services.auto.getActiveRun(p(c))));
@@ -525,6 +531,52 @@ export function buildRoutes(services: AppServices): App {
     assetsMod.ensureShotEntityImageBindings(ctx, shot);
     return c.json(shot);
   });
+  app.get('/api/shots/:id/production', (c) => c.json({
+    production: shotsMod.getShot(p(c), c.req.param('id')).production,
+    projectAudio: shotProductionMod.getProjectAudio(p(c)),
+  }));
+  app.patch('/api/shots/:id/production', async (c) => c.json({
+    production: shotProductionMod.updateShotProduction(p(c), c.req.param('id'), await c.req.json()),
+    shot: shotsMod.getShot(p(c), c.req.param('id')),
+  }));
+  app.post('/api/shots/:id/segments', async (c) => {
+    const body = await c.req.json();
+    if (!['continuous', 'time_jump', 'surveillance_skip'].includes(body.kind)) return c.json({ error: 'invalid segment kind' }, 400);
+    const result = shotProductionMod.createLockedCameraSegment(p(c), c.req.param('id'), body);
+    services.bus.emit({ type: 'project.updated' });
+    return c.json(result, 201);
+  });
+  app.get('/api/shots/:id/cctv-preview', (c) => {
+    const shot = shotsMod.getShot(p(c), c.req.param('id'));
+    const times = [0, shot.durationSeconds / 2, shot.durationSeconds].map((offset) => ({
+      offsetSeconds: offset,
+      timestamp: cctvWallClock(shot.production.cctv.startTime, offset + shot.production.segment.timeJumpSeconds).toISOString(),
+    }));
+    return c.json({
+      overlay: shot.production.cctv,
+      camera: shot.production.camera,
+      times,
+      method: 'post_overlay_only',
+      note: '文字由浏览器/后期 overlay 生成；视频模型只接收无文字的监控干净画面要求。',
+    });
+  });
+  app.post('/api/shots/:id/submission-preview', async (c) => {
+    const ctx = p(c);
+    const body = await c.req.json();
+    const shotId = c.req.param('id');
+    const promptVersionId = String(body.promptVersionId ?? promptMod.listPrompts(ctx, shotId).filter((prompt) => prompt.stage === 'final').at(-1)?.id ?? '');
+    const intent = await preflightMod.intentFromInput(ctx, services.providers, {
+      shotId,
+      promptVersionId,
+      providerId: String(body.providerId ?? ctx.config.default_provider ?? 'mock'),
+      durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
+      aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
+      resolution: body.resolution,
+      megapixels: body.megapixels !== undefined ? Number(body.megapixels) : undefined,
+      providerParams: body.providerParams ?? {},
+    });
+    return c.json(shotProductionMod.buildSubmissionPreview(ctx, services.providers, intent));
+  });
   app.post('/api/shots/:id/render-dependency/resolve', (c) => {
     const ctx = p(c);
     const readiness = shotsMod.resolvePreviousTakeFrame(ctx, c.req.param('id'));
@@ -764,6 +816,17 @@ export function buildRoutes(services: AppServices): App {
       },
     ), 201);
   });
+  app.post('/api/shots/:id/prompts/artifacts', async (c) => {
+    const body = await c.req.json();
+    if (!['rewrite', 't2va', 'ref2va', 'audio_reference'].includes(body.stage)) return c.json({ error: 'invalid prompt artifact stage' }, 400);
+    return c.json(promptMod.createPromptArtifact(p(c), {
+      shotId: c.req.param('id'),
+      stage: body.stage,
+      h3Mode: body.mode ?? 't2va',
+      text: String(body.text ?? ''),
+      source: body.source === 'manual' ? 'manual' : 'ai_compiler',
+    }), 201);
+  });
 
   // --- preflight -----------------------------------------------------------
 
@@ -773,7 +836,7 @@ export function buildRoutes(services: AppServices): App {
     const body = await c.req.json();
     const report = await preflightMod.runBasicPreflight(ctx, services.providers, {
       shotId,
-      promptVersionId: String(body.promptVersionId ?? promptMod.listPrompts(ctx, shotId).at(-1)?.id ?? ''),
+      promptVersionId: String(body.promptVersionId ?? promptMod.listPrompts(ctx, shotId).filter((prompt) => prompt.stage === 'final').at(-1)?.id ?? ''),
       providerId: String(body.providerId ?? ctx.config.default_provider ?? 'runninghub'),
       megapixels: body.megapixels !== undefined ? Number(body.megapixels) : undefined,
       durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
@@ -796,6 +859,9 @@ export function buildRoutes(services: AppServices): App {
     const shotId = String(body.shotId);
     const promptVersionId = String(body.promptVersionId);
     const providerId = String(body.providerId ?? ctx.config.default_provider ?? 'runninghub');
+    if (providerId === 'runninghub' && body.confirmed !== true) {
+      return c.json({ error: 'RunningHub 付费提交必须在查看最终 payload、参考顺序、成本和风险后明确确认' }, 400);
+    }
     // P0-2: build the EXACT render intent (client overrides included), gate
     // on that intent, and only then submit. The intent hash is persisted on
     // the job so any later re-submission can be audited against it.
@@ -900,6 +966,12 @@ export function buildRoutes(services: AppServices): App {
     }
     return c.json({ ok: true });
   });
+  app.get('/api/render/:id/recovery-plan', (c) => {
+    const job = services.queue.get(c.req.param('id'));
+    if (!job) return c.json({ error: 'job not found' }, 404);
+    if (!job.failureAdvice) return c.json({ error: '该任务没有 805 恢复方案' }, 409);
+    return c.json(job.failureAdvice);
+  });
 
   // --- takes ---------------------------------------------------------------
 
@@ -920,6 +992,7 @@ export function buildRoutes(services: AppServices): App {
         prompt: String(form.get('prompt') ?? '').trim() || undefined,
       },
     }, services.ffmpeg);
+    try { await takeQualityMod.runTakeQuality(ctx, services.ffmpeg, take.id); } catch { /* Imported Take remains available with unverified quality. */ }
     services.bus.emit({ type: 'shot.updated', shotId: take.shotId, status: shotsMod.getShot(ctx, take.shotId).status });
     return c.json(take, 201);
   });
@@ -930,6 +1003,23 @@ export function buildRoutes(services: AppServices): App {
   });
 
   app.get('/api/takes/:id', (c) => c.json(takesMod.getTake(p(c), c.req.param('id'))));
+  app.get('/api/takes/:id/quality', (c) => {
+    const ctx = p(c);
+    return c.json({ latest: takeQualityMod.latestTakeQuality(ctx, c.req.param('id')), history: takeQualityMod.listTakeQuality(ctx, c.req.param('id')) });
+  });
+  app.post('/api/takes/:id/quality', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const observations = Array.isArray(body.aiObservations) ? body.aiObservations : [];
+    if (observations.length && body.source !== 'ai_inference') return c.json({ error: 'AI 观察必须显式标记 source=ai_inference' }, 400);
+    return c.json(await takeQualityMod.runTakeQuality(p(c), services.ffmpeg, c.req.param('id'), observations), 201);
+  });
+  app.patch('/api/takes/:id/quality/:key', async (c) => {
+    const body = await c.req.json();
+    return c.json(takeQualityMod.overrideTakeQuality(p(c), c.req.param('id'), c.req.param('key') as takeQualityMod.AiQualityObservation['key'], {
+      status: body.status,
+      message: String(body.message ?? ''),
+    }));
+  });
   app.patch('/api/takes/:id', async (c) => c.json(takesMod.updateTake(p(c), c.req.param('id'), await c.req.json())));
   app.post('/api/takes/:id/select', (c) => {
     const ctx = p(c);
@@ -1174,6 +1264,15 @@ export function buildRoutes(services: AppServices): App {
 
   app.get('/api/assets/bindings', (c) => c.json(assetsMod.listBindings(p(c), c.req.query('shotId') ?? null)));
   app.post('/api/assets/bindings', async (c) => c.json(assetsMod.createBinding(p(c), await c.req.json()), 201));
+  app.post('/api/assets/bindings/reorder', async (c) => {
+    const body = await c.req.json();
+    return c.json(assetsMod.reorderBindings(p(c), String(body.shotId ?? ''), Array.isArray(body.ids) ? body.ids.map(String) : []));
+  });
+  app.post('/api/assets/bindings/:id/prepare', async (c) => {
+    const body = await c.req.json();
+    if (!['crop', 'outpaint'].includes(body.policy)) return c.json({ error: 'policy 必须是 crop 或 outpaint' }, 400);
+    return c.json(await shotProductionMod.prepareReferenceImage(p(c), services.ffmpeg, c.req.param('id'), body.policy), 201);
+  });
   app.patch('/api/assets/bindings/:id', async (c) => c.json(assetsMod.updateBinding(p(c), c.req.param('id'), await c.req.json())));
   app.delete('/api/assets/bindings/:id', (c) => {
     assetsMod.deleteBinding(p(c), c.req.param('id'));

@@ -308,7 +308,7 @@ export async function applyResult(
           } else if (value.kind === 'prompt' && typeof value.text === 'string') {
             const source = row.action === 'repair_prompt'
               ? getPrompt(ctx, String(body.promptId))
-              : listPrompts(ctx, String(body.shotId)).at(-1);
+              : listPrompts(ctx, String(body.shotId)).filter((prompt) => prompt.stage === 'final').at(-1);
             if (!source) throw new Error('source prompt not found');
             if (!value.text.trim()) throw new Error('prompt must not be empty');
             const version = createPrompt(ctx, {

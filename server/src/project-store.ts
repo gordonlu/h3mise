@@ -4,7 +4,7 @@ import { cp, mkdir, readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import type { ProjectConfig, ProjectFormat, ProjectMeta } from '@h3mise/shared';
+import type { ProjectConfig, ProjectFormat, ProjectMeta, VideoProviderId } from '@h3mise/shared';
 import { Db, jget } from './db/sqlite.js';
 import { migrate } from './db/migrate.js';
 import { PROJECT_MIGRATIONS, REGISTRY_MIGRATIONS } from './db/schema.js';
@@ -121,6 +121,7 @@ export interface CreateProjectInput {
   defaultAspectRatio?: string;
   visualStyle?: string;
   defaultDurationSeconds?: number;
+  defaultProvider?: VideoProviderId;
 }
 
 function slugify(title: string): string {
@@ -168,7 +169,7 @@ export class ProjectStore {
       format: input.format,
       default_aspect_ratio: input.defaultAspectRatio ?? '16:9',
       visual_style: input.visualStyle ?? '',
-      default_provider: 'runninghub',
+      default_provider: input.defaultProvider ?? 'runninghub',
       default_video_model: 'minimax_h3',
       default_duration_seconds: input.defaultDurationSeconds ?? 12,
     };

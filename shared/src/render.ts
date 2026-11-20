@@ -64,6 +64,7 @@ export interface RenderJob {
   takeId: string | null;
   /** Convenience projection joined by the server; null until a Take exists. */
   take?: Take | null;
+  failureAdvice?: import('./shot-production.js').RenderRecoveryPlan | null;
   createdAt: string;
   updatedAt: string;
 }

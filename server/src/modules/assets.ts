@@ -2,13 +2,15 @@
 // CharacterState (current look), MediaAsset + ReferenceBinding (roles).
 // Shot-driven requirements computed here too.
 
-import type { CharacterState, Entity, EntityKind, MediaAsset, MediaKind, ReferenceBinding, ReferenceRole, Shot } from '@h3mise/shared';
+import type { AudioReferencePolicy, CharacterState, Entity, EntityKind, MediaAsset, MediaKind, ReferenceBinding, ReferenceFramePolicy, ReferenceRole, ReferenceUse, Shot } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 
 const ENTITY_KINDS = new Set<EntityKind>(['character', 'scene', 'prop', 'vehicle', 'creature']);
 const REFERENCE_ROLES = new Set<ReferenceRole>(['identity', 'costume', 'environment', 'motion', 'body_motion', 'timing', 'camera_motion', 'lighting', 'style', 'audio', 'first_frame', 'last_frame']);
+const REFERENCE_USES = new Set<ReferenceUse>(['general', 'face', 'full_body', 'costume', 'pose', 'expression', 'three_view', 'seated', 'scene_plate', 'lighting', 'camera', 'performance']);
+const FRAME_POLICIES = new Set<ReferenceFramePolicy>(['unassigned', 'crop', 'outpaint', 'reference_only']);
 
 function assertEntityKind(kind: unknown): asserts kind is EntityKind {
   if (!ENTITY_KINDS.has(kind as EntityKind)) throw new Error('invalid entity kind');
@@ -360,6 +362,11 @@ interface RefRow {
   label: string;
   shot_id: string | null;
   source_entity_id: string | null;
+  position: number;
+  target_entity_id: string | null;
+  reference_use: string;
+  frame_policy: string;
+  audio_policy_json: string | null;
   created_at: string;
 }
 
@@ -374,40 +381,60 @@ function refFromRow(r: RefRow): ReferenceBinding {
     label: r.label,
     shotId: r.shot_id,
     sourceEntityId: r.source_entity_id ?? null,
+    position: r.position,
+    targetEntityId: r.target_entity_id ?? null,
+    referenceUse: (r.reference_use || 'general') as ReferenceUse,
+    framePolicy: (r.frame_policy || 'unassigned') as ReferenceFramePolicy,
+    audioPolicy: jget<AudioReferencePolicy | null>(r.audio_policy_json, null),
     createdAt: r.created_at,
   };
 }
 
 export function listBindings(p: ProjectContext, shotId?: string | null): ReferenceBinding[] {
   const rows = shotId === undefined
-    ? p.db.all<RefRow>('SELECT * FROM reference_bindings ORDER BY created_at, id')
-    : p.db.all<RefRow>('SELECT * FROM reference_bindings WHERE shot_id IS ? ORDER BY created_at, id', [shotId]);
+    ? p.db.all<RefRow>('SELECT * FROM reference_bindings ORDER BY position, created_at, id')
+    : p.db.all<RefRow>('SELECT * FROM reference_bindings WHERE shot_id IS ? ORDER BY position, created_at, id', [shotId]);
   return rows.map(refFromRow);
 }
 
 export function createBinding(
   p: ProjectContext,
-  input: { assetId: string; roles: ReferenceRole[]; preserve?: string[]; ignore?: string[]; label?: string; shotId?: string | null; sourceEntityId?: string | null },
+  input: { assetId: string; roles: ReferenceRole[]; preserve?: string[]; ignore?: string[]; label?: string; shotId?: string | null; sourceEntityId?: string | null; targetEntityId?: string | null; referenceUse?: ReferenceUse; framePolicy?: ReferenceFramePolicy; audioPolicy?: AudioReferencePolicy | null },
 ): ReferenceBinding {
   if (!Array.isArray(input.roles) || input.roles.some((role) => !REFERENCE_ROLES.has(role))) throw new Error('invalid reference role');
   const asset = getMedia(p, input.assetId);
+  if (input.referenceUse && !REFERENCE_USES.has(input.referenceUse)) throw new Error('invalid reference use');
+  if (input.framePolicy && !FRAME_POLICIES.has(input.framePolicy)) throw new Error('invalid reference frame policy');
+  if (input.targetEntityId) getEntity(p, input.targetEntityId);
+  if (input.shotId && asset.kind === 'image') {
+    const count = p.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM reference_bindings WHERE shot_id = ? AND type = 'image'", [input.shotId])?.n ?? 0;
+    if (count >= 9) throw new Error('每个 Shot 最多绑定 9 张参考图');
+  }
   const id = nextId(p.db, 'ref');
   const now = new Date().toISOString();
+  const position = (p.db.get<{ n: number }>('SELECT COALESCE(MAX(position), 0) + 1 AS n FROM reference_bindings WHERE shot_id IS ?', [input.shotId ?? null])?.n ?? 1);
   p.db.run(
-    'INSERT INTO reference_bindings (id, asset_id, type, roles_json, preserve_json, ignore_json, label, shot_id, source_entity_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, input.assetId, asset.kind, j(input.roles), j(input.preserve ?? []), j(input.ignore ?? []), input.label ?? asset.label, input.shotId ?? null, input.sourceEntityId ?? null, now],
+    'INSERT INTO reference_bindings (id, asset_id, type, roles_json, preserve_json, ignore_json, label, shot_id, source_entity_id, position, target_entity_id, reference_use, frame_policy, audio_policy_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, input.assetId, asset.kind, j(input.roles), j(input.preserve ?? []), j(input.ignore ?? []), input.label ?? asset.label, input.shotId ?? null, input.sourceEntityId ?? null, position, input.targetEntityId ?? null, input.referenceUse ?? 'general', input.framePolicy ?? 'unassigned', input.audioPolicy ? j(input.audioPolicy) : null, now],
   );
   return listBindings(p, input.shotId ?? null).find((b) => b.id === id)!;
 }
 
-export function updateBinding(p: ProjectContext, id: string, patch: Partial<Pick<ReferenceBinding, 'roles' | 'preserve' | 'ignore' | 'label' | 'shotId'>>): ReferenceBinding {
+export function updateBinding(p: ProjectContext, id: string, patch: Partial<Pick<ReferenceBinding, 'roles' | 'preserve' | 'ignore' | 'label' | 'shotId' | 'targetEntityId' | 'referenceUse' | 'framePolicy' | 'audioPolicy'>>): ReferenceBinding {
   if (patch.roles !== undefined && (!Array.isArray(patch.roles) || patch.roles.some((role) => !REFERENCE_ROLES.has(role)))) throw new Error('invalid reference role');
+  if (patch.referenceUse !== undefined && !REFERENCE_USES.has(patch.referenceUse)) throw new Error('invalid reference use');
+  if (patch.framePolicy !== undefined && !FRAME_POLICIES.has(patch.framePolicy)) throw new Error('invalid reference frame policy');
+  if (patch.targetEntityId) getEntity(p, patch.targetEntityId);
   const colMap: Record<string, string> = {
     roles: 'roles_json',
     preserve: 'preserve_json',
     ignore: 'ignore_json',
     label: 'label',
     shotId: 'shot_id',
+    targetEntityId: 'target_entity_id',
+    referenceUse: 'reference_use',
+    framePolicy: 'frame_policy',
+    audioPolicy: 'audio_policy_json',
   };
   const cols: string[] = [];
   const vals: unknown[] = [];
@@ -416,7 +443,7 @@ export function updateBinding(p: ProjectContext, id: string, patch: Partial<Pick
     const col = colMap[k];
     if (!col) continue;
     cols.push(`${col} = ?`);
-    vals.push(k === 'roles' || k === 'preserve' || k === 'ignore' ? j(v) : v);
+    vals.push(k === 'roles' || k === 'preserve' || k === 'ignore' || k === 'audioPolicy' ? j(v) : v);
   }
   if (cols.length) {
     vals.push(id);
@@ -424,6 +451,18 @@ export function updateBinding(p: ProjectContext, id: string, patch: Partial<Pick
   }
   const r = p.db.get<RefRow>('SELECT * FROM reference_bindings WHERE id = ?', [id])!;
   return refFromRow(r);
+}
+
+export function reorderBindings(p: ProjectContext, shotId: string, orderedIds: string[]): ReferenceBinding[] {
+  const current = listBindings(p, shotId);
+  const known = new Set(current.map((binding) => binding.id));
+  if (orderedIds.length !== current.length || new Set(orderedIds).size !== current.length || orderedIds.some((id) => !known.has(id))) {
+    throw new Error('参考图排序必须包含当前 Shot 的全部绑定，且不能重复');
+  }
+  p.db.tx(() => {
+    orderedIds.forEach((id, index) => p.db.run('UPDATE reference_bindings SET position = ? WHERE id = ? AND shot_id = ?', [index + 1, id, shotId]));
+  });
+  return listBindings(p, shotId);
 }
 
 export function deleteBinding(p: ProjectContext, id: string): void {

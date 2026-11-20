@@ -495,7 +495,7 @@ export class Ffmpeg {
     outPath: string,
     start: number,
     end: number,
-    options?: { audio?: { volume?: number; mute?: boolean; normalize?: boolean }; ensureAudio?: boolean; videoFilters?: string[] },
+    options?: { audio?: { volume?: number; mute?: boolean; normalize?: boolean }; ensureAudio?: boolean; videoFilters?: string[]; variableFrameRate?: boolean },
   ): Promise<void> {
     await mkdir(dirname(outPath), { recursive: true });
     const audio = options?.audio;
@@ -538,6 +538,7 @@ export class Ffmpeg {
     const videoFilters = (options?.videoFilters ?? []).map((filter) => filter.trim()).filter(Boolean);
     if (videoFilters.length) args.push('-vf', videoFilters.join(','));
     args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
+    if (options?.variableFrameRate) args.push('-vsync', 'vfr');
     if (keepSourceAudio && sourceHasAudio) {
       // Keep the ORIGINAL audio: default stream selection picks 0:a.
       args.push('-c:a', 'aac');
@@ -559,7 +560,7 @@ export class Ffmpeg {
   async concat(
     clips: string[],
     outPath: string,
-    options?: { transitions?: Array<{ type: 'cut' | 'fade' | 'dissolve' | 'none'; duration: number }> },
+    options?: { transitions?: Array<{ type: 'cut' | 'fade' | 'dissolve' | 'none'; duration: number }>; variableFrameRate?: boolean },
   ): Promise<void> {
     await mkdir(dirname(outPath), { recursive: true });
     if (clips.length === 0) throw new Error('concat: no clips');
@@ -586,7 +587,7 @@ export class Ffmpeg {
       filter += clips.map((_, i) => `[v${i}][a${i}]`).join('') + `concat=n=${clips.length}:v=1:a=1[vout][aout]`;
       await run(
         'ffmpeg',
-        ['-y', ...inputs, '-filter_complex', filter, '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', '-movflags', '+faststart', outPath],
+        ['-y', ...inputs, '-filter_complex', filter, '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', ...(options?.variableFrameRate ? ['-vsync', 'vfr'] : []), '-movflags', '+faststart', outPath],
         outPath,
       );
       return;
@@ -644,7 +645,7 @@ export class Ffmpeg {
     }
     await run(
       'ffmpeg',
-      ['-y', ...inputs, '-filter_complex', filter.replace(/;+$/, ''), '-map', `[${prevV}]`, '-map', `[${prevA}]`, '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', '-movflags', '+faststart', outPath],
+      ['-y', ...inputs, '-filter_complex', filter.replace(/;+$/, ''), '-map', `[${prevV}]`, '-map', `[${prevA}]`, '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', ...(options?.variableFrameRate ? ['-vsync', 'vfr'] : []), '-movflags', '+faststart', outPath],
       outPath,
     );
   }
@@ -665,6 +666,32 @@ export class Ffmpeg {
       '-t', String(Math.max(0.1, durationSeconds)),
       '-movflags', '+faststart',
       outPath,
+    ], videoPath);
+  }
+
+  /** Mix one project-level BGM into the finished timeline. Ducking is driven
+   * by the actual dialogue/master track, not rebuilt inside each Shot. */
+  async mixProjectBgm(
+    videoPath: string,
+    bgmPath: string,
+    outPath: string,
+    durationSeconds: number,
+    options: { bgmGainDb: number; duckingEnabled: boolean; duckingGainDb: number },
+  ): Promise<void> {
+    await mkdir(dirname(outPath), { recursive: true });
+    const bgmGain = Math.pow(10, options.bgmGainDb / 20).toFixed(6);
+    const duckRatio = Math.max(1, Math.min(20, Math.pow(10, Math.abs(options.duckingGainDb) / 20))).toFixed(3);
+    const filter = options.duckingEnabled
+      ? `[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=2[voice][side];[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=${bgmGain}[music];[music][side]sidechaincompress=threshold=0.02:ratio=${duckRatio}:attack=20:release=300[ducked];[voice][ducked]amix=inputs=2:duration=first:normalize=0[a]`
+      : `[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[voice];[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=${bgmGain}[music];[voice][music]amix=inputs=2:duration=first:normalize=0[a]`;
+    await run('ffmpeg', [
+      '-y', '-hide_banner', '-v', 'error', '-nostdin',
+      '-i', videoPath,
+      '-stream_loop', '-1', '-i', bgmPath,
+      '-filter_complex', filter,
+      '-map', '0:v:0', '-map', '[a]',
+      '-c:v', 'copy', '-c:a', 'aac', '-t', String(Math.max(0.1, durationSeconds)),
+      '-movflags', '+faststart', outPath,
     ], videoPath);
   }
 

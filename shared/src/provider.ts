@@ -37,6 +37,21 @@ export interface ProviderCapabilities {
   audioReuse?: 'unknown' | 'reference_only' | 'resings' | 'copy';
   /** v2v/faceswap workflows normally keep the source video's audio track. */
   preservesSourceAudio?: boolean;
+  /** Optional exact, user-recorded evidence. Detection never populates this. */
+  testedCombinations?: Array<{
+    mode: H3Mode;
+    durationSeconds: number;
+    aspectRatio: string;
+    megapixels: number | null;
+    testedAt: string;
+    note?: string;
+  }>;
+  costEstimate?: {
+    cnyPerTask: number | null;
+    cnyPerSecond: number | null;
+    failureCharge: 'charged' | 'not_charged' | 'unknown';
+    note?: string;
+  };
 }
 
 export interface AiAppNode {

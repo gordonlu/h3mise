@@ -26,5 +26,6 @@ export interface PreflightReport {
   risk: 'LOW' | 'MEDIUM' | 'HIGH';
   blocked: boolean;
   aiSemanticRun: boolean;
+  payload?: import('./shot-production.js').SubmissionPayloadPreview | null;
   createdAt: string;
 }

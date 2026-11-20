@@ -91,6 +91,15 @@ export type ReferenceRole =
   | 'first_frame'
   | 'last_frame';
 
+export type ReferenceUse = 'general' | 'face' | 'full_body' | 'costume' | 'pose' | 'expression' | 'three_view' | 'seated' | 'scene_plate' | 'lighting' | 'camera' | 'performance';
+export type ReferenceFramePolicy = 'unassigned' | 'crop' | 'outpaint' | 'reference_only';
+
+export interface AudioReferencePolicy {
+  mode: 'reference' | 'fully_copy' | 'partially_copy' | 'resings';
+  startSeconds: number | null;
+  endSeconds: number | null;
+}
+
 export interface ReferenceBinding {
   id: string;
   assetId: string;
@@ -105,5 +114,10 @@ export interface ReferenceBinding {
   shotId: string | null;
   /** Entity whose main image is automatically kept in this shot binding. */
   sourceEntityId?: string | null;
+  position?: number;
+  targetEntityId?: string | null;
+  referenceUse?: ReferenceUse;
+  framePolicy?: ReferenceFramePolicy;
+  audioPolicy?: AudioReferencePolicy | null;
   createdAt: string;
 }

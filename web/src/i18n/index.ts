@@ -6,6 +6,7 @@ import { workflowManualTranslations, workflowTranslations } from './workflow';
 import { shotTranslations } from './shot';
 import { studioTranslations } from './studio';
 import { welcomeTranslations } from './welcome';
+import { productionTranslations } from './production';
 
 export const zh = {
   welcome: welcomeTranslations.zh,
@@ -1003,7 +1004,7 @@ export const dictionaries: Record<Locale, typeof zh> = { zh, en, ja };
 export function translate(locale: Locale, path: string, vars?: Record<string, string | number>): string {
   const dict = dictionaries[locale] ?? zh;
   const val = path.split('.').reduce<unknown>((acc, k) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[k] : undefined), dict);
-  let out = typeof val === 'string' ? val : workflowTranslations[locale]?.[path] ?? workflowManualTranslations[locale]?.[path] ?? shotTranslations[locale]?.[path] ?? studioTranslations[locale]?.[path] ?? path;
+  let out = typeof val === 'string' ? val : workflowTranslations[locale]?.[path] ?? workflowManualTranslations[locale]?.[path] ?? productionTranslations[locale]?.[path] ?? shotTranslations[locale]?.[path] ?? studioTranslations[locale]?.[path] ?? path;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) out = out.replaceAll(`{${k}}`, String(v));
   }

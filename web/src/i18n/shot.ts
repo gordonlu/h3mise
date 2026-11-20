@@ -40,6 +40,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
     "shot.dependency.planned": "计划依赖",
     "shot.dependency.previousTake": "上一 Take",
     "shot.dependency.manualFrame": "手动首帧",
+    "shot.bindPreviousLastFrame": "绑定上一镜头尾帧",
 
     "shot.asset.entity": "实体",
     "shot.asset.mainImage": "{name} 主图",
@@ -733,6 +734,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
   },
 
   "en": {
+    "shot.bindPreviousLastFrame": "Bind previous Take's last frame",
     "shot.tab.workspace": "Workspace",
     "shot.tab.plan": "Director Plan",
     "shot.tab.references": "References",
@@ -1466,6 +1468,7 @@ export const shotTranslations: Record<'zh' | 'en' | 'ja', Record<string, string>
   },
 
   "ja": {
+    "shot.bindPreviousLastFrame": "前の Take の末尾フレームをバインド",
     "shot.tab.workspace": "ワークスペース",
     "shot.tab.plan": "演出計画",
     "shot.tab.references": "参考素材",

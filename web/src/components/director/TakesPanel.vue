@@ -7,6 +7,7 @@ import { confirmDialog } from '../../stores/confirm';
 import { t as tr } from '../../stores/locale';
 import VideoPlayer from '../VideoPlayer.vue';
 import VideoAnalysisFilmstrip from '../VideoAnalysisFilmstrip.vue';
+import TakeQualityPanel from './TakeQualityPanel.vue';
 
 interface EntityLite {
   id: string;
@@ -530,6 +531,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <span class="muted">机械证据，不等于内容通过；仍需看片、听音频后记录判断。</span>
         </div>
         <VideoAnalysisFilmstrip :take-id="activeTake.id" />
+        <TakeQualityPanel :take-id="activeTake.id" />
       </div>
     </div>
 

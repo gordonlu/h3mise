@@ -1,7 +1,7 @@
 // Prompt module — PRD §18-21. PromptVersions are immutable; the compiler
 // never overwrites history. Raw Prompt path bypasses DirectorPlan entirely.
 
-import type { H3Mode, PromptSource, PromptVersion } from '@h3mise/shared';
+import type { H3Mode, PromptSource, PromptStage, PromptVersion, ReferenceBinding } from '@h3mise/shared';
 import { cameraPlanWarnings, describeCameraPlan, describeShotComposer, normalizeCameraPlan } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import { nextId } from '../db/ids.js';
@@ -14,6 +14,7 @@ import { directorStyleAiContext, directorStylePromptDirective } from './director
 import { getBeat, getStory } from './story.js';
 import { getShotComposer } from './shot-composer.js';
 import { shotAudioLineContext } from './audio-lines.js';
+import { productionPromptDirectives } from './production-directives.js';
 
 interface PvRow {
   id: string;
@@ -21,11 +22,29 @@ interface PvRow {
   source: string;
   director_plan_version_id: string | null;
   h3_mode: string;
+  stage: string;
+  reference_signature: string | null;
+  production_signature: string | null;
   text: string;
   source_take_id: string | null;
   revision_reason: string;
   preserved_aspects_json: string;
   created_at: string;
+}
+
+export function referenceSignatureV2(bindings: ReferenceBinding[]): string {
+  return `v2:${JSON.stringify(bindings.map((binding) => ({
+    id: binding.id,
+    targetEntityId: binding.targetEntityId ?? null,
+    sourceEntityId: binding.sourceEntityId ?? null,
+    referenceUse: binding.referenceUse ?? 'general',
+    roles: binding.roles,
+    audioPolicy: binding.audioPolicy ?? null,
+  })))}`;
+}
+
+export function shotProductionSignature(shot: { production: unknown; durationSeconds: number; aspectRatio: string }): string {
+  return JSON.stringify({ production: shot.production, durationSeconds: shot.durationSeconds, aspectRatio: shot.aspectRatio });
 }
 
 function pvFromRow(r: PvRow): PromptVersion {
@@ -35,6 +54,9 @@ function pvFromRow(r: PvRow): PromptVersion {
     source: r.source as PromptSource,
     directorPlanVersionId: r.director_plan_version_id,
     h3Mode: r.h3_mode as H3Mode,
+    stage: (r.stage || 'final') as PromptStage,
+    referenceSignature: r.reference_signature ?? null,
+    productionSignature: r.production_signature ?? null,
     text: r.text,
     sourceTakeId: r.source_take_id,
     revisionReason: r.revision_reason,
@@ -59,6 +81,7 @@ export function createPrompt(
     shotId: string;
     source: PromptSource;
     h3Mode: H3Mode;
+    stage?: PromptStage;
     text: string;
     directorPlanVersionId?: string | null;
     sourceTakeId?: string | null;
@@ -74,17 +97,38 @@ export function createPrompt(
   }
   const id = nextId(p.db, 'prompt');
   const now = new Date().toISOString();
+  const stage = input.stage ?? 'final';
+  if (!['rewrite', 't2va', 'ref2va', 'audio_reference', 'final'].includes(stage)) throw new Error('invalid prompt stage');
+  const productionSignature = shotProductionSignature(getShot(p, input.shotId));
+  const signature = referenceSignatureV2(listBindings(p, input.shotId).filter((binding) => {
+    const first = binding.roles.includes('first_frame');
+    const last = binding.roles.includes('last_frame');
+    if (input.h3Mode === 'vref2va' || input.h3Mode === 'faceswap') return binding.type === 'image' || binding.type === 'video';
+    if (input.h3Mode === 'ref2va') return binding.type === 'image' || binding.type === 'audio';
+    if (input.h3Mode === 'i2va') return first;
+    if (input.h3Mode === 'l2va') return last;
+    if (input.h3Mode === 'fl2va') return first || last;
+    return false;
+  }));
   p.db.run(
     `INSERT INTO prompt_versions (
-       id, shot_id, source, director_plan_version_id, h3_mode, text,
-       source_take_id, revision_reason, preserved_aspects_json, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       id, shot_id, source, director_plan_version_id, h3_mode, stage, reference_signature,
+       production_signature, text, source_take_id, revision_reason, preserved_aspects_json, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      id, input.shotId, input.source, input.directorPlanVersionId ?? null, input.h3Mode, input.text,
-      sourceTakeId, input.revisionReason?.trim() ?? '', JSON.stringify(input.preservedAspects ?? []), now,
+      id, input.shotId, input.source, input.directorPlanVersionId ?? null, input.h3Mode, stage, signature,
+      productionSignature, input.text, sourceTakeId, input.revisionReason?.trim() ?? '',
+      JSON.stringify(input.preservedAspects ?? []), now,
     ],
   );
   return getPrompt(p, id);
+}
+
+export function createPromptArtifact(
+  p: ProjectContext,
+  input: { shotId: string; stage: Exclude<PromptStage, 'final'>; h3Mode: H3Mode; text: string; source?: PromptSource },
+): PromptVersion {
+  return createPrompt(p, { ...input, source: input.source ?? 'ai_compiler' });
 }
 
 /**
@@ -133,7 +177,7 @@ export function compilePrompt(p: ProjectContext, shotId: string, mode: H3Mode, d
     storyBeat: shot.storyBeatId ? getBeat(p, shot.storyBeatId) : null,
   };
   const audioLine = shotAudioLineContext(p, shotId);
-  const text = [compileDeterministic(ctx, mode), audioLine?.text ?? ''].filter(Boolean).join('\n\n');
+  const text = [compileDeterministic(ctx, mode), audioLine?.text ?? '', productionPromptDirectives(shot.production, refs)].filter(Boolean).join('\n\n');
   return createPrompt(p, {
     shotId,
     source: 'deterministic_compiler',

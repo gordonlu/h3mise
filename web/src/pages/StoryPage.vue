@@ -402,7 +402,7 @@ onMounted(async () => {
         </label>
         <label class="field"><span>{{ t('pages.settings.aspectRatio') }}</span>
           <select v-model="proposal.aspectRatio">
-            <option>16:9</option><option>9:16</option><option>4:3</option><option>1:1</option>
+            <option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option><option>1:1</option>
           </select>
         </label>
         <label class="field"><span>{{ t('pages.story.plannedDuration') }}</span><input v-model.number="proposal.plannedDurationSeconds" type="number" min="10" max="3600" /></label>

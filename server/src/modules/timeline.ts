@@ -9,11 +9,23 @@ import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
 import type { Ffmpeg } from '../ffmpeg.js';
-import { getShot } from './shots.js';
+import { getShot, listShots } from './shots.js';
 import { getMedia } from './assets.js';
 import { timelineLookFilters } from './timeline-looks.js';
 import { getTake } from './takes.js';
 import { activeEpisodeId } from './story.js';
+import { getProjectAudio } from './shot-production.js';
+import { cctvFontFile, cctvVideoFilters } from './cctv.js';
+
+export function cctvSegmentOffsetSeconds(p: ProjectContext, shot: ReturnType<typeof getShot>): number {
+  const groupId = shot.production.segment.groupId;
+  const previousDuration = groupId
+    ? listShots(p)
+        .filter((candidate) => candidate.production.segment.groupId === groupId && candidate.production.segment.index < shot.production.segment.index)
+        .reduce((sum, candidate) => sum + candidate.durationSeconds, 0)
+    : 0;
+  return previousDuration + (shot.production.segment.kind === 'time_jump' ? shot.production.segment.timeJumpSeconds : 0);
+}
 
 interface ClipRow {
   id: string;
@@ -246,12 +258,17 @@ export async function renderLookPreview(
   const timeSeconds = Number.isFinite(requested)
     ? Math.min(Math.max(start, requested), Math.max(start, end - 0.05))
     : (start + end) / 2;
+  const shot = getShot(p, clip.shotId);
   const outPath = join(
     p.paths.cache,
     'look-previews',
-    `${clip.id}-${look}-${timeSeconds.toFixed(1).replace('.', '_')}.jpg`,
+    `${clip.id}-${look}-${shot.production.cctv.enabled ? 'cctv-' : ''}${timeSeconds.toFixed(1).replace('.', '_')}.jpg`,
   );
-  await ffmpeg.previewFrame(abs, outPath, timeSeconds, timelineLookFilters(look));
+  const info = await ffmpeg.probe(abs);
+  const cctvFilters = shot.production.cctv.enabled
+    ? cctvVideoFilters(shot.production.cctv, shot.production.segment, { trimInSeconds: timeSeconds, width: info.width ?? 1280, height: info.height ?? 720, fps: info.fps, preview: true, segmentOffsetSeconds: cctvSegmentOffsetSeconds(p, shot), fontFile: cctvFontFile() })
+    : [];
+  await ffmpeg.previewFrame(abs, outPath, timeSeconds, [...timelineLookFilters(look), ...cctvFilters]);
   return {
     clipId,
     look,
@@ -330,13 +347,26 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
       throw new Error(`clip ${clip.id}: take ${clip.takeId} is no longer selected — reselect the shot and re-add the clip`);
     }
     const abs = p.resolveProjectPath(take.localVideoPath);
+    const shot = getShot(p, clip.shotId);
+    const info = await ffmpeg.probe(abs);
+    const cctvFilters = shot.production.cctv.enabled || shot.production.segment.kind === 'surveillance_skip'
+      ? cctvVideoFilters(shot.production.cctv, shot.production.segment, {
+          trimInSeconds: clip.trimIn,
+          width: info.width ?? 1280,
+          height: info.height ?? 720,
+          fps: info.fps,
+          segmentOffsetSeconds: cctvSegmentOffsetSeconds(p, shot),
+          fontFile: cctvFontFile(),
+        })
+      : [];
     const trimOut = clip.trimOut ?? take.duration;
     if (trimOut - clip.trimIn < 0.1) throw new Error(`clip ${clip.id}: invalid trim`);
     const tmp = join(p.paths.cache, `clip-${clip.id}.mp4`);
     await ffmpeg.trim(abs, tmp, clip.trimIn, trimOut, {
       audio: clip.audio,
       ensureAudio: true,
-      videoFilters: timelineLookFilters(clip.look),
+      videoFilters: [...timelineLookFilters(clip.look), ...cctvFilters],
+      variableFrameRate: shot.production.segment.kind === 'surveillance_skip',
     });
     clips.push(tmp);
     onProgress?.(clips.length, tl.clips.length);
@@ -346,24 +376,32 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
     duration: transition.duration,
   }));
   const masterLineId = tl.masterAudioLineId;
-  const concatPath = masterLineId ? `${outPath}.video.mp4` : outPath;
-  await ffmpeg.concat(clips, concatPath, { transitions });
+  const projectAudio = getProjectAudio(p);
+  const concatPath = masterLineId || projectAudio.bgmAssetId ? `${outPath}.video.mp4` : outPath;
+  const variableFrameRate = tl.clips.some((clip) => getShot(p, clip.shotId).production.segment.kind === 'surveillance_skip');
+  await ffmpeg.concat(clips, concatPath, { transitions, variableFrameRate });
   const durationSeconds = timelineDurationSeconds(tl.clips, (clip) => getTake(p, clip.takeId).duration);
-  if (masterLineId) {
-    try {
+  const masterPath = projectAudio.bgmAssetId ? `${outPath}.master.mp4` : outPath;
+  try {
+    if (masterLineId) {
       const line = p.db.get<{ asset_id: string; offset_seconds: number }>('SELECT asset_id, offset_seconds FROM audio_lines WHERE id = ?', [masterLineId]);
       if (!line) throw new Error('timeline master audio line no longer exists');
       const asset = getMedia(p, line.asset_id);
       await ffmpeg.replaceAudio(
         concatPath,
         p.resolveProjectPath(asset.fileName),
-        outPath,
+        masterPath,
         durationSeconds,
         Math.max(0, line.offset_seconds),
       );
-    } finally {
-      await rm(concatPath, { force: true });
     }
+    if (projectAudio.bgmAssetId) {
+      const bgm = getMedia(p, projectAudio.bgmAssetId);
+      await ffmpeg.mixProjectBgm(masterLineId ? masterPath : concatPath, p.resolveProjectPath(bgm.fileName), outPath, durationSeconds, projectAudio);
+    }
+  } finally {
+    if (concatPath !== outPath) await rm(concatPath, { force: true });
+    if (masterPath !== outPath) await rm(masterPath, { force: true });
   }
   // Forward slashes: stored rel paths must be OS-independent.
   const relPath = relative(p.root, outPath).split(sep).join('/');

@@ -54,6 +54,15 @@ const projectConfigForm = ref<Pick<ProjectConfig, 'title' | 'default_provider' |
 });
 const projectConfigDirty = ref(false);
 const savingProjectConfig = ref(false);
+const costForm = ref<{ cnyPerTask: number | null; cnyPerSecond: number | null; failureCharge: 'charged' | 'not_charged' | 'unknown'; note: string }>({ cnyPerTask: null, cnyPerSecond: null, failureCharge: 'unknown', note: '' });
+watch(() => profile.value?.capabilities.costEstimate, (value) => {
+  costForm.value = {
+    cnyPerTask: value?.cnyPerTask ?? null,
+    cnyPerSecond: value?.cnyPerSecond ?? null,
+    failureCharge: value?.failureCharge ?? 'unknown',
+    note: value?.note ?? '',
+  };
+}, { immediate: true, deep: true });
 
 watch(() => project.current?.config, (config) => {
   if (!config) return;
@@ -248,6 +257,22 @@ async function saveInstanceType(instanceType: 'default' | 'plus' | 'ultra') {
   } catch (e) {
     notice.value = errorMessage(e);
   }
+}
+
+async function saveCostEvidence() {
+  if (!profile.value) return;
+  try {
+    const activeId = profile.value.activeWorkflowId;
+    const costEstimate = { ...costForm.value };
+    profile.value = await put<AiAppProfile>('/api/providers/runninghub/profile', {
+      ...profile.value,
+      capabilities: { ...profile.value.capabilities, costEstimate },
+      apps: profile.value.apps.map((app) => app.id === activeId
+        ? { ...app, capabilities: { ...(app.capabilities ?? { supportedModes: [] }), costEstimate } }
+        : app),
+    });
+    notice.value = t('shot.production.cost.saved');
+  } catch (error) { notice.value = errorMessage(error); }
 }
 
 async function saveApiKey() {
@@ -497,7 +522,7 @@ watch(() => route.hash, async (hash) => {
           <label class="field">
             {{ t('pages.settings.aspectRatio') }}
             <select v-model="projectConfigForm.default_aspect_ratio" @change="projectConfigDirty = true">
-              <option>16:9</option><option>9:16</option><option>4:3</option><option>1:1</option>
+              <option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option><option>1:1</option>
             </select>
             <span class="muted">{{ t('pages.settings.aspectRatioHelp') }}</span>
           </label>
@@ -619,6 +644,17 @@ watch(() => route.hash, async (hash) => {
             </select>
             <span class="muted">default（24G）实测约 1.4 MP 边界；2.0 MP 建议使用 plus/ultra。显存不足时先降低 MP，再升级实例；更高显存会产生更高 RunningHub 消耗。</span>
           </label>
+          <details class="cost-evidence">
+            <summary>{{ t('shot.production.cost.title') }}</summary>
+            <div class="grid two">
+              <label class="field">{{ t('shot.production.cost.perTask') }}<input v-model.number="costForm.cnyPerTask" type="number" min="0" step="0.01" /></label>
+              <label class="field">{{ t('shot.production.cost.perSecond') }}<input v-model.number="costForm.cnyPerSecond" type="number" min="0" step="0.0001" /></label>
+            </div>
+            <label class="field">{{ t('shot.production.cost.failure') }}<select v-model="costForm.failureCharge"><option value="unknown">{{ t('shot.production.cost.unknown') }}</option><option value="charged">{{ t('shot.production.cost.charged') }}</option><option value="not_charged">{{ t('shot.production.cost.notCharged') }}</option></select></label>
+            <label class="field">{{ t('shot.production.cost.note') }}<textarea v-model="costForm.note" rows="2" :placeholder="t('shot.production.cost.notePlaceholder')"></textarea></label>
+            <button class="sm" @click="saveCostEvidence">{{ t('shot.production.cost.save') }}</button>
+            <span class="muted">{{ t('shot.production.cost.tested', { count: profile?.capabilities.testedCombinations?.length ?? 0 }) }}</span>
+          </details>
           <label class="field">
             {{ t('pages.settings.concurrency') }}
             <input type="number" min="1" max="4" :value="profile?.concurrency ?? 1" @change="saveProviderConcurrency('runninghub', Number(($event.target as HTMLInputElement).value))" />

@@ -20,27 +20,27 @@ export async function runFilmCheck(p: ProjectContext): Promise<FilmCheckResult> 
     issues.push({ severity, code, message, target });
   const shots = listShots(p);
   const timeline = getTimeline(p);
+  const timelineShots = new Set(timeline.clips.map((clip) => clip.shotId));
   let selectedTakes = 0;
 
   for (const shot of shots) {
     const takes = listTakes(p, shot.id);
     const selected = takes.find((take) => take.status === 'selected');
     if (!selected) {
-      add('error', takes.length ? 'shot.no-selected' : 'shot.no-takes', `「${shot.title}」${takes.length ? '还没有选定Take' : '还没有可用Take'}`, { kind: 'shot', shotId: shot.id });
+      const included = timelineShots.has(shot.id);
+      add(included || !timeline.clips.length ? 'error' : 'warning', takes.length ? 'shot.no-selected' : 'shot.no-takes', `「${shot.title}」${takes.length ? '还没有选定Take' : '还没有可用Take'}${included ? '' : '，未包含在当前导出中'}`, { kind: 'shot', shotId: shot.id });
       continue;
     }
     selectedTakes++;
     if (!(await fileExists(p, selected.localVideoPath))) {
-      add('error', 'take.missing-file', `「${shot.title}」选定Take的视频文件缺失`, { kind: 'shot', shotId: shot.id });
+      add(timelineShots.has(shot.id) ? 'error' : 'warning', 'take.missing-file', `「${shot.title}」选定Take的视频文件缺失`, { kind: 'shot', shotId: shot.id });
     }
   }
 
   if (!timeline.clips.length) add('error', 'timeline.empty', '时间线为空，无法导出成片', { kind: 'timeline' });
   let duration = 0;
   const takeDurations = new Map<string, number>();
-  const timelineShots = new Set<string>();
   for (const clip of timeline.clips) {
-    timelineShots.add(clip.shotId);
     let take;
     try { take = getTake(p, clip.takeId); } catch {
       add('error', 'clip.take-missing', `片段${clip.id}引用的Take不存在`, { kind: 'timeline-clip', clipId: clip.id });
@@ -61,7 +61,7 @@ export async function runFilmCheck(p: ProjectContext): Promise<FilmCheckResult> 
   duration = timelineDurationSeconds(timeline.clips, (clip) => takeDurations.get(clip.takeId) ?? 0);
   for (const shot of shots) {
     if (listTakes(p, shot.id).some((take) => take.status === 'selected') && !timelineShots.has(shot.id)) {
-      add('error', 'shot.not-on-timeline', `「${shot.title}」已选片但未加入时间线`, { kind: 'shot', shotId: shot.id });
+      add('warning', 'shot.not-on-timeline', `「${shot.title}」已选片但未加入当前导出`, { kind: 'shot', shotId: shot.id });
     }
   }
   const errors = issues.filter((issue) => issue.severity === 'error');

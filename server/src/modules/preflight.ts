@@ -12,7 +12,7 @@ import { MEGAPIXEL_PRESETS, cameraPlanWarnings, isMegapixelPreset, normalizeCame
 import type { ProjectContext } from '../project-store.js';
 import { j, jget } from '../db/sqlite.js';
 import { nextId } from '../db/ids.js';
-import { getShot, advanceShotStatus, advanceTo, renderReadiness } from './shots.js';
+import { getShot, listShots, advanceShotStatus, advanceTo, renderReadiness } from './shots.js';
 import type { Shot } from '@h3mise/shared';
 import { lintPrompt } from './prompt-lint.js';
 import { getAudioLineSilences, shotAudioLineContext } from './audio-lines.js';
@@ -46,6 +46,8 @@ export function referenceCountViolations(
     if (nAudio > 0) out.push({ key: 'ref.audio.unsupported', message: '换脸模式不接受参考音频，成片保留源视频音频' });
   }
   if (mode === 'ref2va') {
+    if (nImage > 9) out.push({ key: 'ref.image.limit', message: `每个 Shot 最多使用 9 张参考图（当前 ${nImage} 张）` });
+    if (nAudio > 3) out.push({ key: 'ref.audio.limit', message: `每个 Shot 最多使用 3 个参考音频（当前 ${nAudio} 个）` });
     if (nImage === 0) out.push({ key: 'ref.image.required', message: 'Ref2VA 至少需要一张参考图' });
     if (nVideo > 0 && caps && caps.maxVideoRefs === 0) {
       out.push({ key: 'ref.video.unsupported', message: '当前 Ref2VA 工作流不支持视频参考素材' });
@@ -71,10 +73,11 @@ function previousShot(p: ProjectContext, shot: Shot): Shot | null {
   if (!row) return null;
   return { ...getShot(p, row.id), screenDirection: (row.screen_direction as Shot['screenDirection']) ?? 'neutral' };
 }
-import { getPrompt } from './prompt.js';
-import { ensureShotEntityImageBindings, getMedia } from './assets.js';
+import { getPrompt, referenceSignatureV2, shotProductionSignature } from './prompt.js';
+import { ensureShotEntityImageBindings, getMedia, listBindings } from './assets.js';
 import { pathReadable } from '../ffmpeg.js';
 import type { ProviderRegistry } from '../providers/registry.js';
+import { buildSubmissionPreview } from './shot-production.js';
 
 /** The exact, normalized thing a render will do — preflight and submission
  * must share this one object so the paid gate cannot be bypassed. */
@@ -104,7 +107,7 @@ export function renderIntentHash(intent: RenderIntent, profileRef: { appId: stri
     aspectRatio: intent.aspectRatio,
     resolution: intent.resolution ?? null,
     megapixels: intent.megapixels ?? null,
-    references: [...intent.references].sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
+    references: intent.references,
     providerParams: Object.keys(intent.providerParams)
       .sort()
       .map((k) => [k, intent.providerParams[k]]),
@@ -140,7 +143,7 @@ export async function intentFromInput(
   const mode = input.mode ?? prompt.h3Mode ?? 't2va';
   ensureShotEntityImageBindings(p, shot, mode);
   const referenceRows = p.db
-    .all<{ id: string; asset_id: string; type: string; roles_json: string | null }>('SELECT * FROM reference_bindings WHERE shot_id = ? ORDER BY created_at, id', [input.shotId])
+    .all<{ id: string; asset_id: string; type: string; roles_json: string | null }>('SELECT * FROM reference_bindings WHERE shot_id = ? ORDER BY position, created_at, id', [input.shotId])
     .filter((row) => {
       const roles = jget<string[]>(row.roles_json ?? '[]', []);
       const first = roles.includes('first_frame');
@@ -187,6 +190,21 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   ];
 
   // Prompt
+  if (prompt.stage !== 'final') {
+    sections[0]!.checks.push({ key: 'prompt.not_final', severity: 'error', message: `当前 Prompt 是 ${prompt.stage} 工作稿，不能作为最终渲染内容；请生成 final 版本` });
+  }
+  const currentBindings = listBindings(p, shot.id).filter((binding) => intent.references.some((reference) => reference.bindingId === binding.id));
+  const currentReferenceSignature = referenceSignatureV2(currentBindings);
+  const legacyOrder = intent.references.map((reference) => reference.bindingId).join(',');
+  const signatureChanged = prompt.referenceSignature?.startsWith('v2:')
+    ? prompt.referenceSignature !== currentReferenceSignature
+    : prompt.referenceSignature != null && (prompt.referenceSignature !== legacyOrder || currentBindings.some((binding) => binding.targetEntityId || (binding.referenceUse && binding.referenceUse !== 'general') || binding.audioPolicy));
+  if (prompt.referenceSignature != null && signatureChanged) {
+    sections[0]!.checks.push({ key: 'prompt.reference_order', severity: 'error', message: '参考顺序、角色绑定、用途或音频策略已变化；旧 Prompt 的 <Picture N>/<Audio N>/<Subject N> 映射已过期，请重新编译 final Prompt' });
+  }
+  if (prompt.productionSignature != null && prompt.productionSignature !== shotProductionSignature(shot)) {
+    sections[0]!.checks.push({ key: 'prompt.production_stale', severity: 'error', message: '机位、CCTV、音频、同机位分段、时长或画幅配置在 Prompt 编译后发生了变化；旧 Prompt 不包含最新制作指令，请重新编译 final Prompt' });
+  }
   if (prompt.text.trim() === '') {
     sections[0]!.checks.push({ key: 'prompt.empty', severity: 'error', message: '提示词为空' });
   } else {
@@ -310,6 +328,15 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
         }
       }
     }
+    if (intent.providerId === 'runninghub') {
+      const verification = registry.getProfileForMode(intent.mode)?.verification.status ?? 'unconfigured';
+      if (verification === 'nodes_detected') {
+        sections[2]!.checks.push({ key: 'provider.evidence.nodes_only', severity: 'warning', message: '当前只有 nodes_detected 节点证据，不代表该 App 或参数组合已实测通过' });
+      }
+      if (intent.durationSeconds >= 15 && (intent.megapixels ?? 0) >= 1.2) {
+        sections[2]!.checks.push({ key: 'provider.workflow_805.risk', severity: 'warning', message: '15 秒 + ≥1.2 MP 属于 RunningHub 805 高风险组合：先降低 MP、缩短到 6 秒，或按同一机位拆段；805 通常没有节点级 failedReason' });
+      }
+    }
     if (provider.configured === false) {
       sections[2]!.checks.push({ key: 'provider.not_configured', severity: 'error', message: `生成服务“${provider.name}”尚未配置或验证` });
     }
@@ -336,7 +363,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   }
   const relevantIds = new Set(bindings.map((binding) => binding.bindingId));
   const bindingRows = p.db.all<{ id: string; roles_json: string | null; asset_id: string; label: string; created_at: string }>(
-    `SELECT id, roles_json, asset_id, label, created_at FROM reference_bindings WHERE shot_id = ? ORDER BY created_at, id`,
+    `SELECT id, roles_json, asset_id, label, created_at FROM reference_bindings WHERE shot_id = ? ORDER BY position, created_at, id`,
     [shot.id],
   ).filter((binding) => relevantIds.has(binding.id));
   const haveRoles = new Set<string>();
@@ -371,6 +398,47 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     for (const violation of referenceCountViolations(intent.mode, bindings, caps)) {
       sections[3]!.checks.push({ key: violation.key, severity: 'error', message: violation.message });
     }
+  }
+  const ratioNumber = (ratio: string): number => {
+    const [width = 0, height = 0] = ratio.split(':').map(Number);
+    return width > 0 && height > 0 ? width / height : 0;
+  };
+  const targetRatio = ratioNumber(intent.aspectRatio);
+  const productionBindings = bindings.map((reference) => ({
+    reference,
+    binding: listBindings(p, shot.id).find((item) => item.id === reference.bindingId),
+  }));
+  for (const { reference, binding } of productionBindings.filter((item) => item.reference.kind === 'image')) {
+    let asset: ReturnType<typeof getMedia>;
+    try { asset = getMedia(p, reference.assetId); } catch { continue; }
+    if (!asset.width || !asset.height || !targetRatio) continue;
+    const sourceRatio = asset.width / asset.height;
+    const mismatch = Math.abs(sourceRatio - targetRatio) / targetRatio > 0.02;
+    if (!mismatch) continue;
+    const description = `${binding?.label || asset.label || asset.id} 为 ${asset.width}:${asset.height}，Shot 为 ${intent.aspectRatio}`;
+    if (binding?.framePolicy === 'reference_only') {
+      sections[3]!.checks.push({ key: `ref.aspect.reference_only.${binding.id}`, severity: 'info', message: `${description}；已明确选择仅作参考，不承诺画幅适配` });
+    } else {
+      sections[3]!.checks.push({ key: `ref.aspect.choice.${binding?.id ?? reference.bindingId}`, severity: 'error', message: `${description}；请选择并生成居中裁切、模糊扩图派生素材，或明确改为仅作参考，系统不会静默处理` });
+    }
+  }
+  const hasFullWardrobe = productionBindings.some(({ binding }) => binding && ['full_body', 'costume', 'three_view'].includes(binding.referenceUse ?? 'general'));
+  const faceOnly = productionBindings.some(({ binding }) => binding && (binding.referenceUse === 'face' || /半身|头像|headshot|half.body/i.test(binding.label)));
+  if (faceOnly && !hasFullWardrobe) {
+    sections[3]!.checks.push({ key: 'ref.wardrobe.coverage', severity: 'warning', message: '当前只有脸部/半身身份参考，下半身服装没有可靠依据；请补全身或服装参考，或把构图限制在参考已覆盖范围' });
+  }
+  if (shot.production.audio.mode === 'reference_audio') {
+    const audioBindings = productionBindings.filter((item) => item.reference.kind === 'audio');
+    if (!audioBindings.length) sections[3]!.checks.push({ key: 'ref.audio.mode', severity: 'error', message: '音频策略为参考音频，但没有绑定音频' });
+    for (const { binding } of audioBindings) {
+      const policy = binding?.audioPolicy;
+      if (!policy || policy.startSeconds === null || policy.endSeconds === null || policy.endSeconds <= policy.startSeconds) {
+        sections[3]!.checks.push({ key: `ref.audio.policy.${binding?.id}`, severity: 'error', message: '参考音频必须明确 fully_copy/reference 等用途及起止时间' });
+      }
+    }
+  }
+  if (shot.production.audio.mode === 'native_dialogue' && productionBindings.some((item) => item.reference.kind === 'audio')) {
+    sections[3]!.checks.push({ key: 'ref.audio.mode_mixed', severity: 'error', message: '原生对白与参考音频策略不能混用；请明确选择一种音频生产链路' });
   }
   if (caps && intent.mode === 'faceswap') {
     const videoBinding = bindings.find((binding) => binding.kind === 'video');
@@ -572,12 +640,33 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     }
   }
 
+  if (shot.production.segment.groupId) {
+    const siblings = listShots(p).filter((item) => item.production.segment.groupId === shot.production.segment.groupId);
+    const expectedCamera = JSON.stringify(shot.production.camera);
+    const drifted = siblings.filter((item) => JSON.stringify(item.production.camera) !== expectedCamera || !item.production.camera.locked);
+    if (drifted.length) {
+      sections[7]!.checks.push({ key: 'continuity.camera_group', severity: 'error', message: `同机位组 ${shot.production.segment.groupId} 的高度、焦段、俯角或锁定状态不一致` });
+    } else {
+      sections[7]!.checks.push({ key: 'continuity.camera_group.ok', severity: 'info', message: `同机位组共 ${siblings.length} 段，物理机位定义一致` });
+    }
+    if (prompt.source === 'deterministic_compiler') {
+      const expected = `part ${shot.production.segment.index}/${shot.production.segment.count}`;
+      if (!prompt.text.includes('locked_camera_segment:') || !prompt.text.includes(expected)) {
+        sections[7]!.checks.push({ key: 'continuity.segment_prompt.stale', severity: 'error', message: `同机位分组或段序号已变化，请重新编译 final Prompt（应为 ${expected}）` });
+      }
+    }
+  }
+
   {
     const hasAudioRefs = bindings.some((binding) => binding.kind === 'audio');
     const issues = lintPrompt(prompt.text, {
       mode: intent.mode,
       hasAudioRefs,
       hasDialogue: /["“”」』]|唱|说|歌词|lyrics|dialogue/i.test(prompt.text),
+      pictureCount: bindings.filter((binding) => binding.kind === 'image').length,
+      audioCount: bindings.filter((binding) => binding.kind === 'audio').length,
+      durationSeconds: intent.durationSeconds,
+      nativeDialogue: shot.production.audio.mode === 'native_dialogue',
     });
     for (const issue of issues) {
       sections[8]!.checks.push({
@@ -649,7 +738,8 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
     }
   }
 
-  const report = finalizePreflight(p, sections, intent.shotId, intent.promptVersionId, intent.providerId, null, false);
+  const payload = buildSubmissionPreview(p, registry, intent);
+  const report = finalizePreflight(p, sections, intent.shotId, intent.promptVersionId, intent.providerId, null, false, payload);
   return report;
 }
 
@@ -661,6 +751,7 @@ export function finalizePreflight(
   providerId: string | null,
   semantic: PreflightSection[] | null,
   aiSemanticRun: boolean,
+  payload: PreflightReport['payload'] = null,
 ): PreflightReport {
   const statusFor = (s: { key: string; label: string; checks: PreflightCheck[] }): PreflightSection['status'] => {
     if (s.checks.some((c) => c.severity === 'error')) return 'fail';
@@ -675,8 +766,8 @@ export function finalizePreflight(
   const id = nextId(p.db, 'preflight');
   const now = new Date().toISOString();
   p.db.run(
-    'INSERT INTO preflight_reports (id, shot_id, prompt_version_id, provider_id, basic_json, semantic_json, risk, blocked, ai_semantic_run, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, shotId, promptVersionId, providerId, j(normalized), semantic ? j(semantic) : null, risk, blocked ? 1 : 0, aiSemanticRun ? 1 : 0, now],
+    'INSERT INTO preflight_reports (id, shot_id, prompt_version_id, provider_id, basic_json, semantic_json, risk, blocked, ai_semantic_run, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, shotId, promptVersionId, providerId, j(normalized), semantic ? j(semantic) : null, risk, blocked ? 1 : 0, aiSemanticRun ? 1 : 0, payload ? j(payload) : null, now],
   );
   const shot = getShot(p, shotId);
   if (!blocked) {
@@ -692,13 +783,14 @@ export function finalizePreflight(
     risk,
     blocked,
     aiSemanticRun,
+    payload,
     createdAt: now,
   };
 }
 
 export function listPreflightReports(p: ProjectContext, shotId: string): PreflightReport[] {
   return p.db
-    .all<{ id: string; shot_id: string; prompt_version_id: string | null; provider_id: string | null; basic_json: string; semantic_json: string | null; risk: string; blocked: number; ai_semantic_run: number; created_at: string }>(
+    .all<{ id: string; shot_id: string; prompt_version_id: string | null; provider_id: string | null; basic_json: string; semantic_json: string | null; risk: string; blocked: number; ai_semantic_run: number; payload_json: string | null; created_at: string }>(
       'SELECT * FROM preflight_reports WHERE shot_id = ? ORDER BY created_at DESC',
       [shotId],
     )
@@ -712,6 +804,7 @@ export function listPreflightReports(p: ProjectContext, shotId: string): Preflig
       risk: r.risk as PreflightReport['risk'],
       blocked: Boolean(r.blocked),
       aiSemanticRun: Boolean(r.ai_semantic_run),
+      payload: jget<PreflightReport['payload']>(r.payload_json, null),
       createdAt: r.created_at,
     }));
 }

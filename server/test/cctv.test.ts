@@ -59,6 +59,41 @@ test('CCTV Timeline export burns overlay, frame-accurate trim timecode and share
   assert.equal(project.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM takes')?.n, 1, 'CCTV export must not create or overwrite a Take');
 });
 
+
+test('CCTV filters degrade to compiled filters when drawtext/gblur/drawgrid are unavailable', () => {
+  const filters = cctvVideoFilters({
+    enabled: true, cameraLabel: 'CAM 04', location: 'Gate', startTime: '2026-01-01T08:00:00',
+    showRec: true, lowResolution: true, dotMatrix: true, blurUpscale: true,
+  }, { groupId: null, kind: 'single', index: 1, count: 1, timeJumpSeconds: 0, frameSkip: 1 }, {
+    trimInSeconds: 0, width: 640, height: 360, availableFilters: new Set(['scale']),
+  });
+  assert.ok(filters.includes('scale=214:120:flags=neighbor'));
+  assert.ok(!filters.some((filter) => filter.startsWith('drawtext=') || filter.startsWith('drawgrid=') || filter.startsWith('gblur=')));
+});
+
+
+class ReducedFilterFfmpeg extends Ffmpeg {
+  override availableFilters(): Promise<Set<string>> {
+    return Promise.resolve(new Set(['scale']));
+  }
+}
+
+test('CCTV preview and export still work when drawtext, drawgrid, and gblur are unavailable', async () => {
+  const { root, store } = await makeStore('cctv-reduced-filters');
+  roots.push(root);
+  const project = await makeProject(store, 'CCTV reduced filters');
+  const ffmpeg = new ReducedFilterFfmpeg();
+  const shot = createShot(project, { title: 'CCTV reduced', durationSeconds: 2, aspectRatio: '16:9' });
+  updateShotProduction(project, shot.id, {
+    cctv: { enabled: true, cameraLabel: 'CAM 04', location: 'Gate', startTime: '2026-01-01T08:00:00', showRec: true, lowResolution: true, dotMatrix: true, blurUpscale: true },
+  });
+  const { clip } = await makeSelectedClip(project, ffmpeg, shot);
+  const preview = await renderLookPreview(project, ffmpeg, clip.id, 'none', 1);
+  assert.ok((await readFile(project.resolveProjectPath(preview.relPath))).length > 1000);
+  const result = await exportTimeline(project, ffmpeg, 'cctv-reduced');
+  assert.ok((await readFile(result.path)).length > 1000);
+});
+
 test('surveillance frame skip preserves editorial duration while reducing decoded frames', async () => {
   const { root, store } = await makeStore('cctv-skip');
   roots.push(root);

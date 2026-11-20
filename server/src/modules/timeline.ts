@@ -266,7 +266,7 @@ export async function renderLookPreview(
   );
   const info = await ffmpeg.probe(abs);
   const cctvFilters = shot.production.cctv.enabled
-    ? cctvVideoFilters(shot.production.cctv, shot.production.segment, { trimInSeconds: timeSeconds, width: info.width ?? 1280, height: info.height ?? 720, fps: info.fps, preview: true, segmentOffsetSeconds: cctvSegmentOffsetSeconds(p, shot), fontFile: cctvFontFile() })
+    ? cctvVideoFilters(shot.production.cctv, shot.production.segment, { trimInSeconds: timeSeconds, width: info.width ?? 1280, height: info.height ?? 720, fps: info.fps, preview: true, segmentOffsetSeconds: cctvSegmentOffsetSeconds(p, shot), fontFile: cctvFontFile(), availableFilters: await ffmpeg.availableFilters() })
     : [];
   await ffmpeg.previewFrame(abs, outPath, timeSeconds, [...timelineLookFilters(look), ...cctvFilters]);
   return {
@@ -339,6 +339,7 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
   const outName = `${sanitize(title ?? tl.title ?? 'timeline')}-${new Date().toISOString().slice(0, 23).replace(/[:T.]/g, '-')}.mp4`;
   const outPath = join(p.paths.exports, outName);
   const clips: string[] = [];
+  const availableFilters = await ffmpeg.availableFilters();
   for (const clip of tl.clips) {
     const take = getTake(p, clip.takeId);
     // P1: the timeline only ever exports SELECTED takes. A reselect removes
@@ -357,6 +358,7 @@ export async function exportTimeline(p: ProjectContext, ffmpeg: Ffmpeg, title?: 
           fps: info.fps,
           segmentOffsetSeconds: cctvSegmentOffsetSeconds(p, shot),
           fontFile: cctvFontFile(),
+          availableFilters,
         })
       : [];
     const trimOut = clip.trimOut ?? take.duration;

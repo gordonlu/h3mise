@@ -122,7 +122,23 @@ export interface FfmpegCapabilities {
 }
 
 export class Ffmpeg {
+  private filterCache: Promise<Set<string>> | null = null;
+
   constructor() {}
+
+  /** Filter names compiled into this local FFmpeg build. Homebrew and some
+   * minimal builds omit drawtext/gblur; callers must degrade instead of
+   * failing the whole export. */
+  availableFilters(): Promise<Set<string>> {
+    this.filterCache ??= run('ffmpeg', ['-hide_banner', '-filters'])
+      .then((stdout) => new Set(
+        stdout.split(/\r?\n/)
+          .map((line) => /^\s*[A-Z.]{2,3}\s+([a-zA-Z0-9_]+)\s/.exec(line)?.[1])
+          .filter((name): name is string => Boolean(name)),
+      ))
+      .catch(() => new Set<string>());
+    return this.filterCache;
+  }
 
   /** Generic raw invocation with our spawn/timeout/error semantics. */
   async runRaw(args: string[], inputLabel?: string, timeoutMs = 600_000): Promise<void> {
@@ -538,7 +554,7 @@ export class Ffmpeg {
     const videoFilters = (options?.videoFilters ?? []).map((filter) => filter.trim()).filter(Boolean);
     if (videoFilters.length) args.push('-vf', videoFilters.join(','));
     args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
-    if (options?.variableFrameRate) args.push('-vsync', 'vfr');
+    if (options?.variableFrameRate) args.push('-fps_mode', 'vfr');
     if (keepSourceAudio && sourceHasAudio) {
       // Keep the ORIGINAL audio: default stream selection picks 0:a.
       args.push('-c:a', 'aac');
@@ -587,7 +603,7 @@ export class Ffmpeg {
       filter += clips.map((_, i) => `[v${i}][a${i}]`).join('') + `concat=n=${clips.length}:v=1:a=1[vout][aout]`;
       await run(
         'ffmpeg',
-        ['-y', ...inputs, '-filter_complex', filter, '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', ...(options?.variableFrameRate ? ['-vsync', 'vfr'] : []), '-movflags', '+faststart', outPath],
+        ['-y', ...inputs, '-filter_complex', filter, '-map', '[vout]', '-map', '[aout]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', ...(options?.variableFrameRate ? ['-fps_mode', 'vfr'] : []), '-movflags', '+faststart', outPath],
         outPath,
       );
       return;
@@ -645,7 +661,7 @@ export class Ffmpeg {
     }
     await run(
       'ffmpeg',
-      ['-y', ...inputs, '-filter_complex', filter.replace(/;+$/, ''), '-map', `[${prevV}]`, '-map', `[${prevA}]`, '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', ...(options?.variableFrameRate ? ['-vsync', 'vfr'] : []), '-movflags', '+faststart', outPath],
+      ['-y', ...inputs, '-filter_complex', filter.replace(/;+$/, ''), '-map', `[${prevV}]`, '-map', `[${prevA}]`, '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-c:a', 'aac', ...(options?.variableFrameRate ? ['-fps_mode', 'vfr'] : []), '-movflags', '+faststart', outPath],
       outPath,
     );
   }

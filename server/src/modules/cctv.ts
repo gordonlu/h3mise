@@ -50,9 +50,10 @@ function drawText(text: string, x: string, y: string, size: number, fontFile?: s
 export function cctvVideoFilters(
   overlay: CctvOverlayConfig,
   segment: ShotContinuitySegment,
-  options: { trimInSeconds: number; width: number; height: number; fps?: number | null; preview?: boolean; segmentOffsetSeconds?: number; fontFile?: string },
+  options: { trimInSeconds: number; width: number; height: number; fps?: number | null; preview?: boolean; segmentOffsetSeconds?: number; fontFile?: string; availableFilters?: Set<string> },
 ): string[] {
   const filters: string[] = [];
+  const has = (name: string) => !options.availableFilters || options.availableFilters.has(name);
   const width = Math.max(2, Math.round(options.width));
   const height = Math.max(2, Math.round(options.height));
   if (overlay.enabled && overlay.lowResolution) {
@@ -60,15 +61,15 @@ export function cctvVideoFilters(
     const lowHeight = Math.max(2, Math.round(height / 3 / 2) * 2);
     filters.push(`scale=${lowWidth}:${lowHeight}:flags=neighbor`, `scale=${width}:${height}:flags=neighbor`);
   }
-  if (overlay.enabled && overlay.blurUpscale) {
+  if (overlay.enabled && overlay.blurUpscale && has('gblur')) {
     const lowWidth = Math.max(2, Math.round(width * 0.75 / 2) * 2);
     const lowHeight = Math.max(2, Math.round(height * 0.75 / 2) * 2);
     filters.push(`scale=${lowWidth}:${lowHeight}:flags=bilinear`, 'gblur=sigma=1.2', `scale=${width}:${height}:flags=bilinear`);
   }
-  if (overlay.enabled && overlay.dotMatrix) {
+  if (overlay.enabled && overlay.dotMatrix && has('drawgrid')) {
     filters.push('drawgrid=width=4:height=4:thickness=1:color=lightgreen@0.12');
   }
-  if (overlay.enabled) {
+  if (overlay.enabled && has('drawtext')) {
     const fps = options.fps && options.fps > 0 ? Number(options.fps.toFixed(3)) : 24;
     const clock = clockParts(overlay.startTime, (options.segmentOffsetSeconds ?? segment.timeJumpSeconds) + options.trimInSeconds, fps);
     const fontSize = Math.max(12, Math.round(height * 0.028));

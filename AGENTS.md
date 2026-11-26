@@ -120,8 +120,8 @@ When you (an agent) drive H3Mise, bring your own model. Do not configure a proje
 
 First call `GET /api/session` and keep the returned `h3mise_session` cookie for every later request: all state-changing routes (POST / PUT / PATCH / DELETE, including `prepare` and `apply`) are session-guarded.
 
-1. `POST /api/ai/actions/{action}/prepare` with the action body. The response contains the exact prompt H3Mise would have sent — `inference.system`, `inference.messages`, `inference.json`, `inference.temperature`, `inference.hasImages` — plus `requestId` and `contextHash`. No model is called.
-   Send `X-H3Mise-Agent-Model: <label>` to record which model produced the answer. The label only; never a key.
+1. `POST /api/ai/actions/{action}/prepare` with the action body. The response contains the exact prompt H3Mise would have sent — `inference.system`, `inference.messages`, `inference.json`, `inference.temperature`, `inference.hasImages` (plus `inference.imageFiles` when `imageMode=paths`) — plus `requestId` and `contextHash`. No model is called.
+   Pass `?imageMode=paths` (or `omitted`) when you read local image files directly instead of consuming inline base64 data URLs. Send `X-H3Mise-Agent-Model: <label>` to record which model produced the answer. The label only; never a key.
 2. Run that prompt with your own model. When `inference.json` is true, return exactly one JSON array or object with no prose or fences. When `inference.hasImages` is true the messages contain reference images; read them only if you have vision, otherwise answer from text alone and leave unseen spatial facts empty.
 3. `POST /api/ai/requests/{requestId}/apply` with `{ "result": ... }` and optional `{ "vision": { "mode", "imageCount" } }` matching the shared contract, then follow the response:
    - `status: "applied"` — validated and applied atomically. Re-applying the same `requestId` returns the stored result without touching project data again.
@@ -131,8 +131,9 @@ First call `GET /api/session` and keep the returned `h3mise_session` cookie for 
 
 Agent MCP shortcuts:
 
-- Use `agent_session` to attach your model, `prepare_ai_action` for the inference payload, and `apply_ai_result` with `persist: true` on the completing answer to save validated plans/prompts atomically. Read `result.saved.directorPlanVersionId` or `result.saved.promptVersionId`; never guess IDs or issue an extra save. Repeat the same request ID to recover the same receipt, without creating another version. Default `persist: false` preserves UI draft behavior; it cannot retroactively persist a completed preview request.
-- Use `inspect_ai_requests` for pending work and its next inference step.
+- Use `agent_session` to attach your model (the MCP client forwards that model label on subsequent calls without overwriting it), `prepare_ai_action` for the inference payload (defaults to `imageMode: "paths"` so reference images return local file paths in `inference.imageFiles` instead of inline base64), and `apply_ai_result` with `persist: true` on the completing answer to save validated plans/prompts atomically. Read `result.saved.directorPlanVersionId` or `result.saved.promptVersionId`; never guess IDs or issue an extra save. Repeat the same request ID to recover the same receipt, without creating another version. Default `persist: false` preserves UI draft behavior; it cannot retroactively persist a completed preview request.
+- Use `inspect_ai_requests` for pending work and its next inference step (`imageMode: "paths"` by default), or `view: "detail"` with `requestId` to inspect a completed/failed/stale request.
+- `submit_render` accepts `mock` offline without paid confirmation, and requires `confirmPaid: true` for `runninghub` / `comfyui` (forwarding `confirmed: true` to `/api/render`).
 - Use `prepare_take_review` for local media probe, full decode verification, cached filmstrip/scene analysis and a contact sheet. Open `contactSheet.absolutePath`, then inspect the video and listen separately. These are mechanical checks, not creative approval; record picture/audio judgments with `review_take`. No arbitrary file path, shell command, model download or paid provider call is accepted by this tool.
 - Use `inspect_render_jobs` for persistent video jobs and provider task IDs. `inspect_jobs` lists local background work only and cannot establish whether a video render is active.
 - The MCP transport renews a rejected session once (HTTP 401). Network failures, timeouts, provider errors and ambiguous submissions are never automatically retried.

@@ -32,6 +32,13 @@ H3Mise 管理的正是这一层：
 
 ![Good Boy 导演台](docs/screenshots/director-desk.png)
 
+## 实战作品
+
+[![《让 AI Agent 做一支完整 MV No.2｜长阶有尽》封面 — 点击前往 Bilibili 观看](docs/images/showcase-changjie-youjin.jpg)](https://www.bilibili.com/video/BV1Wv4M6vEuc)
+
+- **《让 AI Agent 做一支完整 MV No.2｜长阶有尽》**（[Bilibili 观看](https://www.bilibili.com/video/BV1Wv4M6vEuc)）  
+  由 AI Agent 调用 H3Mise 自主完成整支 MV 的故事、镜头与连续性制作（RunningHub × MiniMax H3 + Suno），获 RunningHub 创作者大赛 **「潜力创作者奖」**（`Gordon_MiniMax`，[获奖名单](https://runninghubcncreator.apps.vibex.cn/winners)）。
+
 ## 从一首歌开始做 MV
 
 [MV 起步包](MV_STARTER_KIT/README.md)提供完整的新手路线、RunningHub 叙事与原音频对口型 App、节点映射、演唱提示词、空白制作表和 Agent 任务模板。全部为可复制文档，使用自己的素材与账号即可开始，不需要任何作者工程或额外脚本。

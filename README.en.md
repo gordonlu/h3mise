@@ -32,6 +32,14 @@ Story → Narrative skeleton / StoryBeat → (optional Storyboard) → Shot desi
 
 ![Good Boy director desk](docs/screenshots/director-desk.png)
 
+## Showcase
+
+[![Full MV produced by an AI Agent with H3Mise — Long Steps Have an End (click to watch on Bilibili)](docs/images/showcase-changjie-youjin.jpg)](https://www.bilibili.com/video/BV1Wv4M6vEuc)
+
+- **《让 AI Agent 做一支完整 MV No.2｜长阶有尽》 (*Letting an AI Agent Make a Full MV No. 2*)** ([Watch on Bilibili](https://www.bilibili.com/video/BV1Wv4M6vEuc))  
+  Produced end to end by an AI Agent driving H3Mise (RunningHub × MiniMax H3 + Suno). Winner of the **Rising Creator Award (潜力创作者奖)** in the RunningHub Creator Contest (`Gordon_MiniMax`, [Winners](https://runninghubcncreator.apps.vibex.cn/winners)).  
+  Want to reproduce this workflow from your own song? Start with the [MV Starter Kit](MV_STARTER_KIT/en/README.md).
+
 ## Let your AI agent drive it (zero config)
 
 Don't want to configure a provider or an AI? Send the block below to your coding agent (Claude Code / Cursor / opencode…). It follows the protocol in [AGENTS.md](AGENTS.md) to create the project, write the story, design shots, and generate the video — and asks you before any paid render:

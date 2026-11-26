@@ -6,6 +6,8 @@ Everything in this folder is Markdown and can be copied to another person on its
 
 [中文版 / Chinese](../README.md)
 
+> **Example finished MV**: [*Letting an AI Agent Make a Full MV No. 2 — 长阶有尽*](https://www.bilibili.com/video/BV1Wv4M6vEuc) — produced end to end by an AI Agent driving H3Mise; winner of the RunningHub Creator Contest Rising Creator Award (`Gordon_MiniMax`, [Winners](https://runninghubcncreator.apps.vibex.cn/winners)).
+
 ## Start here
 
 1. Read [Quick start](01-quick-start.md) and complete a short narrative shot and a singing shot.

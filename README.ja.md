@@ -32,6 +32,14 @@ H3Mise が管理するのはまさにその層です:
 
 ![Good Boy 監督デスク](docs/screenshots/director-desk.png)
 
+## 制作事例（Showcase）
+
+[![AI Agent × H3Mise で制作したフル MV「長階有尽」— Bilibili で視聴](docs/images/showcase-changjie-youjin.jpg)](https://www.bilibili.com/video/BV1Wv4M6vEuc)
+
+- **《让 AI Agent 做一支完整 MV No.2｜长阶有尽》**（[Bilibili で視聴](https://www.bilibili.com/video/BV1Wv4M6vEuc)）  
+  AI エージェントが H3Mise を操作して物語・ショット・連続性まで一貫制作したフル尺 MV（RunningHub × MiniMax H3 + Suno）。RunningHub クリエイターコンテスト **「潜力創作者賞」** 受賞（`Gordon_MiniMax`、[受賞者一覧](https://runninghubcncreator.apps.vibex.cn/winners)）。  
+  自分の楽曲で同じ制作フローを試すには、[MV スターターキット](MV_STARTER_KIT/en/README.md) をご覧ください。
+
 ## AI エージェントに任せる（設定不要）
 
 Provider や AI の設定は不要です。下のブロックをコーディングエージェント（Claude Code / Cursor / opencode など）に送るだけ。[AGENTS.md](AGENTS.md) のプロトコルに従って、プロジェクト作成・ストーリー・ショット設計・動画生成まで進め、有料レンダーの前には必ず確認を取ります：

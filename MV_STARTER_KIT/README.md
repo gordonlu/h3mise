@@ -6,6 +6,8 @@
 
 [English version](en/README.md)
 
+> **参考成片**：[《让 AI Agent 做一支完整 MV No.2｜长阶有尽》](https://www.bilibili.com/video/BV1Wv4M6vEuc) — 使用本工作流配合 AI Agent 完整制作，获 RunningHub 创作者大赛「潜力创作者奖」（`Gordon_MiniMax`，[获奖名单](https://runninghubcncreator.apps.vibex.cn/winners)）。
+
 ## 从这里开始
 
 1. 阅读 [快速开始](01-快速开始.md)，先完成一个叙事镜头和一个演唱镜头的小样。

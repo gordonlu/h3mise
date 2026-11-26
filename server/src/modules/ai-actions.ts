@@ -14,7 +14,7 @@
 
 import type { ProjectContext } from '../project-store.js';
 import type { AIService, DirectorContentPart, DirectorMessage, DirectorModel, VisionStatus } from './ai.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import * as directorMod from './director.js';
 import * as promptMod from './prompt.js';
 import * as shotsMod from './shots.js';
@@ -24,7 +24,7 @@ import * as continuityMod from './continuity.js';
 import * as takesMod from './takes.js';
 import { directorStyleAiContext } from './director-styles.js';
 import { applyBeatProposal, materializeMissingBeatShots } from './story-pipeline.js';
-import { emptyDirectorPlan, type DirectorPlan, type StoryBeat, type VisualContinuityState } from '@h3mise/shared';
+import { emptyDirectorPlan, type AiImageMode, type AiInferenceImageFile, type DirectorPlan, type StoryBeat, type VisualContinuityState } from '@h3mise/shared';
 
 export type ActionName =
   | 'plan_shot'
@@ -50,6 +50,8 @@ export interface InferenceStep {
   /** Ask for a single JSON value; advanceAction receives the parsed value. */
   json: boolean;
   temperature: number;
+  /** Local image file descriptors populated when imageMode is 'paths'. */
+  imageFiles?: AiInferenceImageFile[];
 }
 
 /** Continuation state between rounds. `raws` holds every answer consumed so
@@ -77,6 +79,7 @@ export function decorateResult(action: string, result: unknown, vision: VisionSt
 }
 
 export function stepHasImages(step: InferenceStep): boolean {
+  if (step.imageFiles && step.imageFiles.length > 0) return true;
   return step.messages.some((message) => Array.isArray(message.content)
     && message.content.some((part) => part.type === 'image_url'));
 }
@@ -124,6 +127,62 @@ const MAX_VISION_IMAGES = 9;
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VISION_TOTAL_BYTES = 24 * 1024 * 1024;
 
+interface MultimodalPayload {
+  content: string | DirectorContentPart[];
+  imageFiles: AiInferenceImageFile[];
+}
+
+async function shotMultimodalPayload(
+  ctx: ProjectContext,
+  shotId: string,
+  text: string,
+  imageMode: AiImageMode = 'base64',
+): Promise<MultimodalPayload> {
+  if (imageMode === 'omitted') return { content: text, imageFiles: [] };
+  const bindings = assetsMod.listBindings(ctx, shotId);
+  const candidates = bindings.filter((binding) => binding.type === 'image').slice(0, MAX_VISION_IMAGES);
+  const parts: DirectorContentPart[] = [{ type: 'text', text }];
+  const imageFiles: AiInferenceImageFile[] = [];
+  let pictureNumber = 0;
+  let totalBytes = 0;
+  for (const binding of candidates) {
+    pictureNumber++;
+    try {
+      const asset = assetsMod.getMedia(ctx, binding.assetId);
+      if (!asset.mimeType.startsWith('image/') || asset.sizeBytes > MAX_VISION_IMAGE_BYTES) continue;
+      if (totalBytes + asset.sizeBytes > MAX_VISION_TOTAL_BYTES) continue;
+      const absPath = ctx.resolveProjectPath(asset.fileName);
+      const label = `<Picture ${pictureNumber}>：${binding.label || asset.label || asset.id}；roles=${binding.roles.join(',') || 'reference'}；preserve=${binding.preserve.join(',') || 'unspecified'}；ignore=${binding.ignore.join(',') || 'none'}`;
+      if (imageMode === 'paths') {
+        const info = await stat(absPath);
+        if (info.size > MAX_VISION_IMAGE_BYTES || totalBytes + info.size > MAX_VISION_TOTAL_BYTES) continue;
+        totalBytes += info.size;
+        imageFiles.push({ label, path: absPath, mimeType: asset.mimeType, sizeBytes: info.size });
+        parts.push({
+          type: 'text',
+          text: `${label}\n[Image file: ${absPath} (${asset.mimeType}, ${Math.max(1, Math.round(info.size / 1024))} KB)]`,
+        });
+        continue;
+      }
+      const bytes = await readFile(absPath);
+      if (bytes.byteLength > MAX_VISION_IMAGE_BYTES || totalBytes + bytes.byteLength > MAX_VISION_TOTAL_BYTES) continue;
+      totalBytes += bytes.byteLength;
+      parts.push({ type: 'text', text: label });
+      parts.push({
+        type: 'image_url',
+        image_url: { url: `data:${asset.mimeType};base64,${bytes.toString('base64')}`, detail: 'high' },
+      });
+    } catch (error) {
+      console.warn(`[ai] skipped unreadable vision asset ${binding.assetId}: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  if (imageMode === 'paths') {
+    const content = imageFiles.length > 0 ? parts.map((part) => (part.type === 'text' ? part.text : '')).join('\n\n') : text;
+    return { content, imageFiles };
+  }
+  return { content: parts.some((part) => part.type === 'image_url') ? parts : text, imageFiles: [] };
+}
+
 /** Build one OpenAI-compatible multimodal user message. Images follow the
  * same binding order used by prompt reference numbering, so each attachment
  * can be identified as <Picture N>. Unreadable/oversized images are skipped;
@@ -133,53 +192,48 @@ export async function shotMultimodalContent(
   shotId: string,
   text: string,
 ): Promise<string | DirectorContentPart[]> {
-  const bindings = assetsMod.listBindings(ctx, shotId);
-  const candidates = bindings.filter((binding) => binding.type === 'image').slice(0, MAX_VISION_IMAGES);
-  const parts: DirectorContentPart[] = [{ type: 'text', text }];
-  let pictureNumber = 0;
-  let totalBytes = 0;
-  for (const binding of candidates) {
-    pictureNumber++;
-    try {
-      const asset = assetsMod.getMedia(ctx, binding.assetId);
-      if (!asset.mimeType.startsWith('image/') || asset.sizeBytes > MAX_VISION_IMAGE_BYTES) continue;
-      if (totalBytes + asset.sizeBytes > MAX_VISION_TOTAL_BYTES) continue;
-      const bytes = await readFile(ctx.resolveProjectPath(asset.fileName));
-      if (bytes.byteLength > MAX_VISION_IMAGE_BYTES || totalBytes + bytes.byteLength > MAX_VISION_TOTAL_BYTES) continue;
-      totalBytes += bytes.byteLength;
-      parts.push({
-        type: 'text',
-        text: `<Picture ${pictureNumber}>：${binding.label || asset.label || asset.id}；roles=${binding.roles.join(',') || 'reference'}；preserve=${binding.preserve.join(',') || 'unspecified'}；ignore=${binding.ignore.join(',') || 'none'}`,
-      });
-      parts.push({
-        type: 'image_url',
-        image_url: { url: `data:${asset.mimeType};base64,${bytes.toString('base64')}`, detail: 'high' },
-      });
-    } catch (error) {
-      console.warn(`[ai] skipped unreadable vision asset ${binding.assetId}: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-  return parts.some((part) => part.type === 'image_url') ? parts : text;
+  return (await shotMultimodalPayload(ctx, shotId, text, 'base64')).content;
 }
 
-async function takeLastFrameContent(
+async function takeLastFramePayload(
   ctx: ProjectContext,
   take: ReturnType<typeof takesMod.getTake>,
   text: string,
-): Promise<string | DirectorContentPart[]> {
-  if (!take.lastFramePath) return `${text}\n\n该 Take 没有可读取的尾帧，只能依据文字上下文填写；无法确认的字段必须留空。`;
+  imageMode: AiImageMode = 'base64',
+): Promise<MultimodalPayload> {
+  if (imageMode === 'omitted') {
+    return { content: `${text}\n\n已省略尾帧图片，请依据文字上下文填写；无法确认的字段必须留空。`, imageFiles: [] };
+  }
+  if (!take.lastFramePath) {
+    return { content: `${text}\n\n该 Take 没有可读取的尾帧，只能依据文字上下文填写；无法确认的字段必须留空。`, imageFiles: [] };
+  }
   try {
-    const bytes = await readFile(ctx.resolveProjectPath(take.lastFramePath));
-    if (bytes.byteLength > MAX_VISION_IMAGE_BYTES) {
-      return `${text}\n\n尾帧超过识图大小限制，只能依据文字上下文填写；无法确认的字段必须留空。`;
+    const absPath = ctx.resolveProjectPath(take.lastFramePath);
+    if (imageMode === 'paths') {
+      const info = await stat(absPath);
+      if (info.size > MAX_VISION_IMAGE_BYTES) {
+        return { content: `${text}\n\n尾帧超过识图大小限制，只能依据文字上下文填写；无法确认的字段必须留空。`, imageFiles: [] };
+      }
+      const label = `${take.id} last frame`;
+      return {
+        content: `${text}\n\n下方图片是 ${take.id} 的真实最后一帧。优先依据图片填写可见事实；单帧无法确认的内容不要猜测。\n[Image file: ${absPath} (image/jpeg, ${Math.max(1, Math.round(info.size / 1024))} KB)]`,
+        imageFiles: [{ label, path: absPath, mimeType: 'image/jpeg', sizeBytes: info.size }],
+      };
     }
-    return [
-      { type: 'text', text: `${text}\n\n下方图片是 ${take.id} 的真实最后一帧。优先依据图片填写可见事实；单帧无法确认的内容不要猜测。` },
-      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${bytes.toString('base64')}`, detail: 'high' } },
-    ];
+    const bytes = await readFile(absPath);
+    if (bytes.byteLength > MAX_VISION_IMAGE_BYTES) {
+      return { content: `${text}\n\n尾帧超过识图大小限制，只能依据文字上下文填写；无法确认的字段必须留空。`, imageFiles: [] };
+    }
+    return {
+      content: [
+        { type: 'text', text: `${text}\n\n下方图片是 ${take.id} 的真实最后一帧。优先依据图片填写可见事实；单帧无法确认的内容不要猜测。` },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${bytes.toString('base64')}`, detail: 'high' } },
+      ],
+      imageFiles: [],
+    };
   } catch (error) {
     console.warn(`[ai] failed to read take last frame ${take.id}: ${error instanceof Error ? error.message : error}`);
-    return `${text}\n\n尾帧读取失败，只能依据文字上下文填写；无法确认的字段必须留空。`;
+    return { content: `${text}\n\n尾帧读取失败，只能依据文字上下文填写；无法确认的字段必须留空。`, imageFiles: [] };
   }
 }
 
@@ -367,7 +421,9 @@ export async function prepareAction(
   ctx: ProjectContext,
   action: string,
   body: Record<string, unknown>,
+  options?: { imageMode?: AiImageMode },
 ): Promise<InferenceStep> {
+  const imageMode: AiImageMode = options?.imageMode ?? 'base64';
   const styleContext = directorStyleAiContext(ctx);
   const skillText = buildSkillText(await ai.loadSkills(), styleContext);
   const shotId = body.shotId ? String(body.shotId) : null;
@@ -376,29 +432,35 @@ export async function prepareAction(
   switch (action as ActionName) {
     case 'plan_shot': {
       if (!shotId) throw new Error('shotId required');
+      const payload = await shotMultimodalPayload(ctx, shotId, planShotPrompt(ctx, shotId, body), imageMode);
       return {
         system: `${DIRECTOR_SYSTEM_PROMPT}\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
-        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, planShotPrompt(ctx, shotId, body)) }],
+        messages: [{ role: 'user', content: payload.content }],
         json: true,
         temperature: 0.6,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'improve_camera': {
       if (!shotId) throw new Error('shotId required');
+      const payload = await shotMultimodalPayload(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}\n\n只有实际看见附图时才能修正空间方位；看不到图时不得猜测。`, imageMode);
       return {
         system: `你是 H3 镜头设计模式库。只改进给定方案的 camera 块，其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
-        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve camera design.')}\n\n只有实际看见附图时才能修正空间方位；看不到图时不得猜测。`) }],
+        messages: [{ role: 'user', content: payload.content }],
         json: true,
         temperature: 0.5,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'improve_performance': {
       if (!shotId) throw new Error('shotId required');
+      const payload = await shotMultimodalPayload(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}\n\n只有实际看见附图时才能描述身体与物体的空间关系；看不到图时不得猜测。`, imageMode);
       return {
         system: `你是 H3 表演导演。只改进给定方案的 performance 块（objective/obstacle/tactic/turn、movement quality、anticipation、primaryAction、followThrough、recovery、gaze、endPose），其他块保持不变，返回完整方案 JSON。所有字段内容一律使用中文。动作描述必须确定性完整：身体部位＋方向＋先后顺序＋空间参照，展开压缩动作为连续动作链，杜绝左右侧/主体/顺序歧义。\n\n专业方法参考：\n${skillText}\n\n${PLAN_SCHEMA_HINT}`,
-        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\nRequest: ${String(body.request ?? 'Improve the performance.')}\n\n只有实际看见附图时才能描述身体与物体的空间关系；看不到图时不得猜测。`) }],
+        messages: [{ role: 'user', content: payload.content }],
         json: true,
         temperature: 0.5,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'brief_to_plan': {
@@ -453,11 +515,13 @@ ${PLAN_SCHEMA_HINT}`,
     }
     case 'reality_check': {
       if (!shotId) throw new Error('shotId required');
+      const payload = await shotMultimodalPayload(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\n\nReality mode: ${plan?.reality.mode ?? 'strict_realism'}\n\n附图可读时可检查可见几何；不可读时只审查文字事实。`, imageMode);
       return {
         system: `你是物理与现实审查员。对照检查该镜头：几何结构、重力支撑接触、惯性动量、因果、介质规律、生物解剖、载具机械、光影、时间连续性、已知事实矛盾。只故意违反一条定律而非到处破绽。每个问题输出一行“问题：… | 严重度：轻微/严重 | 修复：…”，最后输出一行结论。只用中文。`,
-        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, shotId, `Plan:\n${JSON.stringify(plan)}\n\nReality mode: ${plan?.reality.mode ?? 'strict_realism'}\n\n附图可读时可检查可见几何；不可读时只审查文字事实。`) }],
+        messages: [{ role: 'user', content: payload.content }],
         json: false,
         temperature: 0.3,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'continuity_check': {
@@ -477,6 +541,7 @@ ${PLAN_SCHEMA_HINT}`,
       if (!shotId) throw new Error('shotId required');
       const current = promptMod.listPrompts(ctx, shotId).filter((prompt) => prompt.stage === 'final').at(-1);
       if (!current) throw new Error('请先从镜头设计生成或手动输入一版提示词');
+      const payload = await shotMultimodalPayload(ctx, shotId, `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}\n\n视觉输入规则：只有实际看见下方附图时才能修正画面位置；若接口降级为纯文字或图片不可见，保留原有空间描述，缺失信息不要补写。`, imageMode);
       return {
         system: `你是专业的 MiniMax H3 视频提示词编辑，严格遵循 H3 官方提示词规范。
 结构规则（必须保留段落与顺序、参考标签 <Picture n>/<Audio n>/<Subject n> 及其全文一致性）：
@@ -503,10 +568,11 @@ Ref2VA 专项规则：
 ${skillText}`,
         messages: [{
           role: 'user',
-          content: await shotMultimodalContent(ctx, shotId, `当前提示词：\n${current.text}\n\n生成模式：${current.h3Mode}\n\n视觉输入规则：只有实际看见下方附图时才能修正画面位置；若接口降级为纯文字或图片不可见，保留原有空间描述，缺失信息不要补写。`),
+          content: payload.content,
         }],
         json: false,
         temperature: 0.4,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'diagnose_take': {
@@ -514,16 +580,18 @@ ${skillText}`,
       if (!takeId) throw new Error('takeId required');
       const take = takesMod.getTake(ctx, takeId);
       const prompt = promptMod.getPrompt(ctx, take.promptVersionId);
+      const payload = await shotMultimodalPayload(ctx, take.shotId, `DirectorPlan:\n${JSON.stringify(plan)}\n\nPrompt:\n${prompt.text}\n\nFailure tags: ${take.failureTags.join(', ')}\nNotes: ${take.notes}\n\n只有实际看见附图时才能诊断视觉位置关系；不可见时不要猜测。`, imageMode);
       return {
         system: `你诊断失败的 H3 生成。输入：导演方案、提示词、参考素材标签、失败标签、Take 备注。按可能性排序输出原因和具体可尝试的修复（改方案、换参考角色、改提示词）。绝不建议再花钱重渲染。只用中文。`,
         messages: [
           {
             role: 'user',
-            content: await shotMultimodalContent(ctx, take.shotId, `DirectorPlan:\n${JSON.stringify(plan)}\n\nPrompt:\n${prompt.text}\n\nFailure tags: ${take.failureTags.join(', ')}\nNotes: ${take.notes}\n\n只有实际看见附图时才能诊断视觉位置关系；不可见时不要猜测。`),
+            content: payload.content,
           },
         ],
         json: false,
         temperature: 0.4,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'analyze_take_continuity': {
@@ -535,6 +603,12 @@ ${skillText}`,
       const entities = assetsMod.listEntities(ctx);
       const states = assetsMod.listCharacterStates(ctx);
       const empty = continuityMod.emptyVisualState();
+      const payload = await takeLastFramePayload(ctx, take, `Take: ${JSON.stringify({ id: take.id, shotId: take.shotId })}
+Shot: ${JSON.stringify(takeShot)}
+DirectorPlan end state: ${JSON.stringify({ intent: takePlan?.intent.endState, blocking: takePlan?.blocking.endPosition, endPose: takePlan?.performance.endPose, continuity: takePlan?.continuity.plannedEndState })}
+Entities: ${JSON.stringify(entities)}
+Allowed CharacterStates: ${JSON.stringify(states)}
+Empty output shape: ${JSON.stringify(empty)}`, imageMode);
       return {
         system: `你是影视场记员。读取生成视频的真实最后一帧，提取下一镜头必须延续的 Actual Visual Continuity。
 只返回一个完整 JSON 对象，字段严格为：characterStates、costume、hair、injury、heldItems、location、timeOfDay、weather、wind、screenDirection、facing、vehicleState、notes。
@@ -544,26 +618,24 @@ characterStates/costume/hair/injury/heldItems/vehicleState 的 key 必须使用�
 如果图片不可见或请求降级为纯文字，只能采用镜头计划明确声明的结束状态和给定资产状态；其余字段留空，并在 notes 说明“AI 未读取尾帧，建议人工确认”。`,
         messages: [{
           role: 'user',
-          content: await takeLastFrameContent(ctx, take, `Take: ${JSON.stringify({ id: take.id, shotId: take.shotId })}
-Shot: ${JSON.stringify(takeShot)}
-DirectorPlan end state: ${JSON.stringify({ intent: takePlan?.intent.endState, blocking: takePlan?.blocking.endPosition, endPose: takePlan?.performance.endPose, continuity: takePlan?.continuity.plannedEndState })}
-Entities: ${JSON.stringify(entities)}
-Allowed CharacterStates: ${JSON.stringify(states)}
-Empty output shape: ${JSON.stringify(empty)}`),
+          content: payload.content,
         }],
         json: true,
         temperature: 0.1,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'repair_prompt': {
       const promptId = body.promptId ? String(body.promptId) : null;
       if (!promptId) throw new Error('promptId required');
       const pv = promptMod.getPrompt(ctx, promptId);
+      const payload = await shotMultimodalPayload(ctx, pv.shotId, `Prompt:\n${pv.text}\n\nProblems: ${String(body.problems ?? '')}\n\n空间位置只能依据实际可见附图修复；图片不可见时不得猜测。`, imageMode);
       return {
         system: `你是 H3 提示词修复器。只修复指出的问题，其余内容保持不变；输出语言与原提示词一致（原文无英文必要时用中文）。只输出修复后的提示词正文。\n\n专业导演方法参考：\n${skillText}`,
-        messages: [{ role: 'user', content: await shotMultimodalContent(ctx, pv.shotId, `Prompt:\n${pv.text}\n\nProblems: ${String(body.problems ?? '')}\n\n空间位置只能依据实际可见附图修复；图片不可见时不得猜测。`) }],
+        messages: [{ role: 'user', content: payload.content }],
         json: false,
         temperature: 0.3,
+        ...(payload.imageFiles.length ? { imageFiles: payload.imageFiles } : {}),
       };
     }
     case 'story_to_beats': {

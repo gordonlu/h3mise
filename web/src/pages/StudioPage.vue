@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { DEFAULT_LANE_ORDER, type CanvasLane, type StoryEpisodeList } from '@h3mise/shared';
 import { useStudioStore } from '../stores/studio';
 import { useStudioUiStore, isBottomDockTab, isLeftDockTab, MEGAPIXEL_OPTIONS } from '../stores/studioUi';
 import { useRunPlanStore } from '../stores/runPlan';
 import { useProjectStore } from '../stores/project';
+import { useRenderStore } from '../stores/render';
 import { useToastStore } from '../stores/toast';
 import { useAutoProduce } from '../composables/useAutoProduce';
 import { useStudioNavigate } from '../composables/useStudioNavigate';
@@ -29,9 +30,37 @@ const store = useStudioStore();
 const ui = useStudioUiStore();
 const runPlan = useRunPlanStore();
 const project = useProjectStore();
+const renderStore = useRenderStore();
 const toasts = useToastStore();
 const route = useRoute();
+const router = useRouter();
 const { graph, loading, error } = storeToRefs(store);
+const activeProviderLabel = computed(() => {
+  const id = project.current?.config.default_provider ?? 'mock';
+  return project.providers.find((provider) => provider.id === id)?.name ?? id;
+});
+
+async function switchProject(event: Event): Promise<void> {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value === '__projects__') {
+    void router.push('/projects');
+    return;
+  }
+  if (!value || value === project.projectId) return;
+  try {
+    if (!(await project.openProject(value))) return;
+    await project.refreshProjects();
+    await renderStore.refresh();
+    noProject.value = false;
+    store.clearSelection();
+    runPlan.setPlan(null);
+    runPlan.setAutoPlan(null);
+    await Promise.all([store.load(), loadEpisodes()]);
+    toasts.push({ kind: 'ok', text: t('shell.switchedProject', { name: project.current?.config.title ?? value }) });
+  } catch (e) {
+    toasts.push({ kind: 'err', text: t('shell.switchProjectFailed', { msg: e instanceof Error ? e.message : String(e) }) });
+  }
+}
 const narrow = ref(false);
 const noProject = ref(false);
 const installingDemo = ref(false);
@@ -145,7 +174,13 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
     <header class="hf-topbar">
       <span class="hf-crumb">{{ t('studio.title') }}</span>
       <span class="hf-beta" :title="t('studio.betaHint')" role="note">{{ t('studio.beta') }}</span>
-      <span class="hf-sub">{{ t('studio.subtitle') }}</span>
+      <label v-if="project.current" class="hf-episode">
+        <span class="hf-visually-hidden">{{ t('shell.projectList') }}</span>
+        <select :value="project.projectId ?? ''" @change="switchProject">
+          <option v-for="p in project.projects" :key="p.id" :value="p.id">{{ p.title }}</option>
+          <option value="__projects__">{{ t('shell.projectList') }}…</option>
+        </select>
+      </label>
       <label v-if="episodes" class="hf-episode">
         <span class="hf-visually-hidden">{{ t('pages.story.episodeAria') }}</span>
         <select :value="episodes.activeEpisodeId" @change="switchEpisode">
@@ -154,6 +189,13 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
           </option>
         </select>
       </label>
+      <RouterLink
+        v-if="project.current"
+        to="/settings"
+        class="badge no-dot"
+        :class="project.current.config.default_provider === 'mock' ? 'ok' : 'info'"
+        :title="t('pages.settings.defaultProvider')"
+      >{{ activeProviderLabel }}</RouterLink>
       <label v-if="!noProject" class="hf-episode">
         <span class="hf-visually-hidden">{{ t('studio.mp') }}</span>
         <select v-model.number="ui.megapixels">
@@ -185,8 +227,7 @@ watch(() => route.query, () => applyDeepLink(), { deep: true });
             <p class="hf-template-title">{{ t('studio.noProject.title') }}</p>
             <p class="hf-muted">{{ t('studio.noProject.hint') }}</p>
             <div class="hf-project-actions">
-              <RouterLink to="/projects" class="hf-ghost">{{ t('studio.noProject.create') }}</RouterLink>
-              <button class="hf-ghost" :disabled="installingDemo" @click="installGoodBoy">
+              <button class="primary" :disabled="installingDemo" @click="installGoodBoy">
                 {{ installingDemo ? t('studio.noProject.installing') : t('studio.noProject.installDemo') }}
               </button>
               <RouterLink to="/projects" class="hf-ghost">{{ t('studio.noProject.openList') }}</RouterLink>

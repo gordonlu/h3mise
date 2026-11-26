@@ -68,8 +68,10 @@ function statusLabel(status: string): string {
 /** PRD §15: only expose modes the active provider profile supports.
  * Unknown capability = nothing offered (P1), never a theoretical fallback. */
 const availableModes = computed(() => {
-  const rh = project.providers.find((p) => p.id === 'runninghub' && p.configured);
-  const active = rh ?? project.providers[0];
+  const preferred = project.current?.config.default_provider;
+  const active = (preferred ? project.providers.find((p) => p.id === preferred) : null)
+    ?? project.providers.find((p) => p.id === 'runninghub' && p.configured)
+    ?? project.providers[0];
   return active?.capabilities?.supportedModes ?? [];
 });
 
@@ -443,7 +445,7 @@ onMounted(load);
             <span :class="['st', `st-${SHOT_USER_STATUS[s.status]}`]" :title="t('pages.shots.internalStatus', { status: SHOT_STATUS_LABEL[s.status] })">
               <i />{{ statusLabel(SHOT_USER_STATUS[s.status]) }}
             </span>
-            <button class="ghost shot-delete" :title="t('workflow.shots.deleteShotIncludingItsPlanPromptsTakes')" @click.stop.prevent="deleteShot(s)">•••</button>
+            <button class="ghost danger shot-delete" :title="t('workflow.shots.deleteShotIncludingItsPlanPromptsTakes')" :aria-label="t('workflow.shots.deleteShotIncludingItsPlanPromptsTakes')" @click.stop.prevent="deleteShot(s)">🗑</button>
           </div>
           <div class="muted purpose">{{ s.purpose || '—' }}</div>
           <div class="shot-meta">

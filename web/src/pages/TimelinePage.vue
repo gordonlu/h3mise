@@ -247,10 +247,15 @@ async function exportTimeline() {
   }
 }
 
+let disposed = false;
+
 async function pollExport(jobId: string) {
   for (let i = 0; i < 600; i++) {
+    if (disposed) return;
     await new Promise((r) => setTimeout(r, 2000));
+    if (disposed) return;
     const job = await get<{ status: string; progress?: number | null; result?: { relPath?: string; url?: string }; error?: string | null }>(`/api/jobs/${jobId}`);
+    if (disposed) return;
     exportJob.value = { id: jobId, ...job };
     if (job.status === 'done') {
       playUrl.value = job.result?.url ?? '';
@@ -275,7 +280,10 @@ onMounted(async () => {
     if (e.type === 'take.selected' || e.type === 'project.updated') void load();
   });
 });
-onUnmounted(() => off?.());
+onUnmounted(() => {
+  disposed = true;
+  off?.();
+});
 </script>
 
 <template>

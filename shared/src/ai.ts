@@ -17,6 +17,15 @@ export interface AiInferenceMessage {
   content: AiInferenceContent;
 }
 
+export type AiImageMode = 'base64' | 'paths' | 'omitted';
+
+export interface AiInferenceImageFile {
+  label: string;
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
 export interface AiInferenceStep {
   system: string;
   messages: AiInferenceMessage[];
@@ -25,6 +34,8 @@ export interface AiInferenceStep {
   temperature: number;
   /** True when the step carries reference images the agent may read. */
   hasImages: boolean;
+  /** Local file references populated when imageMode is 'paths' (avoids base64 bloat in tool output). */
+  imageFiles?: AiInferenceImageFile[];
 }
 
 /** Response of POST /api/ai/actions/:action/prepare. */

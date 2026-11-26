@@ -3,10 +3,13 @@
 // brings its own model — while keeping the same validation and atomic apply.
 
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { after, test } from 'node:test';
 import { emptyDirectorPlan } from '@h3mise/shared';
 import { AIService } from '../src/modules/ai.js';
-import { applyResult, agentStatus, cancelRequest, countPending, detachAgent, getRequest, listRequests, prepareRequest, touchAgent } from '../src/modules/ai-delegation.js';
+import { applyResult, agentStatus, cancelRequest, countPending, detachAgent, getRequest, listRequests, prepareRequest, touchAgent, wireStep } from '../src/modules/ai-delegation.js';
+import { createBinding, insertMedia } from '../src/modules/assets.js';
 import { createPlanVersion, latestPlan, listPlanVersions } from '../src/modules/director.js';
 import { createPrompt, importRawPrompt, listPrompts } from '../src/modules/prompt.js';
 import { createShot } from '../src/modules/shots.js';
@@ -338,4 +341,52 @@ test('prompt repair preserves the source plan and take revision provenance', asy
   assert.equal(repaired.h3Mode, 'i2va');
   assert.equal(repaired.revisionReason, source.revisionReason);
   assert.deepEqual(repaired.preservedAspects, ['wardrobe']);
+});
+
+test('imageMode="paths" avoids base64 bloat, returns imageFiles, and matches contextHash on apply', async () => {
+  const p = await project('ai-deleg-paths');
+  const ai = offlineAi();
+  const shot = createShot(p, { title: '参考图路径测试', durationSeconds: 6 });
+  const relPath = 'assets/ref-test.png';
+  const absPath = p.resolveProjectPath(relPath);
+  mkdirSync(dirname(absPath), { recursive: true });
+  const pngBytes = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000000020001e221bc330000000049454e44ae426082', 'hex');
+  writeFileSync(absPath, pngBytes);
+  const media = insertMedia(p, {
+    kind: 'image',
+    fileName: relPath,
+    mimeType: 'image/png',
+    sizeBytes: pngBytes.byteLength,
+    source: 'import',
+    label: '主角定妆照',
+  });
+  createBinding(p, { assetId: media.id, roles: ['identity'], shotId: shot.id, label: '主角定妆照' });
+
+  const prepared = await prepareRequest(ai, p, 'plan_shot', { shotId: shot.id }, 'gemini-pro', 'paths');
+  const wired = wireStep(prepared.step);
+  assert.equal(wired.hasImages, true);
+  assert.equal(wired.imageFiles?.length, 1);
+  assert.equal(wired.imageFiles?.[0]?.path, absPath);
+  assert.ok(!JSON.stringify(wired.messages).includes('data:image/'), 'paths mode never embeds base64');
+
+  const base = emptyDirectorPlan();
+  const valid = {
+    intent: { ...base.intent, visualThesis: '定妆延续', endState: '回头' },
+    subject: { ...base.subject, action: '站立' },
+    camera: { ...base.camera, dominantBehavior: '固定' },
+  };
+  const outcome = await applyResult(ai, p, prepared.requestId, JSON.stringify(valid), { mode: 'multimodal', imageCount: 1 });
+  assert.equal(outcome.status, 'applied');
+});
+
+test('touchAgent never overwrites an explicit attached model with the generic MCP fallback', async () => {
+  const p = await project('ai-deleg-agent-label');
+  detachAgent();
+  touchAgent('claude-opus-4');
+  assert.equal(agentStatus(p).modelLabel, 'claude-opus-4');
+  touchAgent('External MCP agent');
+  assert.equal(agentStatus(p).modelLabel, 'claude-opus-4');
+  touchAgent('gemini-pro');
+  assert.equal(agentStatus(p).modelLabel, 'gemini-pro');
+  detachAgent();
 });

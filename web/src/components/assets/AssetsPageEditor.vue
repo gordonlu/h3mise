@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, toRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { get, post, del, patch, mediaUrl, fileUrl } from '../../api/client';
 import { useToastStore } from '../../stores/toast';
@@ -350,6 +350,10 @@ function goBackToSource() {
 
 const filteredEntities = computed(() => entities.value.filter((x) => !kindFilter.value || x.kind === kindFilter.value));
 
+function clone<T>(item: T): T {
+  return structuredClone(toRaw(item));
+}
+
 onMounted(load);
 </script>
 
@@ -417,7 +421,7 @@ onMounted(load);
               <span class="kind-badge" :style="{ color: KIND_COLOR[e.kind], background: `${KIND_COLOR[e.kind]}1a`, borderColor: `${KIND_COLOR[e.kind]}55` }">{{ kindLabel(e.kind) }}</span>
               <h3 class="card-name" :title="e.name">{{ e.name }}</h3>
               <div class="card-actions">
-                <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'entity', item: e }">✎</button>
+                <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'entity', item: clone(e) }">✎</button>
                 <button class="icon-btn danger" :title="t('common.delete')" @click="removeEntity(e)">🗑</button>
               </div>
             </div>
@@ -458,7 +462,7 @@ onMounted(load);
               <span class="kind-badge info">{{ entities.find((e) => e.id === st.characterId)?.name ?? st.characterId }}</span>
               <h3 class="card-name" :title="st.name">{{ st.name }}</h3>
               <div class="card-actions">
-                <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'state', item: st }">✎</button>
+                <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'state', item: clone(st) }">✎</button>
                 <button class="icon-btn danger" :title="t('common.delete')" @click="removeState(st)">🗑</button>
               </div>
             </div>
@@ -545,7 +549,7 @@ onMounted(load);
                 <h3 class="card-name media-name" :title="m.label || m.id">{{ m.label || m.id }}</h3>
                 <div class="card-actions">
                   <span class="type-chip">{{ m.kind }}</span>
-                  <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'media', item: m }">✎</button>
+                  <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'media', item: clone(m) }">✎</button>
                   <button class="icon-btn danger" :title="t('pages.assets.media.deleteAsset')" @click="removeMedia(m)">🗑</button>
                 </div>
               </div>
@@ -570,7 +574,7 @@ onMounted(load);
             <div class="roles">
               <span v-for="r in b.roles" :key="r" class="tag active">{{ r }}</span>
             </div>
-            <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'binding', item: b }">✎</button>
+            <button class="icon-btn" :title="t('common.edit')" @click="editing = { kind: 'binding', item: clone(b) }">✎</button>
           </article>
         </div>
       </div>

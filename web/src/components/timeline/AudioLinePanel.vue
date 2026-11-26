@@ -291,5 +291,5 @@ onMounted(() => { void refresh(); });
 .waveform { cursor: crosshair; }
 .audio-segment .text { min-width: 0; }
 .notice { padding: 8px 10px; border-radius: 5px; background: var(--accent-soft); font-size: 12px; }
-.danger { color: var(--err); border-color: var(--err-line); }
+.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 </style>

@@ -195,7 +195,7 @@ function modeLabel(mode: string): string {
 .take-count { white-space: nowrap; }
 .pending-check { padding: 12px; }
 .pending-check p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
-.repair-prompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 12px; border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); }
+.repair-prompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 12px; border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); }
 .repair-prompt div { min-width: 0; }
 .repair-prompt p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
 .repair-prompt button { flex: none; }

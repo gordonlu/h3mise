@@ -69,7 +69,8 @@ interface NavItem {
 
 function isActive(to: string): boolean {
   if (to === '/shots') return route.path === '/shots' || route.path.startsWith('/shots/');
-  if (to === '/assets') return route.path.startsWith('/assets');
+  if (to === '/assets?tab=media') return (route.path === '/assets' && route.query.tab === 'media') || route.path.endsWith('/breakdown');
+  if (to === '/assets') return route.path === '/assets' && route.query.tab !== 'media';
   return route.path === to;
 }
 
@@ -134,8 +135,9 @@ async function pickProject(id: string): Promise<void> {
 
 <template>
   <aside ref="root" class="side" :class="{ collapsed: props.collapsed }" :aria-label="t('nav.workspaceAria')">
-    <router-link to="/projects" class="side-brand">
+    <router-link to="/projects" class="side-brand" :title="t('shell.projectList')" :aria-label="t('shell.projectList')">
       <img src="/h3mise-logo.png" alt="H3Mise" />
+      <span v-if="props.collapsed" class="side-brand-mark" aria-hidden="true">H3</span>
     </router-link>
 
     <template v-if="project.current">
@@ -159,7 +161,7 @@ async function pickProject(id: string): Promise<void> {
         </div>
       </div>
 
-      <router-link to="/production" class="side-oneclick" :class="{ active: route.path === '/production' }">
+      <router-link to="/production" class="side-oneclick" :class="{ active: route.path === '/production' }" :title="t('nav.oneClick')" :aria-label="t('nav.oneClick')">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path v-for="d in ICONS.bolt" :key="d" :d="d" /></svg>
         <span>{{ t('nav.oneClick') }}</span>
       </router-link>
@@ -174,6 +176,8 @@ async function pickProject(id: string): Promise<void> {
         :to="item.to"
         class="side-item"
         :class="{ active: isActive(item.to) }"
+        :title="item.label"
+        :aria-label="item.label"
       >
         <svg class="side-icon" viewBox="0 0 24 24" aria-hidden="true"><path v-for="d in ICONS[item.icon]" :key="d" :d="d" /></svg>
         <span class="side-label">{{ item.label }}</span>
@@ -231,7 +235,7 @@ async function pickProject(id: string): Promise<void> {
         </div>
       </div>
 
-      <button class="side-util" @click="render.drawerOpen = true">
+      <button class="side-util" :title="t('common.renderQueue')" :aria-label="t('common.renderQueue')" @click="render.drawerOpen = true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path v-for="d in ICONS.queue" :key="d" :d="d" /></svg>
         <span>{{ t('common.renderQueue') }}</span>
         <span v-if="activeJobs" class="badge accent no-dot">{{ activeJobs }}</span>
@@ -273,6 +277,10 @@ async function pickProject(id: string): Promise<void> {
 .side.collapsed .side-section-label,
 .side.collapsed .side-brand img { display: none; }
 .side.collapsed .side-brand { padding: 2px 0 8px; }
+.side-brand-mark {
+  display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px;
+  background: var(--accent); color: #fff; font: 700 13px/1 var(--mono); letter-spacing: -0.02em;
+}
 .side.collapsed .side-item,
 .side.collapsed .side-util,
 .side.collapsed .side-oneclick { justify-content: center; gap: 0; padding-left: 0; padding-right: 0; }

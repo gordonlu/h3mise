@@ -34,3 +34,18 @@ for (const failure of ['network', 'server', 'unauthorized']) {
     assert.equal(submissions, failure === 'unauthorized' ? 2 : 1);
   });
 }
+
+test('model header is only sent when explicitly set via setModelLabel', async () => {
+  const seen = [];
+  const api = createApiClient('http://local', async (url, init) => {
+    if (url.endsWith('/api/session')) return new Response('{}', { headers: { 'set-cookie': 'h3mise_session=test' } });
+    seen.push(init.headers['X-H3Mise-Agent-Model'] ?? null);
+    return new Response('{"ok":true}');
+  });
+  await api('GET', '/api/health');
+  api.setModelLabel('gemini-pro');
+  await api('GET', '/api/health');
+  api.setModelLabel(null);
+  await api('GET', '/api/health');
+  assert.deepEqual(seen, [null, 'gemini-pro', null]);
+});

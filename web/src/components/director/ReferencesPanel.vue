@@ -298,7 +298,7 @@ function submittedAssetLabel(binding: ReferenceBinding): string {
       <span v-if="videoProfileNotice" class="muted">{{ videoProfileNotice }}</span>
     </div>
     <div class="row">
-      <input ref="uploadInput" class="file-input" type="file" multiple :accept="currentMode === 'ref2va' ? 'image/*,audio/*' : 'image/*'" @change="uploadFiles" />
+      <input ref="uploadInput" class="file-input" type="file" multiple :accept="currentMode === 'ref2va' ? 'image/*,audio/*' : currentMode === 'vref2va' || currentMode === 'faceswap' ? 'image/*,video/*' : 'image/*'" @change="uploadFiles" />
       <button class="primary sm" :disabled="uploading || currentMode === 't2va'" @click="uploadInput?.click()">{{ uploading ? t('shot.production.references.uploadingShort') : t('shot.production.references.uploadBind') }}</button>
       <button class="primary sm" @click="pickerOpen = !pickerOpen">＋ {{ t('shot.references.bindReference') }}</button>
       <router-link :to="uploadPath" class="sm upload-link">{{ t('shot.production.references.library') }}</router-link>
@@ -441,7 +441,7 @@ function submittedAssetLabel(binding: ReferenceBinding): string {
 </template>
 
 <style scoped>
-.warning-note { border-color: var(--warn-line, var(--line-2)); color: var(--warn, inherit); }
+.warning-note { border-color: color-mix(in srgb, var(--warn) 42%, transparent); color: var(--warn); }
 .wrap { flex-wrap: wrap; }
 .upload-link { display: inline-flex; align-items: center; text-decoration: none; }
 .picker { border-color: var(--accent); }

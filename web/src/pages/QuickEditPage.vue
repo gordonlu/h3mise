@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { del, fileUrl, get, post, takeVideoUrl } from '../api/client';
 import { useToastStore } from '../stores/toast';
 import { t } from '../stores/locale';
@@ -118,15 +118,21 @@ async function removeClip(clip: TimelineClip) {
   }
 }
 
+let disposed = false;
+
 async function exportVideo() {
   busy.value = 'export';
   try {
     const started = await post<{ jobId: string }>('/api/timeline/export', {});
+    if (disposed) return;
     exportJob.value = { id: started.jobId, status: 'running', progress: 0 };
     toasts.push({ kind: 'info', text: t('workflow.quickedit.buildingTheFullVideoStayOnThis') });
     for (let i = 0; i < 600; i++) {
+      if (disposed) return;
       await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (disposed) return;
       const job = await get<Omit<ExportJob, 'id'>>(`/api/jobs/${started.jobId}`);
+      if (disposed) return;
       exportJob.value = { id: started.jobId, ...job };
       if (job.status === 'done') {
         activeTakeId.value = null;
@@ -138,13 +144,14 @@ async function exportVideo() {
     }
     throw new Error(t('workflow.quickedit.exportWaitTimedOutTheTaskMay'));
   } catch (e) {
-    toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
+    if (!disposed) toasts.push({ kind: 'err', text: e instanceof Error ? e.message : String(e) });
   } finally {
-    busy.value = '';
+    if (!disposed) busy.value = '';
   }
 }
 
 onMounted(load);
+onUnmounted(() => { disposed = true; });
 </script>
 
 <template>

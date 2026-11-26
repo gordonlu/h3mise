@@ -500,14 +500,19 @@ async function exportStills(): Promise<void> {
   }
 }
 
+let disposed = false;
+
 async function exportPreview(): Promise<void> {
   busy.value = 'preview';
   try {
     await persist();
     const queued = await post<{ jobId: string }>(`/api/shots/${props.shot.id}/composer/preview`, { bind: bindFrames.value });
     for (let i = 0; i < 240; i++) {
+      if (disposed) return;
       await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (disposed) return;
       const job = await get<{ status: string; result: ComposerExportResult | null; error: string | null }>(`/api/jobs/${queued.jobId}`);
+      if (disposed) return;
       if (job.status === 'done') {
         previewAssetId.value = job.result?.videoAssetId ?? null;
         emit('assetsAdded');
@@ -517,9 +522,9 @@ async function exportPreview(): Promise<void> {
       if (job.status === 'failed') throw new Error(job.error ?? 'preview failed');
     }
   } catch (error) {
-    toastError(error);
+    if (!disposed) toastError(error);
   } finally {
-    busy.value = null;
+    if (!disposed) busy.value = null;
   }
 }
 
@@ -569,6 +574,7 @@ onMounted(() => {
   void load();
 });
 onUnmounted(() => {
+  disposed = true;
   stageToken += 1;
   playing.value = false;
   cancelAnimationFrame(playTimer);
@@ -750,7 +756,7 @@ onUnmounted(() => {
 .stage { width: 100%; }
 .stage :deep(canvas) { width: 100% !important; height: auto !important; display: block; }
 .stage-loading { position: absolute; inset: 0; display: grid; place-items: center; background: #111; }
-.stage-error { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.stage-error { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-subtle); }
 .stage-error strong { color: var(--bad); }
 .stage-error p { margin: 0; }
 .drag-layer { position: absolute; inset: 0; cursor: grab; }

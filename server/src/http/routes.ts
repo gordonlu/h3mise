@@ -1554,12 +1554,19 @@ export function buildRoutes(services: AppServices): App {
   // the agent runs inference itself, apply validates + atomically applies the
   // answer with the same code path as the built-in AI.
 
+  const parseImageMode = (raw: unknown): 'base64' | 'paths' | 'omitted' =>
+    raw === 'paths' || raw === 'omitted' || raw === 'base64' ? raw : 'base64';
+
   app.post('/api/ai/actions/:action/prepare', async (c) => {
     const ctx = p(c);
     const action = c.req.param('action');
-    const body = await c.req.json().catch(() => ({}));
+    const rawBody = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const imageMode = parseImageMode(c.req.query('imageMode') ?? rawBody.imageMode);
+    const body = Object.hasOwn(rawBody, 'imageMode')
+      ? Object.fromEntries(Object.entries(rawBody).filter(([key]) => key !== 'imageMode'))
+      : rawBody;
     try {
-      const prepared = await delegationMod.prepareRequest(services.ai, ctx, action, body, c.req.header('x-h3mise-agent-model') ?? null);
+      const prepared = await delegationMod.prepareRequest(services.ai, ctx, action, body, c.req.header('x-h3mise-agent-model') ?? null, imageMode);
       return c.json({
         requestId: prepared.requestId,
         action,
@@ -1607,8 +1614,9 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/ai/requests/:id/step', async (c) => {
     const ctx = p(c);
     const id = c.req.param('id');
+    const imageMode = parseImageMode(c.req.query('imageMode'));
     try {
-      const step = await delegationMod.pendingStep(services.ai, ctx, id);
+      const step = await delegationMod.pendingStep(services.ai, ctx, id, imageMode);
       return c.json({ requestId: id, inference: delegationMod.wireStep(step) });
     } catch (error) {
       if (error instanceof delegationMod.AiDelegationError) return c.json({ error: error.message, code: error.code }, error.httpStatus as 400);

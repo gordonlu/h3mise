@@ -8,7 +8,7 @@
 // auto_director) resume across HTTP calls.
 
 import { createHash } from 'node:crypto';
-import type { AiAgentStatus, AiInferenceMessage, AiInferenceStep, AiRequestDetail, AiRequestSource, AiRequestStatus, AiRequestSummary } from '@h3mise/shared';
+import type { AiAgentStatus, AiImageMode, AiInferenceMessage, AiInferenceStep, AiRequestDetail, AiRequestSource, AiRequestStatus, AiRequestSummary } from '@h3mise/shared';
 import type { ProjectContext } from '../project-store.js';
 import type { AIService, VisionStatus } from './ai.js';
 import { extractJsonValue } from './ai.js';
@@ -28,10 +28,15 @@ const mutex = createKeyedMutex();
 let agentModel: string | null = null;
 let agentLastSeenAt = 0;
 
+const GENERIC_AGENT_LABEL = 'External MCP agent';
+
 /** Record agent activity. Called on every delegated prepare/apply and by the
- * explicit attach endpoint; keeps the presence alive while an agent works. */
+ * explicit attach endpoint; keeps the presence alive while an agent works.
+ * A generic fallback header never overwrites an explicitly attached model label. */
 export function touchAgent(modelLabel: string | null): void {
-  if (modelLabel) agentModel = modelLabel;
+  if (modelLabel && (modelLabel !== GENERIC_AGENT_LABEL || !agentModel)) {
+    agentModel = modelLabel;
+  }
   agentLastSeenAt = Date.now();
 }
 
@@ -93,9 +98,12 @@ function now(): string {
 }
 
 /** Fingerprint of everything a step depends on. Rebuilt on apply to detect
- * that the project changed after prepare (stale delegation). */
+ * that the project changed after prepare (stale delegation). Uses the
+ * path-based representation so apply never re-reads 24 MB of base64 images. */
 function contextHash(action: string, body: Record<string, unknown>, step: InferenceStep): string {
-  return createHash('sha256').update(JSON.stringify({ action, body, system: step.system, messages: step.messages })).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify({ action, body, system: step.system, messages: step.messages, imageFiles: step.imageFiles ?? [] }))
+    .digest('hex');
 }
 
 function parseJson<T>(text: string | null, fallback: T): T {
@@ -145,6 +153,7 @@ export function wireStep(step: InferenceStep): AiInferenceStep {
     json: step.json,
     temperature: step.temperature,
     hasImages: stepHasImages(step),
+    ...(step.imageFiles?.length ? { imageFiles: step.imageFiles } : {}),
   };
 }
 
@@ -195,17 +204,20 @@ export async function prepareRequest(
   action: string,
   body: Record<string, unknown>,
   modelLabel: string | null,
+  imageMode: AiImageMode = 'base64',
 ): Promise<PreparedRequest> {
-  const step = await prepareAction(ai, ctx, action, body);
+  const step = await prepareAction(ai, ctx, action, body, { imageMode });
+  const hashStep = imageMode === 'paths' ? step : await prepareAction(ai, ctx, action, body, { imageMode: 'paths' });
   touchAgent(modelLabel);
-  const hash = contextHash(action, body, step);
+  const hash = contextHash(action, body, hashStep);
   const id = nextId(ctx.db, 'aireq');
   const ts = now();
+  const effectiveModel = modelLabel && (modelLabel !== GENERIC_AGENT_LABEL || !agentModel) ? modelLabel : agentModel;
   const state: StoredState = { raws: [], extra: {}, pendingJson: step.json, vision: null };
   ctx.db.run(
     `INSERT INTO ai_requests (id, action, status, source, model_label, context_hash, body_json, state_json, created_at, updated_at)
      VALUES (?, ?, 'pending', 'agent', ?, ?, ?, ?, ?, ?)`,
-    [id, action, modelLabel, hash, JSON.stringify(body), JSON.stringify(state), ts, ts],
+    [id, action, effectiveModel, hash, JSON.stringify(body), JSON.stringify(state), ts, ts],
   );
   return { requestId: id, step, contextHash: hash };
 }
@@ -213,7 +225,12 @@ export async function prepareRequest(
 /** The inference a pending request waits on. Round 0 is rebuilt from the
  * stored body (pure); later rounds return the step stored by the previous
  * apply. Agents pick up UI-deferred requests with this. */
-export async function pendingStep(ai: AIService, ctx: ProjectContext, id: string): Promise<InferenceStep> {
+export async function pendingStep(
+  ai: AIService,
+  ctx: ProjectContext,
+  id: string,
+  imageMode: AiImageMode = 'base64',
+): Promise<InferenceStep> {
   const row = getRow(ctx, id);
   if (!row) throw new AiDelegationError(`ai request ${id} not found`, 404, 'not_found');
   if (row.status !== 'pending') {
@@ -222,7 +239,7 @@ export async function pendingStep(ai: AIService, ctx: ProjectContext, id: string
   const state = parseState(row);
   if (state.raws.length === 0) {
     const body = parseJson<Record<string, unknown>>(row.body_json, {});
-    return prepareAction(ai, ctx, row.action, body);
+    return prepareAction(ai, ctx, row.action, body, { imageMode });
   }
   if (!state.pendingStep) {
     throw new AiDelegationError('该请求缺少可重放的推理步骤，请重新发起', 409, 'no_step');
@@ -264,7 +281,7 @@ export async function applyResult(
     // side effects between rounds by design, so later rounds would always
     // look stale against the prepare-time snapshot.
     if (state.raws.length === 0) {
-      const first = await prepareAction(ai, ctx, row.action, body);
+      const first = await prepareAction(ai, ctx, row.action, body, { imageMode: 'paths' });
       if (contextHash(row.action, body, first) !== row.context_hash) {
         ctx.db.run('UPDATE ai_requests SET status = ?, error = ?, updated_at = ? WHERE id = ?', ['stale', '项目在 prepare 之后已变化', now(), id]);
         throw new AiDelegationError('项目在 prepare 之后已变化，请重新 prepare', 409, 'stale');

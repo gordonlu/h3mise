@@ -2,6 +2,9 @@
 export function createApiClient(baseUrl, fetchImpl = fetch) {
   let cookie = '';
   let bootstrap = null;
+  let modelLabel = typeof process !== 'undefined' && process.env?.H3MISE_AGENT_MODEL?.trim()
+    ? process.env.H3MISE_AGENT_MODEL.trim()
+    : null;
   async function ensureSession() {
     if (cookie) return cookie;
     if (!bootstrap) bootstrap = (async () => {
@@ -14,13 +17,16 @@ export function createApiClient(baseUrl, fetchImpl = fetch) {
     })().finally(() => { bootstrap = null; });
     return bootstrap;
   }
-  return async function api(method, path, body) {
+  async function api(method, path, body) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const sentCookie = await ensureSession();
       const response = await fetchImpl(`${baseUrl}${path}`, {
         method,
-        headers: { Cookie: sentCookie, 'X-H3Mise-Agent-Model': 'External MCP agent',
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        headers: {
+          Cookie: sentCookie,
+          ...(modelLabel ? { 'X-H3Mise-Agent-Model': modelLabel } : {}),
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        },
         body: body === undefined ? undefined : JSON.stringify(body),
       }).catch(error => { throw new Error(`Cannot reach H3Mise at ${baseUrl}: ${error.message}`); });
       const text = await response.text();
@@ -32,8 +38,18 @@ export function createApiClient(baseUrl, fetchImpl = fetch) {
         if (attempt === 0) continue;
       }
       const message = data && typeof data === 'object' && 'error' in data
-        ? `${data.code ? `[${data.code}] ` : ''}${data.error}` : `HTTP ${response.status}`;
-      throw new Error(`H3Mise ${method} ${path} failed: ${message}`);
+        ? `${data.code ? `[${data.code}] ` : ''}${data.error}`
+        : data && typeof data === 'object' && 'message' in data
+          ? String(data.message)
+          : `HTTP ${response.status}`;
+      const extra = data && typeof data === 'object' && data.currentProject
+        ? ` (currentProject=${JSON.stringify(data.currentProject)})`
+        : '';
+      throw new Error(`H3Mise ${method} ${path} failed: ${message}${extra}`);
     }
+  }
+  api.setModelLabel = (label) => {
+    modelLabel = typeof label === 'string' && label.trim() ? label.trim() : null;
   };
+  return api;
 }

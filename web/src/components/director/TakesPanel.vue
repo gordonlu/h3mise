@@ -318,15 +318,17 @@ function appearanceLabel(character: EntityLite, field: 'costume' | 'hair'): stri
   return field === 'costume' ? tr('shot.takes.creatureAppearance') : tr('shot.takes.creatureSurface');
 }
 
-async function openCommit(takeId: string) {
+async function openCommit(takeId: string, scroll = true) {
   commitTarget.value = takeId;
   commitForm.value = structuredClone(toRaw(props.actualState ?? emptyState()));
   // heldItems edited as comma-separated text per character.
   const ht: Record<string, string> = {};
   for (const [k, v] of Object.entries(commitForm.value.heldItems ?? {})) ht[k] = v.join(', ');
   heldItemsText.value = ht;
-  await nextTick();
-  commitPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scroll) {
+    await nextTick();
+    commitPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 async function selectAndOpenCommit(takeId: string) {
@@ -386,11 +388,40 @@ function onKey(e: KeyboardEvent) {
   else if (k === 'b') { e.preventDefault(); assignSlot(t.id, 'B'); }
 }
 
+const noteDrafts = ref<Record<string, string>>({});
+let noteTimer: ReturnType<typeof setTimeout> | null = null;
+function startNoteEdit(take: Take): void {
+  noteDrafts.value[take.id] = take.notes ?? '';
+  noteEdit.value = take.id;
+}
+function onNoteInput(takeId: string, value: string): void {
+  noteDrafts.value[takeId] = value;
+  if (noteTimer) clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => {
+    noteTimer = null;
+    void props.onUpdate(takeId, { notes: value });
+  }, 500);
+}
+function finishNoteEdit(take: Take): void {
+  if (noteTimer) {
+    clearTimeout(noteTimer);
+    noteTimer = null;
+  }
+  const value = noteDrafts.value[take.id];
+  if (value !== undefined && value !== (take.notes ?? '')) {
+    void props.onUpdate(take.id, { notes: value });
+  }
+  noteEdit.value = null;
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onKey);
-  if (needsContinuity.value && props.selectedTakeId) void openCommit(props.selectedTakeId);
+  if (needsContinuity.value && props.selectedTakeId) void openCommit(props.selectedTakeId, false);
 });
-onUnmounted(() => window.removeEventListener('keydown', onKey));
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey);
+  if (noteTimer) clearTimeout(noteTimer);
+});
 </script>
 
 <template>
@@ -759,13 +790,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 
           <textarea
             v-if="noteEdit === t.id"
-            :value="t.notes"
+            :value="noteDrafts[t.id] ?? t.notes"
             rows="2"
             :placeholder="tr('shot.takes.notesFailurePlaceholder')"
-            @blur="noteEdit = null"
-            @input="onUpdate(t.id, { notes: ($event.target as HTMLTextAreaElement).value })"
+            @blur="finishNoteEdit(t)"
+            @input="onNoteInput(t.id, ($event.target as HTMLTextAreaElement).value)"
           />
-          <button v-else class="sm ghost note-btn" @click="noteEdit = t.id">{{ t.notes || `＋ ${tr('shot.takes.note')}` }}</button>
+          <button v-else class="sm ghost note-btn" @click="startNoteEdit(t)">{{ t.notes || `＋ ${tr('shot.takes.note')}` }}</button>
         </div>
       </div>
     </div>

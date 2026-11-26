@@ -158,8 +158,6 @@ body {
 
 ::selection { background: var(--accent-soft-2); }
 
-}
-
 a { color: var(--accent-text); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -204,8 +202,7 @@ button.primary:disabled { background: var(--accent-disabled); border-color: var(
 button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 button.danger:hover { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 button.ghost { background: none; border-color: transparent; color: var(--text-2); box-shadow: none; }
-button.ghost:hover { box-shadow: none; transform: none; background: var(--bg-subtle); }
-button.ghost:hover { background: var(--bg-subtle); border-color: transparent; color: var(--text); }
+button.ghost:hover { box-shadow: none; transform: none; background: var(--bg-subtle); border-color: transparent; color: var(--text); }
 button.sm { padding: 6px 12px; font-size: 12px; border-radius: 9px; }
 
 :is(button, a, input, select, textarea, [tabindex]):focus-visible {

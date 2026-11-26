@@ -47,14 +47,15 @@ const ICONS: Record<string, string> = {
 
 const node = computed<CanvasNode | null>(() => store.selectedNode);
 const many = computed(() => store.selection.length > 1);
-const body = computed(() => (node.value ? bodies[node.value.kind] ?? DefaultInspector : EmptyInspector));
+const body = computed(() => (many.value ? MultiInspector : node.value ? bodies[node.value.kind] ?? DefaultInspector : EmptyInspector));
 
 const status = computed(() => {
-  if (!node.value || node.value.kind !== 'shot') return '';
+  if (many.value || !node.value || node.value.kind !== 'shot') return '';
   return SHOT_USER_STATUS_LABEL[(node.value.data as ShotNodeData).userStatus];
 });
 
 const fullRoute = computed(() => {
+  if (many.value) return null;
   const current = node.value;
   if (!current) return null;
   switch (current.kind) {

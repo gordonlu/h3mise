@@ -25,6 +25,13 @@ const objectSchema = (properties = {}, required = []) => ({
 
 const stringProp = (description) => ({ type: 'string', description });
 
+const H3_MODES = ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', 'vref2va', 'faceswap'];
+const AI_ACTIONS = [
+  'plan_shot', 'improve_camera', 'improve_performance', 'brief_to_plan', 'propose_project',
+  'reality_check', 'continuity_check', 'compile_prompt', 'diagnose_take', 'analyze_take_continuity',
+  'repair_prompt', 'story_to_beats', 'beats_to_shots', 'auto_director',
+];
+
 const tools = [
   {
     name: 'configure_runninghub_frame_profile',
@@ -58,8 +65,12 @@ const tools = [
   },
   {
     name: 'prepare_ai_action',
-    description: 'Prepare validated inference for your own model without calling project AI. Returns requestId, contextHash and exact inference, including reference images when applicable.',
-    inputSchema: objectSchema({ action: stringProp('Delegated action from AGENTS.md.'), body: { type: 'object', additionalProperties: true } }, ['action', 'body']),
+    description: 'Prepare validated inference for your own model without calling project AI. Returns requestId, contextHash and exact inference. Defaults imageMode="paths" so images return local file paths instead of huge base64 blobs.',
+    inputSchema: objectSchema({
+      action: { type: 'string', enum: AI_ACTIONS, description: 'Delegated AI action.' },
+      body: { type: 'object', additionalProperties: true, description: 'Action inputs (e.g. shotId, takeId, promptId, brief, request, problems). Optional for story_to_beats / auto_director.' },
+      imageMode: { type: 'string', enum: ['paths', 'omitted', 'base64'], description: 'How reference images are returned. Defaults to "paths" to avoid base64 token explosion.' },
+    }, ['action']),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
@@ -76,8 +87,13 @@ const tools = [
   },
   {
     name: 'inspect_ai_requests',
-    description: 'List delegated requests or retrieve one pending inference step, without calling a model.',
-    inputSchema: objectSchema({ requestId: { type: 'string' }, status: { type: 'string', enum: ['pending', 'applied', 'failed', 'cancelled', 'stale'] } }),
+    description: 'List delegated requests, retrieve one pending inference step (default imageMode="paths"), or inspect a finished request detail (view="detail").',
+    inputSchema: objectSchema({
+      requestId: { type: 'string' },
+      status: { type: 'string', enum: ['pending', 'applied', 'failed', 'cancelled', 'stale'] },
+      view: { type: 'string', enum: ['step', 'detail'], description: 'When requestId is given: "step" fetches the next pending inference step; "detail" returns stored status/result/error for any state.' },
+      imageMode: { type: 'string', enum: ['paths', 'omitted', 'base64'], description: 'Image representation for view="step". Defaults to "paths".' },
+    }),
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
@@ -233,15 +249,18 @@ const tools = [
     description: 'Update safe canonical fields on one existing Shot.',
     inputSchema: objectSchema({
       shotId: stringProp('Exact Shot ID returned by list_shots.'),
+      title: { type: 'string' },
       sequenceId: { type: ['string', 'null'] },
+      storyBeatId: { type: ['string', 'null'] },
       purpose: { type: 'string' },
       shotFunction: { type: 'string', enum: ['establishing', 'wide', 'medium', 'closeup', 'insert', 'reaction', 'action', 'transition', 'montage', 'pov', 'aerial', 'dialogue', 'other'] },
       durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
       aspectRatio: { type: 'string' },
-      h3Mode: { type: ['string', 'null'], enum: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va', null] },
+      h3Mode: { type: ['string', 'null'], enum: [...H3_MODES, null] },
       primaryCharacterId: { type: ['string', 'null'] },
       sceneId: { type: ['string', 'null'] },
       renderDependencyMode: { type: 'string', enum: ['auto', 'independent', 'planned', 'previous_take', 'manual_frame'] },
+      dependsOnShotId: { type: ['string', 'null'], description: 'Upstream Shot ID for previous_take frame-bridge chaining.' },
       screenDirection: { type: 'string', enum: ['left_to_right', 'right_to_left', 'neutral'] },
       intentionalReversal: { type: 'boolean' },
     }, ['shotId']),
@@ -263,6 +282,19 @@ const tools = [
       ignore: { type: 'array', items: { type: 'string' } },
       label: { type: 'string' },
       shotId: { type: ['string', 'null'] },
+      targetEntityId: { type: ['string', 'null'] },
+      referenceUse: { type: 'string', enum: ['general', 'face', 'full_body', 'costume', 'pose', 'expression', 'three_view', 'seated', 'scene_plate', 'lighting', 'camera', 'performance'] },
+      framePolicy: { type: 'string', enum: ['unassigned', 'crop', 'outpaint', 'reference_only'] },
+      audioPolicy: {
+        type: ['object', 'null'],
+        properties: {
+          mode: { type: 'string', enum: ['reference', 'fully_copy', 'partially_copy', 'resings'] },
+          startSeconds: { type: ['number', 'null'] },
+          endSeconds: { type: ['number', 'null'] },
+        },
+        required: ['mode'],
+        additionalProperties: false,
+      },
     }, ['assetId', 'roles']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
@@ -329,7 +361,7 @@ const tools = [
     description: 'Compile and persist a new deterministic H3 prompt version from the current canonical Shot state.',
     inputSchema: objectSchema({
       shotId: stringProp('Shot to compile.'),
-      mode: { type: 'string', enum: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'], description: 'Optional H3 generation mode.' },
+      mode: { type: 'string', enum: H3_MODES, description: 'Optional H3 generation mode.' },
       durationSeconds: { type: 'number', exclusiveMinimum: 0, description: 'Optional requested duration.' },
     }, ['shotId']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -340,7 +372,7 @@ const tools = [
     inputSchema: objectSchema({
       shotId: stringProp('Exact Shot ID returned by list_shots.'),
       text: stringProp('Complete provider-ready prompt text.'),
-      mode: { type: 'string', enum: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'] },
+      mode: { type: 'string', enum: H3_MODES },
     }, ['shotId', 'text', 'mode']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
@@ -350,7 +382,7 @@ const tools = [
     inputSchema: objectSchema({
       shotId: stringProp('Shot that owns both the source Take and new prompt.'),
       text: stringProp('Complete revised prompt text.'),
-      mode: { type: 'string', enum: ['t2va', 'i2va', 'fl2va', 'l2va', 'ref2va'] },
+      mode: { type: 'string', enum: H3_MODES },
       sourceTakeId: stringProp('Take whose observed problem motivated this revision.'),
       revisionReason: stringProp('Concrete observed problem this revision addresses.'),
       preservedAspects: { type: 'array', items: { type: 'string' }, description: 'Aspects that must remain unchanged.' },
@@ -390,23 +422,25 @@ const tools = [
       megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.0736] },
       durationSeconds: { type: 'number', description: 'Exact requested duration. Defaults to the Shot duration.' },
       aspectRatio: { type: 'string' },
+      resolution: { type: 'string' },
+      providerParams: { type: 'object', additionalProperties: true },
     }, ['shotId', 'promptVersionId', 'providerId']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: 'submit_render',
-    description: 'Submit one paid render after explicit user authorization. Requires confirmPaid=true on every call; preflight and duplicate-job gates still run server-side.',
+    description: 'Submit one render job. Paid/local providers (runninghub, comfyui) require explicit user authorization and confirmPaid=true on every call; mock renders run offline for free. Server-side preflight and duplicate-job gates still apply.',
     inputSchema: objectSchema({
       shotId: stringProp('Exact Shot ID to render.'),
       promptVersionId: stringProp('Exact immutable PromptVersion to render.'),
-      providerId: { type: 'string', enum: ['runninghub', 'comfyui'], description: 'Paid or local generation provider.' },
+      providerId: { type: 'string', enum: ['mock', 'runninghub', 'comfyui'], description: 'Render provider (mock is free offline; runninghub/comfyui require confirmPaid=true).' },
       durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
       aspectRatio: { type: 'string' },
       resolution: { type: 'string' },
       megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.0736] },
       providerParams: { type: 'object', additionalProperties: true },
-      confirmPaid: { type: 'boolean', const: true, description: 'Must be true, confirming the user explicitly authorized this paid submission.' },
-    }, ['shotId', 'promptVersionId', 'providerId', 'confirmPaid']),
+      confirmPaid: { type: 'boolean', description: 'Must be true for runninghub/comfyui, confirming the user explicitly authorized this submission.' },
+    }, ['shotId', 'promptVersionId', 'providerId']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   {
@@ -551,7 +585,12 @@ async function callTool(name, args = {}) {
       };
       return Array.isArray(result) ? result.map(compact) : compact(result);
     }
-    case 'prepare_ai_action': return api('POST', `/api/ai/actions/${encodeURIComponent(requireString(args, 'action'))}/prepare`, args.body ?? {});
+    case 'prepare_ai_action': {
+      const imageMode = args.imageMode === 'base64' || args.imageMode === 'omitted' || args.imageMode === 'paths'
+        ? args.imageMode
+        : 'paths';
+      return api('POST', `/api/ai/actions/${encodeURIComponent(requireString(args, 'action'))}/prepare?imageMode=${imageMode}`, args.body ?? {});
+    }
     case 'apply_ai_result': {
       if (!Object.hasOwn(args, 'result')) throw new Error('result is required');
       return api('POST', `/api/ai/requests/${encodeURIComponent(requireString(args, 'requestId'))}/apply`, {
@@ -560,13 +599,29 @@ async function callTool(name, args = {}) {
     }
     case 'agent_session': {
       if (args.action === 'inspect') return api('GET', '/api/ai/agent');
-      if (args.action === 'attach') return api('POST', '/api/ai/agent/session', { model: requireString(args, 'model') });
-      if (args.action === 'detach') return api('DELETE', '/api/ai/agent/session');
+      if (args.action === 'attach') {
+        const model = requireString(args, 'model');
+        const attached = await api('POST', '/api/ai/agent/session', { model });
+        api.setModelLabel(model);
+        return attached;
+      }
+      if (args.action === 'detach') {
+        const detached = await api('DELETE', '/api/ai/agent/session');
+        api.setModelLabel(null);
+        return detached;
+      }
       throw new Error('invalid agent session action');
     }
-    case 'inspect_ai_requests': return api('GET', args.requestId
-      ? `/api/ai/requests/${encodeURIComponent(args.requestId)}/step`
-      : `/api/ai/requests${args.status ? `?status=${encodeURIComponent(args.status)}` : ''}`);
+    case 'inspect_ai_requests': {
+      if (args.requestId) {
+        if (args.view === 'detail') return api('GET', `/api/ai/requests/${encodeURIComponent(args.requestId)}`);
+        const imageMode = args.imageMode === 'base64' || args.imageMode === 'omitted' || args.imageMode === 'paths'
+          ? args.imageMode
+          : 'paths';
+        return api('GET', `/api/ai/requests/${encodeURIComponent(args.requestId)}/step?imageMode=${imageMode}`);
+      }
+      return api('GET', `/api/ai/requests${args.status ? `?status=${encodeURIComponent(args.status)}` : ''}`);
+    }
     case 'h3mise_status': {
       const [health, currentProject] = await Promise.all([
         api('GET', '/api/health'),
@@ -657,13 +712,19 @@ async function callTool(name, args = {}) {
       ...(args.megapixels === undefined ? {} : { megapixels: args.megapixels }),
       ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
       ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),
+      ...(args.resolution === undefined ? {} : { resolution: args.resolution }),
+      ...(args.providerParams === undefined ? {} : { providerParams: args.providerParams }),
     });
     case 'submit_render': {
-      if (args.confirmPaid !== true) throw new Error('confirmPaid=true is required for every paid render submission');
+      const providerId = typeof args.providerId === 'string' && args.providerId.trim() ? args.providerId.trim() : null;
+      if (providerId !== 'mock' && args.confirmPaid !== true) {
+        throw new Error('confirmPaid=true is required for every paid render submission');
+      }
       return api('POST', '/api/render', {
         shotId: requireString(args, 'shotId'),
         promptVersionId: requireString(args, 'promptVersionId'),
         providerId: requireString(args, 'providerId'),
+        ...(args.confirmPaid === true ? { confirmed: true } : {}),
         ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
         ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),
         ...(args.resolution === undefined ? {} : { resolution: args.resolution }),
@@ -784,7 +845,7 @@ async function handle(message) {
         if (typeof name !== 'string') throw new Error('tool name is required');
         try {
           const value = await callTool(name, message.params?.arguments ?? {});
-          result(message.id, { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
+          result(message.id, { content: [{ type: 'text', text: JSON.stringify(value) }] });
         } catch (toolError) {
           result(message.id, {
             isError: true,

@@ -70,7 +70,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.composer-error { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.composer-error { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-subtle); }
 .composer-error strong { color: var(--bad); }
 .composer-error p { margin: 0; }
 .err-detail { max-height: 120px; overflow: auto; font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; }

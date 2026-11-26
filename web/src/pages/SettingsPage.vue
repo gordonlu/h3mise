@@ -3,16 +3,24 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { get, post, put } from '../api/client';
 import { useProjectStore } from '../stores/project';
+import { useToastStore } from '../stores/toast';
 import { locale, t } from '../stores/locale';
 import type { AiAppProfile, ComfyUiWorkflowProfile, DirectorStylePreset, ProjectConfig, RunningHubRegion, StoryboardProviderProfile, WorkflowProfile } from '@h3mise/shared';
 
 const project = useProjectStore();
+const toasts = useToastStore();
 const route = useRoute();
 const health = ref<{ ffmpeg: { available: boolean; ffmpegVersion: string | null }; runningHubConfigured: boolean; comfyUiConfigured: boolean; aiConfigured: boolean } | null>(null);
 const healthError = ref('');
 const profile = ref<AiAppProfile | null>(null);
 const verifying = ref(false);
 const notice = ref('');
+const noticeKind = ref<'ok' | 'err' | 'info'>('info');
+function setNotice(text: string, kind: 'ok' | 'err' | 'info' = 'ok'): void {
+  notice.value = text;
+  noticeKind.value = kind;
+  if (text) toasts.push({ kind, text });
+}
 const profileJson = ref('');
 const editingProfile = ref(false);
 const apiKeyInfo = ref<{ source: 'settings' | 'env' | 'none'; configured: boolean } | null>(null);
@@ -126,9 +134,9 @@ async function saveRunningHubRegion(region: RunningHubRegion) {
     profileJson.value = JSON.stringify(result.profile, null, 2);
     apiKeyInfo.value = await get<{ source: 'settings' | 'env' | 'none'; configured: boolean }>('/api/providers/runninghub/apikey');
     await project.refreshProviders();
-    notice.value = t('pages.settings.regionSaved');
+    setNotice(t('pages.settings.regionSaved'), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.regionSaveFailed', { msg: e instanceof Error ? e.message : String(e) });
+    setNotice(t('pages.settings.regionSaveFailed', { msg: e instanceof Error ? e.message : String(e) }), 'err');
   } finally {
     savingRegion.value = false;
   }
@@ -190,7 +198,7 @@ async function saveProjectConfig() {
   const title = projectConfigForm.value.title.trim();
   const duration = Number(projectConfigForm.value.default_duration_seconds);
   if (!title || !Number.isFinite(duration) || duration < 1 || duration > 15) {
-    notice.value = t('pages.settings.projectSaveInvalid');
+    setNotice(t('pages.settings.projectSaveInvalid'), 'err');
     return;
   }
   savingProjectConfig.value = true;
@@ -198,9 +206,9 @@ async function saveProjectConfig() {
     await project.saveConfig({ ...projectConfigForm.value, title, default_duration_seconds: duration });
     await project.refreshProjects();
     projectConfigDirty.value = false;
-    notice.value = t('pages.settings.projectSaved');
+    setNotice(t('pages.settings.projectSaved'), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.projectSaveFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.projectSaveFailed', { msg: errorMessage(e) }), 'err');
   } finally {
     savingProjectConfig.value = false;
   }
@@ -212,9 +220,9 @@ async function verify() {
   try {
     profile.value = await post<AiAppProfile>('/api/providers/runninghub/verify');
     profileJson.value = JSON.stringify(profile.value, null, 2);
-    notice.value = t('pages.settings.detectDone', { note: localizedProviderNote(profile.value.verification.note) });
+    setNotice(t('pages.settings.detectDone', { note: localizedProviderNote(profile.value.verification.note) }), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.detectFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.detectFailed', { msg: errorMessage(e) }), 'err');
   } finally {
     verifying.value = false;
   }
@@ -225,15 +233,15 @@ async function saveProfile() {
   try {
     parsed = JSON.parse(profileJson.value);
   } catch (e) {
-    notice.value = t('pages.settings.jsonParseFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.jsonParseFailed', { msg: errorMessage(e) }), 'err');
     return;
   }
   try {
     profile.value = await put('/api/providers/runninghub/profile', parsed);
     editingProfile.value = false;
-    notice.value = t('pages.settings.profileSaved');
+    setNotice(t('pages.settings.profileSaved'), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.saveFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.saveFailed', { msg: errorMessage(e) }), 'err');
   }
 }
 
@@ -242,9 +250,9 @@ async function saveProviderConcurrency(provider: 'runninghub' | 'comfyui', value
   try {
     await put(`/api/providers/${provider}/concurrency`, { concurrency });
     await load();
-    notice.value = t('pages.settings.concurrencySaved', { n: concurrency });
+    setNotice(t('pages.settings.concurrencySaved', { n: concurrency }), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.concurrencySaveFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.concurrencySaveFailed', { msg: errorMessage(e) }), 'err');
   }
 }
 
@@ -252,10 +260,10 @@ async function saveInstanceType(instanceType: 'default' | 'plus' | 'ultra') {
   if (!profile.value) return;
   try {
     profile.value = await put<AiAppProfile>('/api/providers/runninghub/profile', { ...profile.value, instanceType });
-    notice.value = `运行实例已设为 ${instanceType}`;
+    setNotice(`运行实例已设为 ${instanceType}`, 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = errorMessage(e);
+    setNotice(errorMessage(e), 'err');
   }
 }
 
@@ -271,22 +279,22 @@ async function saveCostEvidence() {
         ? { ...app, capabilities: { ...(app.capabilities ?? { supportedModes: [] }), costEstimate } }
         : app),
     });
-    notice.value = t('shot.production.cost.saved');
-  } catch (error) { notice.value = errorMessage(error); }
+    setNotice(t('shot.production.cost.saved'), 'ok');
+  } catch (error) { setNotice(errorMessage(error), 'err'); }
 }
 
 async function saveApiKey() {
   if (!apiKeyInput.value.trim()) {
-    notice.value = t('pages.settings.enterApiKey');
+    setNotice(t('pages.settings.enterApiKey'), 'err');
     return;
   }
   savingKey.value = true;
   try {
     apiKeyInfo.value = await put('/api/providers/runninghub/apikey', { key: apiKeyInput.value });
     apiKeyInput.value = '';
-    notice.value = t('pages.settings.apiKeySaved');
+    setNotice(t('pages.settings.apiKeySaved'), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.apiKeySaveFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.apiKeySaveFailed', { msg: errorMessage(e) }), 'err');
   } finally {
     savingKey.value = false;
   }
@@ -317,10 +325,10 @@ async function saveAiApps() {
     profile.value = updated;
     profileJson.value = JSON.stringify(updated, null, 2);
     aiApps.value = updated.apps.map((app) => ({ ...app }));
-    notice.value = t('pages.settings.aiAppsSaved');
+    setNotice(t('pages.settings.aiAppsSaved'), 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = t('pages.settings.aiAppsSaveFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.aiAppsSaveFailed', { msg: errorMessage(e) }), 'err');
   } finally {
     savingAiApps.value = false;
   }
@@ -328,26 +336,26 @@ async function saveAiApps() {
 
 async function activateAiApp(app: WorkflowProfile) {
   if (!app.inputs?.prompt?.nodeId) {
-    notice.value = '该 App 还没有节点映射：请先保存，再检测节点，之后才能设为当前工作流。';
+    setNotice('该 App 还没有节点映射：请先保存，再检测节点，之后才能设为当前工作流。', 'err');
     return;
   }
   try {
     profile.value = await post<AiAppProfile>(`/api/providers/runninghub/workflows/${encodeURIComponent(app.id)}/activate`, {});
     profileJson.value = JSON.stringify(profile.value, null, 2);
     aiApps.value = profile.value.apps.map((entry) => ({ ...entry }));
-    notice.value = `已切换到 ${app.name || app.appId}`;
+    setNotice(`已切换到 ${app.name || app.appId}`, 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = errorMessage(e);
+    setNotice(errorMessage(e), 'err');
   }
 }
 
 async function verifyAiApp(app: WorkflowProfile) {
   if (!profile.value?.apps?.some((entry) => entry.id === app.id)) {
-    notice.value = '请先保存 AI App 列表，再检测节点。';
+    setNotice('请先保存 AI App 列表，再检测节点。', 'err');
     return;
   }
-  notice.value = '正在检测节点…';
+  setNotice('正在检测节点…', 'info');
   try {
     const workflow = await post<WorkflowProfile>(`/api/providers/runninghub/workflows/${encodeURIComponent(app.id)}/verify`, {});
     profile.value = await get<AiAppProfile | null>('/api/providers/runninghub/profile');
@@ -355,10 +363,10 @@ async function verifyAiApp(app: WorkflowProfile) {
       profileJson.value = JSON.stringify(profile.value, null, 2);
       aiApps.value = profile.value.apps.map((entry) => ({ ...entry }));
     }
-    notice.value = workflow.verification?.note ?? '节点检测完成';
+    setNotice(workflow.verification?.note ?? '节点检测完成', 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = errorMessage(e);
+    setNotice(errorMessage(e), 'err');
     profile.value = await get<AiAppProfile | null>('/api/providers/runninghub/profile').catch(() => profile.value);
     if (profile.value) {
       profileJson.value = JSON.stringify(profile.value, null, 2);
@@ -392,10 +400,10 @@ async function saveFrameApp() {
       appId: frameAppIdInput.value.trim(),
     });
     frameAppIdInput.value = frameProfile.value.appId;
-    notice.value = 'Frame App 已保存；现在可以检测节点。';
+    setNotice('Frame App 已保存；现在可以检测节点。', 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = `Frame App 保存失败：${errorMessage(e)}`;
+    setNotice(`Frame App 保存失败：${errorMessage(e)}`, 'err');
   } finally {
     savingFrame.value = false;
   }
@@ -405,10 +413,10 @@ async function verifyFrameApp() {
   verifyingFrame.value = true;
   try {
     frameProfile.value = await post<AiAppProfile>('/api/providers/runninghub/frame-profile/verify', {});
-    notice.value = localizedProviderNote(frameProfile.value.verification.note);
+    setNotice(localizedProviderNote(frameProfile.value.verification.note), 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = `Frame 节点检测失败：${errorMessage(e)}`;
+    setNotice(`Frame 节点检测失败：${errorMessage(e)}`, 'err');
   } finally {
     verifyingFrame.value = false;
   }
@@ -423,10 +431,10 @@ async function importComfyWorkflow(event: Event) {
     const parsed = JSON.parse(await file.text());
     comfyProfile.value = await post<ComfyUiWorkflowProfile>('/api/providers/comfyui/import', parsed);
     comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
-    notice.value = t('pages.settings.comfyImported', { n: Object.keys(comfyProfile.value.workflow).length });
+    setNotice(t('pages.settings.comfyImported', { n: Object.keys(comfyProfile.value.workflow).length }), 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = t('pages.settings.comfyImportFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.comfyImportFailed', { msg: errorMessage(e) }), 'err');
   }
 }
 
@@ -436,10 +444,10 @@ async function saveComfyProfile() {
     comfyProfile.value = await put<ComfyUiWorkflowProfile>('/api/providers/comfyui/profile', parsed);
     comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
     editingComfyProfile.value = false;
-    notice.value = t('pages.settings.comfyProfileSaved');
+    setNotice(t('pages.settings.comfyProfileSaved'), 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = t('pages.settings.comfyProfileSaveFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.comfyProfileSaveFailed', { msg: errorMessage(e) }), 'err');
   }
 }
 
@@ -448,10 +456,10 @@ async function verifyComfyProfile() {
   try {
     comfyProfile.value = await post<ComfyUiWorkflowProfile>('/api/providers/comfyui/verify', {});
     comfyProfileJson.value = JSON.stringify(comfyProfile.value, null, 2);
-    notice.value = t('pages.settings.comfyVerified', { note: localizedProviderNote(comfyProfile.value.verification.note) });
+    setNotice(t('pages.settings.comfyVerified', { note: localizedProviderNote(comfyProfile.value.verification.note) }), 'ok');
     await project.refreshProviders();
   } catch (e) {
-    notice.value = t('pages.settings.comfyVerifyFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.comfyVerifyFailed', { msg: errorMessage(e) }), 'err');
   } finally {
     verifyingComfy.value = false;
   }
@@ -461,9 +469,9 @@ async function saveStoryboardProfile() {
   if (!storyboardProfile.value) return;
   try {
     storyboardProfile.value = await put<StoryboardProviderProfile>('/api/providers/runninghub/storyboard-profile', storyboardProfile.value);
-    notice.value = t('pages.settings.storyboardSaved');
+    setNotice(t('pages.settings.storyboardSaved'), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.storyboardSaveFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.storyboardSaveFailed', { msg: errorMessage(e) }), 'err');
   }
 }
 
@@ -472,9 +480,9 @@ async function verifyStoryboardProfile() {
   try {
     await saveStoryboardProfile();
     storyboardProfile.value = await post<StoryboardProviderProfile>('/api/providers/runninghub/storyboard-profile/verify', {});
-    notice.value = t('pages.settings.storyboardVerified', { note: localizedProviderNote(storyboardProfile.value.verification.note) });
+    setNotice(t('pages.settings.storyboardVerified', { note: localizedProviderNote(storyboardProfile.value.verification.note) }), 'ok');
   } catch (e) {
-    notice.value = t('pages.settings.storyboardVerifyFailed', { msg: errorMessage(e) });
+    setNotice(t('pages.settings.storyboardVerifyFailed', { msg: errorMessage(e) }), 'err');
   } finally {
     verifyingStoryboard.value = false;
   }
@@ -493,6 +501,10 @@ watch(() => route.hash, async (hash) => {
   <div class="page">
     <h1>{{ t('pages.settings.title') }}</h1>
     <p><RouterLink to="/welcome">{{ t('welcome.guide') }}</RouterLink></p>
+    <div v-if="notice" class="settings-notice" :class="noticeKind" role="status">
+      <span>{{ notice }}</span>
+      <button class="sm ghost" :aria-label="t('common.cancel')" @click="notice = ''">✕</button>
+    </div>
 
     <div class="settings-layout">
       <nav class="settings-nav" :aria-label="t('pages.settings.title')">
@@ -717,11 +729,6 @@ watch(() => route.hash, async (hash) => {
             <span class="mono">AI_BASE_URL / AI_API_KEY / AI_MODEL</span>
             {{ t('pages.settings.aiCompatibility') }}
           </p>
-          <label class="field">
-            {{ t('pages.settings.concurrency') }}
-            <input type="number" min="1" max="4" :value="comfyProfile?.concurrency ?? 1" @change="saveProviderConcurrency('comfyui', Number(($event.target as HTMLInputElement).value))" />
-            <span class="muted">{{ t('pages.settings.aiConcurrencyHelp') }}</span>
-          </label>
           <p class="muted">{{ t('pages.settings.externalAiHelp') }}</p>
           <div class="resource-links">
             <span class="muted">{{ t('pages.settings.skillsResources') }}</span>
@@ -742,6 +749,11 @@ watch(() => route.hash, async (hash) => {
           <p class="muted">
             {{ t('pages.settings.comfyHelpBefore') }} <strong>API Format</strong> {{ t('pages.settings.comfyHelpAfter') }}
           </p>
+          <label class="field">
+            {{ t('pages.settings.concurrency') }}
+            <input type="number" min="1" max="4" :value="comfyProfile?.concurrency ?? 1" @change="saveProviderConcurrency('comfyui', Number(($event.target as HTMLInputElement).value))" />
+            <span class="muted">{{ t('pages.settings.aiConcurrencyHelp') }}</span>
+          </label>
           <div class="row wrap">
             <label class="sm file-button">
               {{ t('pages.settings.importWorkflow') }}
@@ -819,8 +831,12 @@ h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; letter-spa
 .frame-app summary { cursor: pointer; font-weight: 600; font-size: 12.5px; margin-bottom: 8px; }
 .payload-preview { max-height: 260px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); font-size: 11px; white-space: pre-wrap; }
 .ai-app-header { justify-content: space-between; margin-bottom: 6px; }
+.settings-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-2); font-size: 12.5px; }
+.settings-notice.ok { border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: var(--ok-soft); color: var(--ok); }
+.settings-notice.err { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: var(--bad-soft); color: var(--bad); }
+.settings-notice.info { border-color: color-mix(in srgb, var(--info) 45%, transparent); background: var(--info-soft); color: var(--info); }
 .project-save-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
-.danger { color: var(--err); border-color: var(--err-line); }
-.danger:hover { background: var(--err-soft); }
+.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.danger:hover { background: var(--bad-soft); }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 </style>

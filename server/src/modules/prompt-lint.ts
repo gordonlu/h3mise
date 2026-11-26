@@ -1,12 +1,21 @@
 // Deterministic prompt lint. No AI, no provider call: it catches wording that
 // paid models commonly misread before the user spends a render.
-import type { H3Mode } from '@h3mise/shared';
+import type { EntityKind, H3Mode } from '@h3mise/shared';
 
 export interface PromptLintIssue {
   key: string;
   severity: 'error' | 'warning' | 'info';
   message: string;
   suggestion: string;
+}
+
+const NON_HUMAN_ENTITY_KINDS = new Set<EntityKind>(['creature', 'prop', 'vehicle', 'scene']);
+
+/** Strip H3Mise-internal XML attributes (speaker/start/end) from <d ...> tags
+ * before submitting to video models so models receive clean official `<d>...</d>`
+ * tags instead of reading metadata attributes aloud. */
+export function stripInternalDialogueAttributes(text: string): string {
+  return text.replace(/<d\s+[^>]*\b(?:speaker|start|end)\s*=[^>]*>/gi, '<d>');
 }
 
 const NEGATIVE_PATTERNS: Array<{ re: RegExp; label: string; suggestion: string }> = [
@@ -25,7 +34,23 @@ const FIELD_CHECKS: Array<{ key: string; label: string; re: RegExp; suggestion: 
 
 const HALF_SENTENCE = /[，,、；;：:]\s*$|\b(?:and|but|with|then)\s*$/i;
 
-export function lintPrompt(text: string, options: { mode?: H3Mode; hasAudioRefs?: boolean; hasDialogue?: boolean; pictureCount?: number; audioCount?: number; durationSeconds?: number; nativeDialogue?: boolean } = {}): PromptLintIssue[] {
+export interface PromptLintOptions {
+  mode?: H3Mode;
+  hasAudioRefs?: boolean;
+  hasDialogue?: boolean;
+  pictureCount?: number;
+  audioCount?: number;
+  durationSeconds?: number;
+  nativeDialogue?: boolean;
+  /** Audio-locked mode (e.g. fully_copy reference audio) where timing comes from the audio track. */
+  audioLocked?: boolean;
+  /** Entity kind of the primary subject; non-human kinds (creature/prop/vehicle/scene) exempt hair/wardrobe lint. */
+  primaryEntityKind?: EntityKind | null;
+  /** Explicitly exempt the human hair/wardrobe lint check. */
+  skipHairCheck?: boolean;
+}
+
+export function lintPrompt(text: string, options: PromptLintOptions = {}): PromptLintIssue[] {
   const issues: PromptLintIssue[] = [];
   const clean = text.trim();
   if (!clean) {
@@ -33,8 +58,11 @@ export function lintPrompt(text: string, options: { mode?: H3Mode; hasAudioRefs?
     return issues;
   }
 
+  // Strip spoken dialogue inside <d>...</d> before checking negative wording so
+  // natural lines like “别难过 / 别闹了 / don't go” never trigger visual lint.
+  const visualText = clean.replace(/<d\b[^>]*>[\s\S]*?<\/d>/gi, ' ');
   const negatives = [...new Set(NEGATIVE_PATTERNS.flatMap(({ re, label, suggestion }) => {
-    const matches = clean.match(re) ?? [];
+    const matches = visualText.match(re) ?? [];
     return matches.length ? [{ label, words: [...new Set(matches)].join('、'), suggestion }] : [];
   }))];
   for (const item of negatives) {
@@ -46,7 +74,10 @@ export function lintPrompt(text: string, options: { mode?: H3Mode; hasAudioRefs?
     });
   }
 
+  const exemptHair = options.skipHairCheck === true
+    || (options.primaryEntityKind != null && NON_HUMAN_ENTITY_KINDS.has(options.primaryEntityKind));
   for (const field of FIELD_CHECKS) {
+    if (field.key === 'hair' && exemptHair) continue;
     if (!field.re.test(clean)) {
       issues.push({
         key: `prompt_lint.missing_${field.key}`,
@@ -104,15 +135,27 @@ export function lintPrompt(text: string, options: { mode?: H3Mode; hasAudioRefs?
   }
 
   const dialogueTags = [...clean.matchAll(/<d\b([^>]*)>([\s\S]*?)<\/d>/gi)];
+  const hasProseSpeakerCue = /\(S\d+\)|<Subject\s+\d+>/i.test(clean) || options.hasAudioRefs === true || options.audioLocked === true;
   for (const match of dialogueTags) {
-    const attributes = match[1] ?? '';
-    if (!/\bspeaker\s*=\s*["'][^"']+["']/i.test(attributes)) {
-      issues.push({ key: 'prompt_lint.dialogue_speaker', severity: 'error', message: '对白缺少明确的 speaker 角色标记', suggestion: '每句对白都标记说话角色，避免模型把台词分配给错误人物' });
-    }
-    const start = Number(attributes.match(/\bstart\s*=\s*["']([\d.]+)["']/i)?.[1]);
-    const end = Number(attributes.match(/\bend\s*=\s*["']([\d.]+)["']/i)?.[1]);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || (options.durationSeconds !== undefined && end > options.durationSeconds + 0.001)) {
-      issues.push({ key: 'prompt_lint.dialogue_time', severity: 'error', message: `对白时间无效或超出 Shot：${attributes.trim()}`, suggestion: '确保 0 ≤ start < end ≤ Shot 时长' });
+    const attributes = (match[1] ?? '').trim();
+    const hasStructuredAttrs = /\b(?:speaker|start|end)\s*=/i.test(attributes);
+    if (hasStructuredAttrs) {
+      if (!/\bspeaker\s*=\s*["'][^"']+["']/i.test(attributes)) {
+        issues.push({ key: 'prompt_lint.dialogue_speaker', severity: 'error', message: '对白缺少明确的 speaker 角色标记', suggestion: '每句对白都标记说话角色，避免模型把台词分配给错误人物' });
+      }
+      const start = Number(attributes.match(/\bstart\s*=\s*["']([\d.]+)["']/i)?.[1]);
+      const end = Number(attributes.match(/\bend\s*=\s*["']([\d.]+)["']/i)?.[1]);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || (options.durationSeconds !== undefined && end > options.durationSeconds + 0.001)) {
+        issues.push({ key: 'prompt_lint.dialogue_time', severity: 'error', message: `对白时间无效或超出 Shot：${attributes}`, suggestion: '确保 0 ≤ start < end ≤ Shot 时长' });
+      }
+    } else if (!hasProseSpeakerCue) {
+      // Official MiniMax H3 clean `<d>[Language] ...</d>` syntax: valid whenever
+      // speaker identity is established via (S1)/<Subject N> or locked audio.
+      const before = clean.slice(Math.max(0, (match.index ?? 0) - 80), match.index ?? 0);
+      const localSpeaker = /(?:说|唱|道|喊|问|答|低声|开口|says?|speaks?|sings?|asks?|replies?|whispers?)\s*[:：]?\s*$/i.test(before.trim());
+      if (!localSpeaker) {
+        issues.push({ key: 'prompt_lint.dialogue_speaker', severity: 'warning', message: '对白 <d> 附近未找到明确说话角色标记', suggestion: '建议配合官方 (S1) / <Subject 1> 写法或在 <d> 前指明说话角色' });
+      }
     }
   }
   if (options.nativeDialogue && dialogueTags.length) {

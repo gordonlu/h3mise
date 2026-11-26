@@ -21,6 +21,7 @@ import {} from 'node:fs';
 import type { AiAppProfile, ProviderCapabilities, RunningHubRegion } from '@h3mise/shared';
 import type { RenderJobHandle, RenderRequestInput, RenderResult, RenderStatus, UploadedAsset, VideoProvider } from './types.js';
 import { ProviderError } from './types.js';
+import { stripInternalDialogueAttributes } from '../modules/prompt-lint.js';
 
 export const RUNNINGHUB_ORIGINS: Record<RunningHubRegion, string> = {
   cn: 'https://www.runninghub.cn',
@@ -271,7 +272,7 @@ export class RunningHubAiAppProvider implements VideoProvider {
         }
       }
     };
-    push(inputs.prompt, request.prompt);
+    push(inputs.prompt, stripInternalDialogueAttributes(request.prompt));
     if (inputs.mode) {
       push(inputs.mode, request.mode.toUpperCase());
     }
@@ -405,7 +406,13 @@ export class RunningHubAiAppProvider implements VideoProvider {
       errorMessage?: string;
       failedReason?: unknown;
       results?: Array<{ url?: string; outputType?: string }> | null;
-      usage?: { consumeMoney?: number | string | null; consumeCoins?: number | string | null; taskCostTime?: string | null };
+      usage?: {
+        consumeMoney?: number | string | null;
+        consumeCoins?: number | string | null;
+        chargedPoint?: number | string | null;
+        settleMode?: string | null;
+        taskCostTime?: string | null;
+      };
     };
     const mapped = STATUS_MAP[String(r.status ?? '')];
     if (!mapped) {
@@ -421,15 +428,23 @@ export class RunningHubAiAppProvider implements VideoProvider {
     if (mapped === 'SUCCEEDED') {
       const urls = (r.results ?? []).map((x) => x.url).filter((u): u is string => Boolean(u));
       result.resultUrl = urls[0];
-      result.cost = r.usage
-        ? {
-            credits: Number(r.usage.consumeMoney ?? 0),
-            unit: 'CNY',
-            // RH 币: many accounts are pre-paid in coins instead of money.
-            coins: Number(r.usage.consumeCoins ?? 0) || undefined,
-            raw: r.usage,
-          }
-        : undefined;
+      if (r.usage) {
+        const money = Number(r.usage.consumeMoney ?? 0) || 0;
+        const coins = Number(r.usage.consumeCoins ?? 0) || 0;
+        const points = Number(r.usage.chargedPoint ?? 0) || 0;
+        const isPointMode = String(r.usage.settleMode ?? '').toUpperCase() === 'POINT' || (points > 0 && money === 0);
+        result.cost = {
+          credits: money > 0 ? money : (isPointMode ? points : 0),
+          unit: money > 0 ? 'CNY' : (isPointMode ? 'POINT' : 'CNY'),
+          // RH 币: many accounts are pre-paid in coins instead of money.
+          coins: coins > 0 ? coins : undefined,
+          // RunningHub membership point billing (settleMode: "POINT", chargedPoint).
+          points: points > 0 ? points : undefined,
+          raw: r.usage,
+        };
+      } else {
+        result.cost = undefined;
+      }
       if (!result.resultUrl) return { status: 'FAILED', error: 'task succeeded but no result URL' };
     }
     if (mapped === 'FAILED') {

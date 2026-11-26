@@ -40,6 +40,9 @@ export interface ShotContinuitySegment {
 
 export interface ShotProductionConfig {
   version: 1;
+  /** Optional RunningHub workflow ID (or registered App ID) pinned to this Shot so
+   * dual-workflow episodes can mix workflows concurrently without switching global activeWorkflowId. */
+  workflowId?: string | null;
   camera: LockedCameraSetup;
   audio: {
     mode: ShotAudioMode;
@@ -85,8 +88,10 @@ export function normalizeShotProduction(value: unknown): ShotProductionConfig {
   const finiteOrNull = (candidate: unknown) => typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
   const audioModes: ShotAudioMode[] = ['none', 'native_dialogue', 'tts_dry', 'reference_audio'];
   const segmentKinds: SegmentKind[] = ['single', 'continuous', 'time_jump', 'surveillance_skip'];
+  const workflowId = typeof input.workflowId === 'string' && input.workflowId.trim() ? input.workflowId.trim() : null;
   return {
     version: 1,
+    ...(workflowId ? { workflowId } : {}),
     camera: {
       heightMeters: finiteOrNull(camera.heightMeters),
       focalLengthMm: finiteOrNull(camera.focalLengthMm),
@@ -166,6 +171,7 @@ export interface SubmissionPayloadPreview {
   promptStage: string;
   promptText: string;
   providerId: string;
+  workflowId?: string | null;
   appId: string;
   mode: H3Mode;
   durationSeconds: number;

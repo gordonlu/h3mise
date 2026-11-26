@@ -39,7 +39,7 @@ export interface RenderStatus {
   transient?: boolean;
   /** Video result URL once succeeded. */
   resultUrl?: string;
-  cost?: { credits?: number; unit?: string; coins?: number; raw?: unknown };
+  cost?: { credits?: number; unit?: string; coins?: number; points?: number; raw?: unknown };
 }
 
 export interface RenderResult {

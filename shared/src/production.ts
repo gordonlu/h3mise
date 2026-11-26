@@ -46,6 +46,7 @@ export interface ProductionOverview {
     /** Sum of provider-reported costs across all persisted render jobs. */
     spentCny: number;
     spentCoins: number;
+    spentPoints: number;
   };
   nextActions: ProductionIssue[];
   issues: ProductionIssue[];

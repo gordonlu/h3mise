@@ -567,10 +567,11 @@ export class ProviderRegistry {
     this.providers.set('mock', mock);
   }
 
-  get(id: string, mode?: H3Mode): VideoProvider | undefined {
-    if (id === 'runninghub' && mode) {
-      const profile = this.getProfileForMode(mode);
+  get(id: string, mode?: H3Mode, workflowId?: string | null): VideoProvider | undefined {
+    if (id === 'runninghub' && (mode || workflowId)) {
+      const profile = this.getProfileForMode(mode, workflowId);
       if (profile) return new RunningHubAiAppProvider({ apiKey: this.getEffectiveApiKey(), profile });
+      if (workflowId) return undefined;
     }
     return this.providers.get(id);
   }
@@ -621,9 +622,9 @@ export class ProviderRegistry {
     return n;
   }
 
-  async capabilities(id: string, mode?: H3Mode): Promise<ProviderCapabilities | undefined> {
-    if (id === 'runninghub' && mode) {
-      const profile = this.getProfileForMode(mode);
+  async capabilities(id: string, mode?: H3Mode, workflowId?: string | null): Promise<ProviderCapabilities | undefined> {
+    if (id === 'runninghub' && (mode || workflowId)) {
+      const profile = this.getProfileForMode(mode, workflowId);
       if (!profile) return undefined;
       // P0-6: only node-detected or verified evidence is executable.
       return ['nodes_detected', 'verified'].includes(profile.verification.status)
@@ -762,13 +763,23 @@ export class ProviderRegistry {
     return { ...profile, instanceType: primary?.instanceType ?? profile.instanceType ?? 'default' };
   }
 
-  /** Resolve the workflow that owns a mode. Frame modes keep their separate
-   * App evidence; every other mode picks the active workflow when it declares
-   * the mode, otherwise the first saved workflow that does. Never falls back
-   * to an unrelated App's node mapping. */
-  getProfileForMode(mode?: H3Mode): AiAppProfile | null {
+  /** Resolve the workflow that owns a mode (or an explicitly requested workflowId).
+   * An explicit workflowId resolves strictly against registered workflows (or the
+   * frame App for frame modes) and returns null if unknown so concurrent dual-workflow
+   * submissions never collide on global activeWorkflowId or fall back silently. */
+  getProfileForMode(mode?: H3Mode, workflowId?: string | null): AiAppProfile | null {
     const primary = this.getProfile();
     if (!primary) return null;
+    const requested = typeof workflowId === 'string' && workflowId.trim() ? workflowId.trim() : null;
+    if (requested) {
+      const match = primary.apps.find((entry) => entry.id === requested || entry.appId === requested);
+      if (match) return workflowAsProfile(match, primary);
+      const frame = this.getFrameProfile();
+      if (frame && (requested === 'frame' || requested === 'runninghub_frames' || frame.appId === requested)) {
+        return frame;
+      }
+      return null;
+    }
     if (this.isFrameMode(mode)) return this.getFrameProfile() ?? primary;
     if (mode === 'vref2va') {
       const active = this.activeWorkflowAsProfile(primary);
@@ -837,12 +848,17 @@ export class ProviderRegistry {
       const inputs = mapDiscoveredNodes(nodes);
       const modes = inferSupportedModes(inputs, nodes).filter(mode => this.isFrameMode(mode));
       if (!inputs.prompt.nodeId || !modes.length) throw new Error('No unambiguous first/last-frame ports found; inspect the App example before mapping');
+      const preserveVerified = profile.verification.status === 'verified'
+        && JSON.stringify({ appId: profile.appId, inputs: profile.inputs, modes: [...profile.capabilities.supportedModes].sort() })
+          === JSON.stringify({ appId: profile.appId, inputs, modes: [...modes].sort() });
       return this.persistFrameProfile({ ...profile, nodes, inputs,
         capabilities: { ...profile.capabilities, supportedModes: modes,
           maxImageRefs: Number(Boolean(inputs.firstFrame?.nodeId)) + Number(Boolean(inputs.lastFrame?.nodeId)),
           maxAudioRefs: 0, maxVideoRefs: 0,
           maxTotalRefs: Number(Boolean(inputs.firstFrame?.nodeId)) + Number(Boolean(inputs.lastFrame?.nodeId)),
-        }, verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: 'Frame node mapping detected; no paid render yet' },
+        }, verification: preserveVerified
+          ? { status: 'verified', checkedAt: new Date().toISOString(), note: profile.verification.note }
+          : { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: 'Frame node mapping detected; no paid render yet' },
       });
     } catch (error) {
       return this.persistFrameProfile({ ...profile, capabilities: { supportedModes: [] },
@@ -1180,11 +1196,18 @@ export class ProviderRegistry {
       });
     }
     const mapped = mapDiscoveredNodes(nodes);
+    const activeWorkflow = current.apps.find((entry) => entry.id === activeId);
+    const nextCapabilities = discoveredCapabilities(mapped, nodes, current.capabilities, activeWorkflow?.kind);
+    const preserveVerified = activeWorkflow?.verification?.status === 'verified'
+      && JSON.stringify({ appId: activeWorkflow.appId, inputs: activeWorkflow.inputs, modes: [...(activeWorkflow.capabilities?.supportedModes ?? [])].sort() })
+        === JSON.stringify({ appId: activeWorkflow.appId, inputs: mapped, modes: [...nextCapabilities.supportedModes].sort() });
     return this.updateWorkflowEvidence(current, activeId, {
       nodes,
       inputs: mapped,
-      capabilities: discoveredCapabilities(mapped, nodes, current.capabilities, current.apps.find((entry) => entry.id === activeId)?.kind),
-      verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
+      capabilities: nextCapabilities,
+      verification: preserveVerified
+        ? { status: 'verified', checkedAt: new Date().toISOString(), note: activeWorkflow?.verification?.note ?? 'a real render submission succeeded against this profile' }
+        : { status: 'nodes_detected', checkedAt: new Date().toISOString(), note },
     });
   }
 
@@ -1204,11 +1227,16 @@ export class ProviderRegistry {
       if (capabilities.supportedModes.includes('faceswap') && ((mapped.refVideos ?? []).filter((slot) => slot.nodeId).length !== 1 || mapped.refImages.filter((slot) => slot.nodeId).length !== 1)) {
         throw new Error('换脸模式需要恰好一个人脸图片槽位和一个源视频槽位');
       }
+      const preserveVerified = workflow.verification?.status === 'verified'
+        && JSON.stringify({ appId: workflow.appId, inputs: workflow.inputs, modes: [...(workflow.capabilities?.supportedModes ?? [])].sort() })
+          === JSON.stringify({ appId: workflow.appId, inputs: mapped, modes: [...capabilities.supportedModes].sort() });
       const updated = this.updateWorkflowEvidence(profile, id, {
         nodes,
         inputs: mapped,
         capabilities,
-        verification: { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: `已检测 ${nodes.length} 个节点；真实提交成功后才标记为已验证` },
+        verification: preserveVerified
+          ? { status: 'verified', checkedAt: new Date().toISOString(), note: workflow.verification?.note ?? 'a real render submission succeeded against this workflow' }
+          : { status: 'nodes_detected', checkedAt: new Date().toISOString(), note: `已检测 ${nodes.length} 个节点；真实提交成功后才标记为已验证` },
       });
       return updated.apps.find((entry) => entry.id === id)!;
     } catch (error) {
@@ -1501,15 +1529,19 @@ export class ProviderRegistry {
     }));
     const inputs = mapStoryboardProviderNodes(nodes);
     if (!inputs) throw new Error('未识别到完整的 Prompt、分辨率、参考图节点，请检查 AI App');
+    const preserveVerified = current.verification.status === 'verified'
+      && JSON.stringify({ appId: current.appId, inputs: current.inputs }) === JSON.stringify({ appId: current.appId, inputs });
     const updated: StoryboardProviderProfile = {
       ...current,
       nodes,
       inputs,
-      verification: {
-        status: 'nodes_detected',
-        checkedAt: new Date().toISOString(),
-        note: `已检测 ${nodes.length} 个节点；首次真实生图成功后标记为已验证`,
-      },
+      verification: preserveVerified
+        ? { status: 'verified', checkedAt: new Date().toISOString(), note: current.verification.note }
+        : {
+            status: 'nodes_detected',
+            checkedAt: new Date().toISOString(),
+            note: `已检测 ${nodes.length} 个节点；首次真实生图成功后标记为已验证`,
+          },
     };
     return this.persistStoryboardProfile(updated);
   }
@@ -1570,13 +1602,16 @@ export class ProviderRegistry {
         }
       }
       await provider.probe();
+      const preserveVerified = current.verification.status === 'verified';
       return this.persistComfyUiProfile({
         ...current,
-        verification: {
-          status: 'nodes_detected',
-          checkedAt: new Date().toISOString(),
-          note: `connected to ${current.baseUrl}${current.apiPrefix}; workflow has ${Object.keys(current.workflow).length} nodes — mapping awaits one successful render`,
-        },
+        verification: preserveVerified
+          ? { status: 'verified', checkedAt: new Date().toISOString(), note: current.verification.note }
+          : {
+              status: 'nodes_detected',
+              checkedAt: new Date().toISOString(),
+              note: `connected to ${current.baseUrl}${current.apiPrefix}; workflow has ${Object.keys(current.workflow).length} nodes — mapping awaits one successful render`,
+            },
       });
     } catch (error) {
       return this.persistComfyUiProfile({

@@ -54,7 +54,7 @@ const tools = [
   {
     name: 'create_shot',
     description: 'Create one planned Shot without inference or rendering. For story-wide materialization prefer materialize_story_shots to avoid duplicates.',
-    inputSchema: objectSchema({ title: stringProp('Shot title.'), durationSeconds: { type: 'integer', minimum: 1, maximum: 15 }, storyBeatId: { type: 'string' }, sequenceId: { type: 'string' }, purpose: { type: 'string' }, aspectRatio: { type: 'string' }, h3Mode: { type: 'string', enum: ['t2va', 'i2va', 'l2va', 'fl2va', 'ref2va', 'vref2va', 'faceswap'] } }, ['title']),
+    inputSchema: objectSchema({ title: stringProp('Shot title.'), durationSeconds: { type: 'integer', minimum: 1, maximum: 15 }, storyBeatId: { type: 'string' }, sequenceId: { type: 'string' }, purpose: { type: 'string' }, aspectRatio: { type: 'string' }, h3Mode: { type: 'string', enum: H3_MODES }, workflowId: { type: ['string', 'null'], description: 'Optional registered RunningHub workflowId pinned to this Shot.' } }, ['title']),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
@@ -257,6 +257,7 @@ const tools = [
       durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
       aspectRatio: { type: 'string' },
       h3Mode: { type: ['string', 'null'], enum: [...H3_MODES, null] },
+      workflowId: { type: ['string', 'null'], description: 'Optional registered RunningHub workflowId pinned to this Shot.' },
       primaryCharacterId: { type: ['string', 'null'] },
       sceneId: { type: ['string', 'null'] },
       renderDependencyMode: { type: 'string', enum: ['auto', 'independent', 'planned', 'previous_take', 'manual_frame'] },
@@ -419,6 +420,7 @@ const tools = [
       shotId: stringProp('Shot to check.'),
       promptVersionId: stringProp('Exact immutable PromptVersion to check.'),
       providerId: { type: 'string', enum: ['mock', 'runninghub', 'comfyui'], description: 'Provider to validate against.' },
+      workflowId: { type: ['string', 'null'], description: 'Optional registered RunningHub workflowId override (defaults to Shot workflowId or active workflow).' },
       megapixels: { type: 'number', enum: [0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.0736] },
       durationSeconds: { type: 'number', description: 'Exact requested duration. Defaults to the Shot duration.' },
       aspectRatio: { type: 'string' },
@@ -434,6 +436,7 @@ const tools = [
       shotId: stringProp('Exact Shot ID to render.'),
       promptVersionId: stringProp('Exact immutable PromptVersion to render.'),
       providerId: { type: 'string', enum: ['mock', 'runninghub', 'comfyui'], description: 'Render provider (mock is free offline; runninghub/comfyui require confirmPaid=true).' },
+      workflowId: { type: ['string', 'null'], description: 'Optional registered RunningHub workflowId override for concurrent dual-workflow mixing.' },
       durationSeconds: { type: 'number', minimum: 1, maximum: 15 },
       aspectRatio: { type: 'string' },
       resolution: { type: 'string' },
@@ -709,6 +712,7 @@ async function callTool(name, args = {}) {
     case 'run_preflight': return api('POST', `/api/shots/${encodeURIComponent(requireString(args, 'shotId'))}/preflight`, {
       promptVersionId: requireString(args, 'promptVersionId'),
       providerId: requireString(args, 'providerId'),
+      ...(args.workflowId === undefined ? {} : { workflowId: args.workflowId }),
       ...(args.megapixels === undefined ? {} : { megapixels: args.megapixels }),
       ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
       ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),
@@ -724,6 +728,7 @@ async function callTool(name, args = {}) {
         shotId: requireString(args, 'shotId'),
         promptVersionId: requireString(args, 'promptVersionId'),
         providerId: requireString(args, 'providerId'),
+        ...(args.workflowId === undefined ? {} : { workflowId: args.workflowId }),
         ...(args.confirmPaid === true ? { confirmed: true } : {}),
         ...(args.durationSeconds === undefined ? {} : { durationSeconds: args.durationSeconds }),
         ...(args.aspectRatio === undefined ? {} : { aspectRatio: args.aspectRatio }),

@@ -4,8 +4,15 @@ import type { AiAppProfile, H3Mode } from '@h3mise/shared';
 import { ProviderRegistry, defaultAiAppProfile, inferSupportedModes, mapDiscoveredNodes } from '../src/providers/registry.js';
 import { RunningHubAiAppProvider } from '../src/providers/runninghub.js';
 import { Ffmpeg } from '../src/ffmpeg.js';
-import { cleanupTempRoot, makeStore } from './helpers.js';
+import { cleanupTempRoot, makeProject, makeStore } from './helpers.js';
 import type { RenderRequestInput } from '../src/providers/types.js';
+import { createShot, updateShot } from '../src/modules/shots.js';
+import { importRawPrompt } from '../src/modules/prompt.js';
+import { runBasicPreflight } from '../src/modules/preflight.js';
+import { productionOverview } from '../src/modules/production.js';
+import { buildRoutes, type AppServices } from '../src/http/routes.js';
+import { EventBus } from '../src/events.js';
+import { RenderQueue } from '../src/modules/render.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((root) => cleanupTempRoot(root)));
@@ -207,4 +214,155 @@ test('stored faceswap workflows repair legacy mode lists when read', async () =>
   const face = registry.getProfile()?.apps.find((entry) => entry.id === 'face');
   assert.ok(face?.modes?.includes('faceswap'));
   assert.equal(face?.readiness?.find((item) => item.mode === 'faceswap')?.ready, true);
+});
+
+test('re-verifying an already-verified workflow preserves verified when mapping is unchanged and demotes when changed', async () => {
+  const { root, store } = await makeStore('workflow-preserve-verified');
+  roots.push(root);
+  const registry = registryWithProfile(store, mainProfile());
+  const originalFetch = globalThis.fetch;
+  let nextNodes = mappedNodes();
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 0, data: { nodeInfoList: nextNodes } }));
+  try {
+    const unchanged = await registry.verifyWorkflow('main');
+    assert.equal(unchanged.verification?.status, 'verified', 'identical node mapping preserves verified status');
+
+    nextNodes = [...mappedNodes(), node('233', 'image', '参考图3')];
+    const changed = await registry.verifyWorkflow('main');
+    assert.equal(changed.verification?.status, 'nodes_detected', 'changed node mapping demotes to nodes_detected');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('shot-level and request-level workflowId select workflows independently without changing activeWorkflowId', async () => {
+  const { root, store } = await makeStore('workflow-per-shot');
+  roots.push(root);
+  const project = await makeProject(store, 'Dual Workflow');
+  const audioNodes = [
+    node('401', 'prompt', 'Prompt'),
+    node('402', 'image', '参考图1'),
+    node('403', 'audio', '原音频', 'AUDIO'),
+  ];
+  const audioInputs = mapDiscoveredNodes(audioNodes);
+  const profile = mainProfile();
+  profile.apps.push({
+    id: 'wf-audio-lock',
+    name: '原音频锁对口型',
+    appId: '2116366903353630721',
+    inputs: audioInputs,
+    nodes: audioNodes,
+    capabilities: { supportedModes: ['t2va', 'ref2va'], maxImageRefs: 1, maxAudioRefs: 1, maxVideoRefs: 0, maxTotalRefs: 2, audioReuse: 'copy' },
+    verification: { status: 'verified', checkedAt: '2026-01-02', note: 'verified audio app' },
+  });
+  const registry = registryWithProfile(store, profile);
+
+  const shot = createShot(project, { title: '对口型镜', durationSeconds: 6, h3Mode: 't2va', workflowId: 'wf-audio-lock' });
+  assert.equal(shot.workflowId, 'wf-audio-lock');
+  const pv = importRawPrompt(project, shot.id, 'Fish in tank, soft light, fixed camera, calm performance.', 't2va');
+
+  const preflightShot = await runBasicPreflight(project, registry, { shotId: shot.id, promptVersionId: pv.id, providerId: 'runninghub' });
+  assert.equal(preflightShot.blocked, false);
+  assert.equal(preflightShot.payload?.appId, '2116366903353630721');
+  assert.equal(preflightShot.payload?.workflowId, 'wf-audio-lock');
+  assert.equal(registry.getProfile()?.activeWorkflowId, 'main', 'global activeWorkflowId is untouched');
+
+  // Request-level override wins over shot default.
+  const preflightOverride = await runBasicPreflight(project, registry, {
+    shotId: shot.id, promptVersionId: pv.id, providerId: 'runninghub', workflowId: 'main',
+  });
+  assert.equal(preflightOverride.payload?.appId, 'main-app');
+
+  // Unknown workflowId blocks cleanly instead of falling back to active workflow.
+  const preflightMissing = await runBasicPreflight(project, registry, {
+    shotId: shot.id, promptVersionId: pv.id, providerId: 'runninghub', workflowId: 'wf-nonexistent',
+  });
+  assert.equal(preflightMissing.blocked, true);
+  assert.ok(preflightMissing.basic.flatMap((s) => s.checks).some((c) => c.key === 'provider.workflow_not_found'));
+
+  // Updating shot workflowId does not invalidate existing prompt production_signature.
+  const updated = updateShot(project, shot.id, { workflowId: 'main' });
+  assert.equal(updated.workflowId, 'main');
+  const afterSwitch = await runBasicPreflight(project, registry, { shotId: shot.id, promptVersionId: pv.id, providerId: 'runninghub' });
+  assert.ok(!afterSwitch.basic.flatMap((s) => s.checks).some((c) => c.key === 'prompt.production_stale'));
+});
+
+test('RunningHub status maps chargedPoint/settleMode POINT and strips <d> attributes in payload', async () => {
+  const { root, store } = await makeStore('workflow-point-billing');
+  roots.push(root);
+  const project = await makeProject(store, 'Point Billing');
+  const provider = new RunningHubAiAppProvider({ apiKey: 'test-key', profile: mainProfile() });
+  const nodeList = provider.previewNodeInfoList({
+    mode: 't2va',
+    prompt: '<Subject 1> speaks: <d speaker="S1" start="0.00" end="5.00">[Mandarin] 别难过</d>',
+    durationSeconds: 5,
+    aspectRatio: '3:4',
+    references: [],
+    providerParams: {},
+  });
+  assert.equal(nodeList.find((n) => n.nodeId === '250')?.fieldValue, '<Subject 1> speaks: <d>[Mandarin] 别难过</d>');
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    status: 'SUCCESS',
+    results: [{ url: 'https://example.com/out.mp4' }],
+    usage: { consumeMoney: '0', consumeCoins: null, chargedPoint: '71.91', settleMode: 'POINT' },
+  }));
+  let status;
+  try {
+    status = await provider.status({ providerTaskId: 'task-point-1' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(status.cost?.points, 71.91);
+  assert.equal(status.cost?.credits, 71.91);
+  assert.equal(status.cost?.unit, 'POINT');
+
+  const shot = createShot(project, { title: 'S1', durationSeconds: 5 });
+  const pv = importRawPrompt(project, shot.id, 'test', 't2va');
+  const now = new Date().toISOString();
+  project.db.run(
+    `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, provider, status, cost_json, created_at, updated_at)
+     VALUES ('job-pt-1', ?, ?, ?, 'runninghub', 'LOCAL_READY', ?, ?, ?)`,
+    [project.meta.id, shot.id, pv.id, JSON.stringify(status.cost), now, now],
+  );
+  // Also verify retroactive fallback for legacy jobs that only saved raw.chargedPoint.
+  project.db.run(
+    `INSERT INTO render_jobs (id, project_id, shot_id, prompt_version_id, provider, status, cost_json, created_at, updated_at)
+     VALUES ('job-pt-legacy', ?, ?, ?, 'runninghub', 'LOCAL_READY', ?, ?, ?)`,
+    [project.meta.id, shot.id, pv.id, JSON.stringify({ credits: 0, unit: 'CNY', raw: { chargedPoint: '28.09', settleMode: 'POINT' } }), now, now],
+  );
+  const registry = new ProviderRegistry(() => store.current, () => store.registry, new Ffmpeg(), null, 'mock');
+  registry.refresh();
+  const overview = await productionOverview(project, registry);
+  assert.equal(overview.summary.spentCny, 0, 'POINT billing must not inflate spentCny');
+  assert.equal(overview.summary.spentPoints, 100);
+});
+
+test('POST /api/projects and GET /api/current-project share unified id + meta + config shape', async () => {
+  const { root, store } = await makeStore('project-shape');
+  roots.push(root);
+  const ffmpeg = new Ffmpeg();
+  const bus = new EventBus();
+  const providers = new ProviderRegistry(() => store.current, () => store.registry, ffmpeg, null, 'mock');
+  const queue = new RenderQueue(() => store, providers, ffmpeg, bus, 50);
+  const app = buildRoutes({ store, providers, queue, ffmpeg, bus } as unknown as AppServices);
+
+  const createdRes = await app.request('/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: '海底合租屋', format: 'story' }),
+  });
+  assert.equal(createdRes.status, 201);
+  const created = await createdRes.json() as { id: string; meta: { id: string }; config: { title: string } };
+  assert.ok(created.id);
+  assert.equal(created.meta.id, created.id);
+  assert.equal(created.config.title, '海底合租屋');
+
+  const currentRes = await app.request('/api/current-project');
+  assert.equal(currentRes.status, 200);
+  const current = await currentRes.json() as { id: string; meta: { id: string }; config: { title: string } };
+  assert.equal(current.id, created.id);
+  assert.equal(current.meta.id, created.id);
+  assert.equal(current.config.title, '海底合租屋');
 });

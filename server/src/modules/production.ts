@@ -141,12 +141,26 @@ export async function productionOverview(p: ProjectContext, registry: ProviderRe
 
   const spent = p.db.all<{ cost_json: string }>('SELECT cost_json FROM render_jobs WHERE cost_json IS NOT NULL').reduce((sum, row) => {
     try {
-      const cost = JSON.parse(row.cost_json) as { credits?: number; coins?: number };
-      sum.cny += Number(cost.credits ?? 0) || 0;
+      const cost = JSON.parse(row.cost_json) as {
+        credits?: number;
+        unit?: string;
+        coins?: number;
+        points?: number;
+        raw?: { chargedPoint?: number | string | null; settleMode?: string | null };
+      };
+      const unit = String(cost.unit ?? '').toUpperCase();
+      const rawPoints = Number(cost.points ?? cost.raw?.chargedPoint ?? 0) || 0;
+      const isPointUnit = unit === 'POINT';
+      if (isPointUnit) {
+        sum.points += Number(cost.points ?? cost.credits ?? rawPoints) || 0;
+      } else {
+        sum.cny += Number(cost.credits ?? 0) || 0;
+        if (rawPoints > 0) sum.points += rawPoints;
+      }
       sum.coins += Number(cost.coins ?? 0) || 0;
     } catch { /* malformed legacy cost is ignored, not guessed */ }
     return sum;
-  }, { cny: 0, coins: 0 });
+  }, { cny: 0, coins: 0, points: 0 });
 
   const severityRank: Record<ProductionIssueSeverity, number> = { blocker: 0, warning: 1, info: 2 };
   issues.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]);
@@ -169,6 +183,7 @@ export async function productionOverview(p: ProjectContext, registry: ProviderRe
       remainingShotCount: shotStatuses.filter((shot) => shot.stage !== 'done').length,
       spentCny: Math.round(spent.cny * 100) / 100,
       spentCoins: Math.round(spent.coins * 100) / 100,
+      spentPoints: Math.round(spent.points * 100) / 100,
     },
     nextActions: issues.slice(0, 3),
     issues,

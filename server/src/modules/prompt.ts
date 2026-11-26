@@ -44,7 +44,10 @@ export function referenceSignatureV2(bindings: ReferenceBinding[]): string {
 }
 
 export function shotProductionSignature(shot: { production: unknown; durationSeconds: number; aspectRatio: string }): string {
-  return JSON.stringify({ production: shot.production, durationSeconds: shot.durationSeconds, aspectRatio: shot.aspectRatio });
+  const production = shot.production && typeof shot.production === 'object'
+    ? Object.fromEntries(Object.entries(shot.production as Record<string, unknown>).filter(([key]) => key !== 'workflowId'))
+    : shot.production;
+  return JSON.stringify({ production, durationSeconds: shot.durationSeconds, aspectRatio: shot.aspectRatio });
 }
 
 function pvFromRow(r: PvRow): PromptVersion {

@@ -114,7 +114,7 @@ export function buildSubmissionPreview(p: ProjectContext, registry: ProviderRegi
   const shot = getShot(p, intent.shotId);
   const prompt = getPrompt(p, intent.promptVersionId);
   const references = referencePreviews(p, intent);
-  const runningHubProfile = intent.providerId === 'runninghub' ? registry.getProfileForMode(intent.mode) : null;
+  const runningHubProfile = intent.providerId === 'runninghub' ? registry.getProfileForMode(intent.mode, intent.workflowId) : null;
   const comfyProfile = intent.providerId === 'comfyui' ? registry.getComfyUiProfile() : null;
   const appId = intent.providerId === 'runninghub'
     ? runningHubProfile?.appId ?? 'unconfigured'
@@ -141,7 +141,7 @@ export function buildSubmissionPreview(p: ProjectContext, registry: ProviderRegi
       : null;
   let providerPayload: Record<string, unknown>;
   if (intent.providerId === 'runninghub') {
-    const provider = registry.get(intent.providerId, intent.mode);
+    const provider = registry.get(intent.providerId, intent.mode, intent.workflowId);
     if (!(provider instanceof RunningHubAiAppProvider)) {
       providerPayload = { error: '当前 RunningHub 工作流不能生成节点预览' };
     } else {
@@ -196,6 +196,7 @@ export function buildSubmissionPreview(p: ProjectContext, registry: ProviderRegi
     promptStage: prompt.stage,
     promptText: prompt.text,
     providerId: intent.providerId,
+    workflowId: intent.workflowId ?? runningHubProfile?.activeWorkflowId ?? null,
     appId,
     mode: intent.mode,
     durationSeconds: intent.durationSeconds,

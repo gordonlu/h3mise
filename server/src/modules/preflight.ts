@@ -74,7 +74,7 @@ function previousShot(p: ProjectContext, shot: Shot): Shot | null {
   return { ...getShot(p, row.id), screenDirection: (row.screen_direction as Shot['screenDirection']) ?? 'neutral' };
 }
 import { getPrompt, referenceSignatureV2, shotProductionSignature } from './prompt.js';
-import { ensureShotEntityImageBindings, getMedia, listBindings } from './assets.js';
+import { ensureShotEntityImageBindings, getMedia, listBindings, listEntities } from './assets.js';
 import { pathReadable } from '../ffmpeg.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { buildSubmissionPreview } from './shot-production.js';
@@ -85,6 +85,7 @@ export interface RenderIntent {
   shotId: string;
   promptVersionId: string;
   providerId: string;
+  workflowId?: string | null;
   mode: H3Mode;
   durationSeconds: number;
   aspectRatio: string;
@@ -102,6 +103,7 @@ export function renderIntentHash(intent: RenderIntent, profileRef: { appId: stri
     shotId: intent.shotId,
     promptVersionId: intent.promptVersionId,
     providerId: intent.providerId,
+    workflowId: intent.workflowId ?? null,
     mode: intent.mode,
     durationSeconds: intent.durationSeconds,
     aspectRatio: intent.aspectRatio,
@@ -121,6 +123,7 @@ export interface BasicPreflightInput {
   shotId: string;
   promptVersionId: string;
   providerId: string;
+  workflowId?: string | null;
   megapixels?: number;
   durationSeconds?: number;
   aspectRatio?: string;
@@ -159,10 +162,14 @@ export async function intentFromInput(
       if (mode === 'fl2va') return first || last;
       return false;
     });
+  const requestedWorkflowId = input.workflowId !== undefined
+    ? (typeof input.workflowId === 'string' && input.workflowId.trim() ? input.workflowId.trim() : null)
+    : (shot.workflowId ?? null);
   return {
     shotId: input.shotId,
     promptVersionId: input.promptVersionId,
     providerId: input.providerId,
+    workflowId: requestedWorkflowId,
     mode,
     durationSeconds: input.durationSeconds ?? shot.durationSeconds,
     aspectRatio: input.aspectRatio ?? shot.aspectRatio,
@@ -252,7 +259,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   }
 
   // Duration (checked on the INTENT, not the shot defaults — P0-2)
-  const caps = await registry.capabilities(intent.providerId, intent.mode);
+  const caps = await registry.capabilities(intent.providerId, intent.mode, intent.workflowId);
   if (!(intent.durationSeconds > 0)) {
     sections[1]!.checks.push({ key: 'duration.invalid', severity: 'error', message: `时长 ${intent.durationSeconds} 秒必须大于 0` });
   } else if (caps && caps.maxDuration && intent.durationSeconds > caps.maxDuration) {
@@ -271,9 +278,13 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
   }
 
   // Provider + mode + aspect (unknown capability = blocked, P0-6)
-  const provider = registry.get(intent.providerId, intent.mode);
+  const provider = registry.get(intent.providerId, intent.mode, intent.workflowId);
   if (!provider) {
-    sections[2]!.checks.push({ key: 'provider.missing', severity: 'error', message: `找不到生成服务“${intent.providerId}”` });
+    if (intent.providerId === 'runninghub' && intent.workflowId) {
+      sections[2]!.checks.push({ key: 'provider.workflow_not_found', severity: 'error', message: `找不到指定工作流“${intent.workflowId}”，请先在 RunningHub 工作流列表中注册并检测节点` });
+    } else {
+      sections[2]!.checks.push({ key: 'provider.missing', severity: 'error', message: `找不到生成服务“${intent.providerId}”` });
+    }
   } else {
     if (!caps || !caps.supportedModes.length) {
       sections[2]!.checks.push({
@@ -329,7 +340,7 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       }
     }
     if (intent.providerId === 'runninghub') {
-      const verification = registry.getProfileForMode(intent.mode)?.verification.status ?? 'unconfigured';
+      const verification = registry.getProfileForMode(intent.mode, intent.workflowId)?.verification.status ?? 'unconfigured';
       if (verification === 'nodes_detected') {
         sections[2]!.checks.push({ key: 'provider.evidence.nodes_only', severity: 'warning', message: '当前只有 nodes_detected 节点证据，不代表该 App 或参数组合已实测通过' });
       }
@@ -659,6 +670,17 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
 
   {
     const hasAudioRefs = bindings.some((binding) => binding.kind === 'audio');
+    const audioLocked = currentBindings.some((binding) => binding.audioPolicy?.mode === 'fully_copy');
+    const entitiesById = new Map(listEntities(p).map((entity) => [entity.id, entity]));
+    const primaryEntity = shot.primaryCharacterId ? entitiesById.get(shot.primaryCharacterId) ?? null : null;
+    const boundEntityKinds = currentBindings
+      .map((binding) => binding.targetEntityId ?? binding.sourceEntityId)
+      .filter((id): id is string => Boolean(id))
+      .map((id) => entitiesById.get(id)?.kind)
+      .filter((kind): kind is NonNullable<typeof kind> => Boolean(kind));
+    const hasHumanEntity = primaryEntity?.kind === 'character' || boundEntityKinds.includes('character');
+    const hasNonHumanEntity = (primaryEntity != null && primaryEntity.kind !== 'character')
+      || boundEntityKinds.some((kind) => kind !== 'character');
     const issues = lintPrompt(prompt.text, {
       mode: intent.mode,
       hasAudioRefs,
@@ -667,6 +689,9 @@ export async function runBasicPreflightIntent(p: ProjectContext, registry: Provi
       audioCount: bindings.filter((binding) => binding.kind === 'audio').length,
       durationSeconds: intent.durationSeconds,
       nativeDialogue: shot.production.audio.mode === 'native_dialogue',
+      audioLocked,
+      primaryEntityKind: primaryEntity?.kind ?? null,
+      skipHairCheck: !hasHumanEntity && hasNonHumanEntity,
     });
     for (const issue of issues) {
       sections[8]!.checks.push({

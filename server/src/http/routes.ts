@@ -181,9 +181,9 @@ export function buildRoutes(services: AppServices): App {
         defaultDurationSeconds: requestedDuration,
         defaultProvider: body.defaultProvider ?? services.providers.providerMode,
       });
-      await services.store.open(meta.id);
+      const opened = await services.store.open(meta.id);
       services.providers.refresh();
-      return c.json(meta, 201);
+      return c.json({ ...opened.meta, meta: opened.meta, config: opened.config }, 201);
     });
   });
 
@@ -192,9 +192,9 @@ export function buildRoutes(services: AppServices): App {
     return projectSwitchGate('interactive-project', async () => {
       if (services.store.current && body.force !== true) return projectLocked(c);
       const meta = await services.store.installBundledDemo(body.demoId ?? 'last-film-reel');
-      await services.store.open(meta.id);
+      const opened = await services.store.open(meta.id);
       services.providers.refresh();
-      return c.json(meta, 201);
+      return c.json({ ...opened.meta, meta: opened.meta, config: opened.config }, 201);
     });
   });
 
@@ -203,12 +203,12 @@ export function buildRoutes(services: AppServices): App {
     const body = await c.req.json().catch(() => ({})) as { force?: boolean };
     return projectSwitchGate('interactive-project', async () => {
       const current = services.store.current;
-      if (current?.meta.id === id) return c.json(current.meta);
+      if (current?.meta.id === id) return c.json({ ...current.meta, meta: current.meta, config: current.config });
       if (current && body.force !== true) return projectLocked(c, id);
       const opened = await services.store.open(id);
       services.providers.refresh();
       await services.queue.recover();
-      return c.json(opened.meta);
+      return c.json({ ...opened.meta, meta: opened.meta, config: opened.config });
     });
   });
 
@@ -259,7 +259,7 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/current-project', (c) => {
     const ctx = services.store.current;
     if (!ctx) return c.json(null);
-    return c.json({ meta: ctx.meta, config: ctx.config });
+    return c.json({ ...ctx.meta, meta: ctx.meta, config: ctx.config });
   });
 
   app.get('/api/guide/project', (c) => c.json(guideMod.projectGuideSummary(p(c))));
@@ -569,6 +569,7 @@ export function buildRoutes(services: AppServices): App {
       shotId,
       promptVersionId,
       providerId: String(body.providerId ?? ctx.config.default_provider ?? 'mock'),
+      workflowId: body.workflowId !== undefined ? (body.workflowId === null ? null : String(body.workflowId)) : undefined,
       durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
       aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
       resolution: body.resolution,
@@ -789,11 +790,31 @@ export function buildRoutes(services: AppServices): App {
   app.get('/api/shots/:id/prompts', (c) => c.json(promptMod.listPrompts(p(c), c.req.param('id'))));
   app.get('/api/prompts/:id', (c) => c.json(promptMod.getPrompt(p(c), c.req.param('id'))));
   app.post('/api/prompts/lint', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; hasAudioRefs?: unknown; hasDialogue?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      text?: unknown;
+      mode?: H3Mode;
+      hasAudioRefs?: unknown;
+      hasDialogue?: unknown;
+      pictureCount?: unknown;
+      audioCount?: unknown;
+      durationSeconds?: unknown;
+      nativeDialogue?: unknown;
+      audioLocked?: unknown;
+      primaryEntityKind?: import('@h3mise/shared').EntityKind | null;
+      skipHairCheck?: unknown;
+    };
     return c.json({
       issues: lintPrompt(String(body.text ?? ''), {
+        mode: body.mode,
         hasAudioRefs: body.hasAudioRefs === true,
         hasDialogue: body.hasDialogue === true,
+        pictureCount: body.pictureCount !== undefined ? Number(body.pictureCount) : undefined,
+        audioCount: body.audioCount !== undefined ? Number(body.audioCount) : undefined,
+        durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
+        nativeDialogue: body.nativeDialogue === true,
+        audioLocked: body.audioLocked === true,
+        primaryEntityKind: body.primaryEntityKind ?? null,
+        skipHairCheck: body.skipHairCheck === true,
       }),
     });
   });
@@ -838,6 +859,7 @@ export function buildRoutes(services: AppServices): App {
       shotId,
       promptVersionId: String(body.promptVersionId ?? promptMod.listPrompts(ctx, shotId).filter((prompt) => prompt.stage === 'final').at(-1)?.id ?? ''),
       providerId: String(body.providerId ?? ctx.config.default_provider ?? 'runninghub'),
+      workflowId: body.workflowId !== undefined ? (body.workflowId === null ? null : String(body.workflowId)) : undefined,
       megapixels: body.megapixels !== undefined ? Number(body.megapixels) : undefined,
       durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
       aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
@@ -874,6 +896,7 @@ export function buildRoutes(services: AppServices): App {
         shotId,
         promptVersionId,
         providerId,
+        workflowId: body.workflowId !== undefined ? (body.workflowId === null ? null : String(body.workflowId)) : undefined,
         durationSeconds: body.durationSeconds !== undefined ? Number(body.durationSeconds) : undefined,
         aspectRatio: body.aspectRatio !== undefined ? String(body.aspectRatio) : undefined,
         resolution: body.resolution,
@@ -891,7 +914,7 @@ export function buildRoutes(services: AppServices): App {
           preflight,
         }, 422);
       }
-      const runningHubProfile = services.providers.getProfileForMode(intent.mode);
+      const runningHubProfile = services.providers.getProfileForMode(intent.mode, intent.workflowId);
       const comfyProfile = services.providers.getComfyUiProfile();
       const profileRef = providerId === 'comfyui'
         ? { appId: `comfyui:${comfyProfile.clientId}`, checkedAt: comfyProfile.verification.checkedAt }
@@ -899,8 +922,9 @@ export function buildRoutes(services: AppServices): App {
       const intentHash = preflightMod.renderIntentHash(intent, profileRef);
       const request = {
         provider: providerId,
-        // Resolve the App from the mode's workflow profile. A client-supplied
-        // aiAppId must never silently switch to an unmapped primary App.
+        ...(intent.workflowId ? { workflowId: intent.workflowId } : {}),
+        // Resolve the App from the mode's (or shot/request-pinned) workflow profile.
+        // A raw unregistered aiAppId must never silently bypass workflow verification.
         aiAppId: providerId === 'runninghub' ? (runningHubProfile?.appId ?? '2089265538441764866') : 'comfyui-local',
         mode: intent.mode,
         promptVersionId,

@@ -52,6 +52,7 @@ interface ShotRow {
 }
 
 function shotFromRow(r: ShotRow): Shot {
+  const production = normalizeShotProduction(jget<unknown>(r.production_json, {}));
   return {
     id: r.id,
     episodeId: r.story_id,
@@ -71,7 +72,8 @@ function shotFromRow(r: ShotRow): Shot {
     dependsOnShotId: r.depends_on_shot_id,
     screenDirection: (r.screen_direction as Shot['screenDirection']) ?? 'neutral',
     intentionalReversal: Boolean(r.intentional_reversal),
-    production: normalizeShotProduction(jget<unknown>(r.production_json, {})),
+    workflowId: production.workflowId ?? null,
+    production,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -102,6 +104,7 @@ export interface CreateShotInput {
   dependsOnShotId?: string | null;
   screenDirection?: Shot['screenDirection'];
   intentionalReversal?: boolean;
+  workflowId?: string | null;
   order?: number;
 }
 
@@ -111,9 +114,10 @@ export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot
   const now = new Date().toISOString();
   const storyId = activeEpisodeId(p);
   const ord = input.order ?? p.db.get<{ m: number }>('SELECT COALESCE(MAX(ord), 0) + 1 as m FROM shots WHERE story_id = ?', [storyId])!.m;
+  const productionJson = input.workflowId ? j(normalizeShotProduction({ workflowId: input.workflowId })) : '{}';
   p.db.run(
-    `INSERT INTO shots (id, story_id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, render_dependency_mode, depends_on_shot_id, screen_direction, intentional_reversal, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO shots (id, story_id, sequence_id, ord, title, story_beat_id, purpose, shot_function, duration_seconds, status, aspect_ratio, h3_mode, primary_character_id, scene_id, render_dependency_mode, depends_on_shot_id, screen_direction, intentional_reversal, production_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       storyId,
@@ -132,6 +136,7 @@ export function createShot(p: ProjectContext, input: CreateShotInput = {}): Shot
       input.dependsOnShotId ?? null,
       input.screenDirection ?? 'neutral',
       input.intentionalReversal ? 1 : 0,
+      productionJson,
       now,
       now,
     ],
@@ -250,9 +255,17 @@ export function updateShot(p: ProjectContext, id: string, patch: Partial<Omit<Sh
     intentionalReversal: 'intentional_reversal',
     production: 'production_json',
   };
+  const normalizedPatch = { ...patch };
+  if (normalizedPatch.workflowId !== undefined) {
+    const existingProduction = normalizedPatch.production ?? getShot(p, id).production;
+    normalizedPatch.production = normalizeShotProduction({
+      ...existingProduction,
+      workflowId: normalizedPatch.workflowId,
+    });
+  }
   const cols: string[] = [];
   const vals: unknown[] = [];
-  for (const [k, v] of Object.entries(patch)) {
+  for (const [k, v] of Object.entries(normalizedPatch)) {
     if (v === undefined) continue;
     const col = map[k];
     if (!col) continue;

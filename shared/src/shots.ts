@@ -131,6 +131,8 @@ export interface Shot {
   screenDirection: ScreenDirection;
   /** "I intend this reversal" — dissolves the preflight reversal warning. */
   intentionalReversal: boolean;
+  /** Optional workflow ID pinned to this Shot (mirrors production.workflowId). */
+  workflowId?: string | null;
   production: ShotProductionConfig;
   createdAt: string;
   updatedAt: string;
